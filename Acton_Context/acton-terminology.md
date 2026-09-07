@@ -55,6 +55,9 @@ The default mode of group learning at Acton: a circle discussion driven entirely
 **Hero's Journey**
 The overarching narrative frame for a student's time at Acton, borrowed from mythic storytelling: a call to adventure, mentors, trials, setbacks, and eventually a "gift" the student brings back to give the world. Struggle is framed as a normal, expected part of the story rather than something to be avoided.
 
+**NGA (Next Great Adventure)**
+A term used for the subjective concept of what it is will follow your time at Acton. This becomes most important in the LP (Launch-Pad) studio (see studios below).
+
 **Real World, Real Stakes**
 A recurring phrase describing Acton's preference for genuine consequences (real money, real audiences, real accountability) over simulated ones, on the theory that authentic stakes produce authentic growth.
 
@@ -63,3 +66,17 @@ Not unique to Acton, but heavily emphasized: the belief that ability is built th
 
 **Do the Hard Thing**
 A common Acton refrain, used to push back against a student's instinct to quit, ask for the answer, or avoid discomfort. Treated less as a slogan and more as a house rule.
+
+## Studios
+
+**Spark**
+The youngest studio at an Acton Academy. Learners in this studio typically float around ages 4-7.
+
+**ES (or Elemetry Studio)**
+The next studio after after Spark. Learners in this stuio typically fall in the range of ages 7-11. This studio is where learners are equipped with the knowledge and bandwith needed to not only be capable of completing the large workloads in future studios, but to flourish under it.
+
+**MS (or Middle Studio)**
+This is where the first stages of preparation for the NGA (next great adventure) begin. The age of learners in this studio typically span the range of 11-14. Learners complete a highschool level curriculum before moving to the next studio.
+
+**LP (Launch-Pad)**
+The final studio before graduation. The Acton equvilant of high-school. The major difference is that Launch-Pad is designed around the general schedule of finishing the academics typically completed in traditional high-school, in the first 2 (out of the expected 4), leaving the last 2 to work on things related to NGA. Obviously, learners in this studio's ages lie between 14-18.
