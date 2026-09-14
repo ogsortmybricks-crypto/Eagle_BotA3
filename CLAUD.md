@@ -6,6 +6,6 @@
 
 Welcome to Eagle_Bot, a software tool designed for use by Acton Academies. Specifically, built for use by learners (Heros, eagles, etc.)
 
-### Base Features (To be developed at the users request, and to be checked off as complete once done with an ✖️ inside the [])
+### What to build
 
-[] Most basic feature: 
+When prompted by the user, read Prompt.md to figure out what to build. 

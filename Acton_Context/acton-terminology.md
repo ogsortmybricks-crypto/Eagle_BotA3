@@ -24,8 +24,11 @@ A defined block of the school year, roughly analogous to a semester or quarter, 
 **Contract**
 A set of rules and norms the Studio writes and votes on itself, covering behavior, consequences, and community standards. Renegotiated periodically. Treated with the seriousness of an actual legal document, because the whole point is practicing self-governance, not pretending to.
 
-**Council / Governance Meeting**
+**Council / Governance Meeting /  Town Hall**
 The recurring meeting where Studio members bring up conflicts, propose changes to the Contract, and hold each other accountable. Run by students, not Guides.
+
+**ROE (Rules of Engagment)**
+A set of rules agreed upon by the heroes describing the expectations during Launches, Town Halls and virtually any meeting in which the entire studio interacts.
 
 ## Learning Structure
 
