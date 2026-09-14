@@ -72,11 +72,11 @@ A common Acton refrain, used to push back against a student's instinct to quit, 
 **Spark**
 The youngest studio at an Acton Academy. Learners in this studio typically float around ages 4-7.
 
-**ES (or Elemetry Studio)**
+**ES (or Elemetry Studio) aka Discovery**
 The next studio after after Spark. Learners in this stuio typically fall in the range of ages 7-11. This studio is where learners are equipped with the knowledge and bandwith needed to not only be capable of completing the large workloads in future studios, but to flourish under it.
 
 **MS (or Middle Studio)**
 This is where the first stages of preparation for the NGA (next great adventure) begin. The age of learners in this studio typically span the range of 11-14. Learners complete a highschool level curriculum before moving to the next studio.
 
 **LP (Launch-Pad)**
-The final studio before graduation. The Acton equvilant of high-school. The major difference is that Launch-Pad is designed around the general schedule of finishing the academics typically completed in traditional high-school, in the first 2 (out of the expected 4), leaving the last 2 to work on things related to NGA. Obviously, learners in this studio's ages lie between 14-18.
+The final studio before graduation. The Acton equvilant of high-school. The major difference is that Launch-Pad is designed around the general schedule of finishing the academics typically completed in traditional high-school, in the first 2 (out of the expected 4), leaving the last 2 to work on things related to NGA. Obviously, learners in this studio's ages lie between 14-18. The Launch-Pad studio is considered the most important as it the point in time where the "magic" of Acton becomes apparent. More details on Launch-Pad can be found in Acton_Context > Launch_Pad.
