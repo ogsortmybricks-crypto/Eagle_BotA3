@@ -1,6 +1,6 @@
-# Eagle_Bot Starter Prompt
+# Eagle Bot Starter Prompt
 
-Eagle_Bot is a software tool desgined with the goal to become the operating system used by any given Acton learner, assisting with everything from Town Halls to keeping track of Core Work Goals.
+Eagle Bot is a software tool desgined with the goal to become the operating system used by any given Acton learner, assisting with everything from Town Halls to keeping track of Core Work Goals.
 
 ### The Base Problem
 

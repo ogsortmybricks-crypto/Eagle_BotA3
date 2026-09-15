@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Archive, Pencil, Plus, Shield, UserPlus, Vote, X } from "lucide-react";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { useDateFormat, useSession } from "@/lib/session";
 import {
   Avatar,
   Banner,
@@ -14,11 +14,26 @@ import {
   PageHeader,
   Spinner,
 } from "@/components/ui";
+import { StudioTag } from "@/components/StudioSwitcher";
+import { StudioPicker } from "@/components/StudioPicker";
+import { SharedWithNote, SharedWithPicker } from "@/components/SharedWithPicker";
 
-type Holder = { id: number; userId: number; name: string; avatarUrl: string | null; note: string | null };
+type Holder = {
+  id: number;
+  userId: number;
+  name: string;
+  avatarUrl: string | null;
+  note: string | null;
+};
 
 type Position = {
   id: number;
+  studioId: number | null;
+  studioName: string | null;
+  studioColor: string | null;
+  shared: boolean;
+  sharedStudioIds: number[];
+  sharedWith: string[];
   title: string;
   description: string | null;
   responsibilities: string[];
@@ -32,16 +47,17 @@ type Position = {
   activeElection: { id: number; title: string; status: string } | null;
 };
 
-type Person = { id: number; name: string };
+type Person = { id: number; name: string; studioId: number | null };
 
 export function Positions() {
-  const { can } = useSession();
+  const { can, studio, studioId } = useSession();
+  const formatDate = useDateFormat();
   const [editing, setEditing] = useState<Position | null>(null);
   const [creating, setCreating] = useState(false);
   const [appointing, setAppointing] = useState<Position | null>(null);
 
   const query = useQuery<{ positions: Position[] }>({
-    queryKey: ["positions"],
+    queryKey: ["positions", studioId],
     queryFn: () => apiGet("/positions"),
   });
 
@@ -51,8 +67,12 @@ export function Positions() {
   return (
     <>
       <PageHeader
-        title="Positions"
-        subtitle="Every role the studio elects or appoints, and who holds it now."
+        title={studio ? `${studio.name} — Positions` : "Positions"}
+        subtitle={
+          studio
+            ? `Every role ${studio.name} elects or appoints, and who holds it now.`
+            : "Every role across the academy, and who holds it now."
+        }
       >
         {can("positions.manage") && (
           <button onClick={() => setCreating(true)} className="btn-primary">
@@ -63,8 +83,8 @@ export function Positions() {
 
       {positions.length === 0 ? (
         <EmptyState icon={Shield} title="No positions recorded">
-          When the AI reads your documents it pulls out every elected role it finds. You can also
-          add them by hand.
+          When the AI reads {studio ? `${studio.name}'s` : "a studio's"} documents it pulls out
+          every elected role it finds. You can also add them by hand.
         </EmptyState>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
@@ -74,6 +94,14 @@ export function Positions() {
                 <div className="min-w-0">
                   <h2 className="font-semibold text-gray-900">{position.title}</h2>
                   <div className="mt-1 flex flex-wrap gap-1.5">
+                    {(studioId === null || position.shared) && (
+                      <StudioTag
+                        name={position.studioName}
+                        color={position.studioColor}
+                        shared={position.shared}
+                      />
+                    )}
+                    <SharedWithNote names={position.sharedWith} />
                     <Chip tone={position.elected ? "brand" : "neutral"}>
                       {position.elected ? "elected" : "appointed"}
                     </Chip>
@@ -133,7 +161,7 @@ export function Positions() {
                     <ul className="mt-1.5 space-y-0.5 text-xs text-gray-500">
                       {position.past.map((holder) => (
                         <li key={holder.id}>
-                          {holder.name} — until {new Date(holder.endedAt).toLocaleDateString()}
+                          {holder.name} — until {formatDate(holder.endedAt)}
                         </li>
                       ))}
                     </ul>
@@ -181,6 +209,7 @@ export function Positions() {
 
 function PositionModal({ position, onClose }: { position: Position | null; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { studioId: viewingStudioId } = useSession();
   const [title, setTitle] = useState(position?.title ?? "");
   const [description, setDescription] = useState(position?.description ?? "");
   const [responsibilities, setResponsibilities] = useState<string[]>(
@@ -190,6 +219,10 @@ function PositionModal({ position, onClose }: { position: Position | null; onClo
   const [seats, setSeats] = useState(position?.seats ?? 1);
   const [termLength, setTermLength] = useState(position?.termLength ?? "");
   const [elected, setElected] = useState(position?.elected ?? true);
+  const [targetStudio, setTargetStudio] = useState<number | null | undefined>(
+    position ? position.studioId : viewingStudioId === null ? undefined : viewingStudioId,
+  );
+  const [sharedWith, setSharedWith] = useState<number[]>(position?.sharedStudioIds ?? []);
   const [error, setError] = useState<string | null>(null);
 
   const save = useMutation({
@@ -201,6 +234,9 @@ function PositionModal({ position, onClose }: { position: Position | null; onClo
         seats,
         termLength: termLength.trim() || undefined,
         elected,
+        ...(targetStudio === undefined ? {} : { studioId: targetStudio }),
+        sharedStudioIds:
+          targetStudio === null ? [] : sharedWith.filter((id) => id !== targetStudio),
       };
       return position ? apiPatch(`/positions/${position.id}`, body) : apiPost("/positions", body);
     },
@@ -240,7 +276,7 @@ function PositionModal({ position, onClose }: { position: Position | null; onClo
           </button>
           <button
             onClick={() => save.mutate()}
-            disabled={save.isPending || title.trim().length < 2}
+            disabled={save.isPending || title.trim().length < 2 || targetStudio === undefined}
             className="btn-primary"
           >
             {save.isPending && <Spinner />} Save
@@ -359,6 +395,20 @@ function PositionModal({ position, onClose }: { position: Position | null; onClo
             <span className="ml-1.5 text-gray-500">rather than appointment</span>
           </span>
         </label>
+
+        <StudioPicker
+          value={targetStudio}
+          onChange={setTargetStudio}
+          label="This position belongs to"
+          hint="Only that studio elects it, and only its members can hold it."
+        />
+
+        <SharedWithPicker
+          ownerStudioId={targetStudio}
+          value={sharedWith}
+          onChange={setSharedWith}
+          noun="position"
+        />
       </div>
     </Modal>
   );
@@ -366,14 +416,27 @@ function PositionModal({ position, onClose }: { position: Position | null; onClo
 
 function AppointModal({ position, onClose }: { position: Position; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { settings, studios } = useSession();
   const [userId, setUserId] = useState<number | null>(null);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const people = useQuery<{ people: Person[] }>({
-    queryKey: ["people"],
+    queryKey: ["people-all"],
     queryFn: () => apiGet("/profiles"),
   });
+
+  // A Middle Studio seat held by someone in Launchpad is nearly always a
+  // mistake, so the picker only offers people who can actually hold it. The
+  // server enforces the same rule; this just stops the mistake being offered.
+  const eligibleStudios = [position.studioId, ...(position.sharedStudioIds ?? [])];
+  const restricted = settings.governance.restrictCandidatesToStudio && position.studioId !== null;
+  const candidates = (people.data?.people ?? []).filter(
+    (person) => !restricted || eligibleStudios.includes(person.studioId),
+  );
+  const eligibleNames = studios
+    .filter((entry) => eligibleStudios.includes(entry.id))
+    .map((entry) => entry.name);
 
   const appoint = useMutation({
     mutationFn: () => apiPost(`/positions/${position.id}/holders`, { userId, note }),
@@ -423,12 +486,19 @@ function AppointModal({ position, onClose }: { position: Position; onClose: () =
             onChange={(event) => setUserId(event.target.value ? Number(event.target.value) : null)}
           >
             <option value="">Pick a person</option>
-            {people.data?.people.map((person) => (
+            {candidates.map((person) => (
               <option key={person.id} value={person.id}>
                 {person.name}
               </option>
             ))}
           </select>
+          {restricted && (
+            <p className="hint">
+              {candidates.length === 0
+                ? `Nobody in ${eligibleNames.join(" or ") || "that studio"} yet. Move someone there first, or turn off the studio restriction in Settings.`
+                : `Only people in ${eligibleNames.join(" and ")} can hold this.`}
+            </p>
+          )}
         </div>
         <div>
           <label className="label" htmlFor="note">

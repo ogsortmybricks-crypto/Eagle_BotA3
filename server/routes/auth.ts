@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db";
-import { academies, invites, positionHolders, positions, users } from "@shared/schema";
+import { academies, invites, positionHolders, positions, studios, users } from "@shared/schema";
 import { hashPassword, publicUser, requireAuth, verifyPassword } from "../auth";
 import { logActivity } from "../activity";
-import { PERMISSIONS } from "@shared/permissions";
+import { effectivePermissions } from "@shared/permissions";
+import { resolveSettings } from "@shared/settings";
+import { listStudios, visibleStudios } from "../studio";
 
 export const authRouter = Router();
 
@@ -29,10 +31,13 @@ authRouter.post("/login", async (req, res) => {
   }
 
   req.session.userId = user.id;
+  // Open on their own studio unless they've deliberately switched before.
+  if (req.session.studioId === undefined) req.session.studioId = user.studioId;
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
 
   await logActivity({
     academyId: user.academyId,
+    studioId: user.studioId,
     actorUserId: user.id,
     action: "auth.login",
     entityType: "user",
@@ -57,11 +62,25 @@ authRouter.get("/me", async (req, res) => {
     .where(eq(academies.id, req.user.academyId))
     .limit(1);
 
+  const settings = resolveSettings(academy?.settings);
+  const all = await listStudios(req.user.academyId);
+  const { allowed, canSeeAll } = visibleStudios(
+    req.user.role,
+    req.user.studioId,
+    all,
+    settings,
+  );
+
+  const scope = req.scope;
+  const selectedStudioId = scope?.studioId ?? null;
+  const selected = allowed.find((studio) => studio.id === selectedStudioId) ?? null;
+
   const held = await db
     .select({
       id: positionHolders.id,
       positionId: positionHolders.positionId,
       title: positions.title,
+      studioId: positions.studioId,
       startedAt: positionHolders.startedAt,
       endedAt: positionHolders.endedAt,
     })
@@ -69,20 +88,64 @@ authRouter.get("/me", async (req, res) => {
     .innerJoin(positions, eq(positions.id, positionHolders.positionId))
     .where(and(eq(positionHolders.userId, req.user.id), isNull(positionHolders.endedAt)));
 
+  const [homeStudio] = req.user.studioId
+    ? await db.select().from(studios).where(eq(studios.id, req.user.studioId)).limit(1)
+    : [null];
+
+  /**
+   * Simple mode is a property of the studio a person *belongs to*, not the one
+   * they happen to be viewing: a Spark learner gets the stripped-back app
+   * everywhere, and a Guide looking at Spark still gets the full tool because
+   * they are the one who has to fix things. An admin can preview it from
+   * Settings without changing anyone else's experience.
+   */
+  const previewSimple = req.session.previewSimpleMode === true;
+  const simpleMode =
+    (req.user.role === "learner" && (homeStudio?.simpleMode ?? false)) || previewSimple;
+
   res.json({
     user: publicUser(req.user),
     academy,
-    permissions: PERMISSIONS[req.user.role],
+    settings,
+    permissions: effectivePermissions(req.user.role, settings),
     currentPositions: held,
+    studios: allowed,
+    /** The studio this session is looking at. Null means every studio at once. */
+    selectedStudioId,
+    /** Whatever noun the selected studio uses, falling back to the academy's. */
+    learnerNoun: selected?.learnerNoun ?? academy?.learnerNoun ?? "Hero",
+    homeStudio: homeStudio ?? null,
+    canSeeAllStudios: canSeeAll,
+    effective: scope?.effective ?? null,
+    simpleMode,
+    /** True when the full view is only hidden because the admin asked to preview. */
+    simpleModePreview: previewSimple,
   });
 });
 
+/**
+ * Lets an admin see exactly what a Spark learner sees.
+ *
+ * Session-scoped and reversible - it changes nothing for anyone else, which is
+ * the only honest way to offer a preview of a mode built for six-year-olds.
+ */
+authRouter.post("/preview-simple", requireAuth, async (req, res) => {
+  const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Say on or off." });
+  if (req.user!.role !== "admin" && req.user!.role !== "guide") {
+    return res.status(403).json({ error: "Only an admin or guide can preview simple mode." });
+  }
+  req.session.previewSimpleMode = parsed.data.enabled;
+  res.json({ ok: true, enabled: parsed.data.enabled });
+});
+
 authRouter.post("/password", requireAuth, async (req, res) => {
+  const minimum = req.settings!.access.minPasswordLength;
   const parsed = z
-    .object({ current: z.string().min(1), next: z.string().min(8) })
+    .object({ current: z.string().min(1), next: z.string().min(minimum) })
     .safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: "New password needs at least 8 characters." });
+    return res.status(400).json({ error: `New password needs at least ${minimum} characters.` });
   }
   const user = req.user!;
   if (!user.passwordHash || !(await verifyPassword(parsed.data.current, user.passwordHash))) {
@@ -95,6 +158,7 @@ authRouter.post("/password", requireAuth, async (req, res) => {
 
   await logActivity({
     academyId: user.academyId,
+    studioId: user.studioId,
     actorUserId: user.id,
     action: "auth.password_changed",
     entityType: "user",
@@ -126,23 +190,21 @@ authRouter.get("/invite/:token", async (req, res) => {
     .where(eq(academies.id, invite.academyId))
     .limit(1);
 
+  const [studio] = invite.studioId
+    ? await db.select().from(studios).where(eq(studios.id, invite.studioId)).limit(1)
+    : [null];
+
   res.json({
     email: invite.email,
     name: invite.name,
     role: invite.role,
-    studio: invite.studio,
+    studio: studio ? { name: studio.name, description: studio.description, color: studio.color } : null,
+    minPasswordLength: resolveSettings(academy?.settings).access.minPasswordLength,
     academy: { name: academy?.name, palette: academy?.palette, logoUrl: academy?.logoUrl },
   });
 });
 
 authRouter.post("/invite/:token", async (req, res) => {
-  const parsed = z
-    .object({ name: z.string().min(2).max(120), password: z.string().min(8) })
-    .safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: "Enter your name and a password of at least 8 characters." });
-  }
-
   const [invite] = await db
     .select()
     .from(invites)
@@ -151,6 +213,22 @@ authRouter.post("/invite/:token", async (req, res) => {
 
   if (!invite || invite.acceptedAt || invite.expiresAt < new Date()) {
     return res.status(410).json({ error: "That invite is no longer usable." });
+  }
+
+  const [academy] = await db
+    .select()
+    .from(academies)
+    .where(eq(academies.id, invite.academyId))
+    .limit(1);
+  const minimum = resolveSettings(academy?.settings).access.minPasswordLength;
+
+  const parsed = z
+    .object({ name: z.string().min(2).max(120), password: z.string().min(minimum) })
+    .safeParse(req.body);
+  if (!parsed.success) {
+    return res
+      .status(400)
+      .json({ error: `Enter your name and a password of at least ${minimum} characters.` });
   }
 
   const [existing] = await db.select().from(users).where(eq(users.email, invite.email)).limit(1);
@@ -166,16 +244,18 @@ authRouter.post("/invite/:token", async (req, res) => {
       name: parsed.data.name.trim(),
       passwordHash: await hashPassword(parsed.data.password),
       role: invite.role,
-      studio: invite.studio,
+      studioId: invite.studioId,
       lastLoginAt: new Date(),
     })
     .returning();
 
   await db.update(invites).set({ acceptedAt: new Date() }).where(eq(invites.id, invite.id));
   req.session.userId = user.id;
+  req.session.studioId = user.studioId;
 
   await logActivity({
     academyId: user.academyId,
+    studioId: user.studioId,
     actorUserId: user.id,
     action: "invite.accepted",
     entityType: "user",

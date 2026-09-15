@@ -3,6 +3,8 @@ import { activityLog } from "@shared/schema";
 
 type LogInput = {
   academyId: number;
+  /** Which studio this happened in. Null for academy-level events. */
+  studioId?: number | null;
   action: string;
   summary: string;
   actorUserId?: number | null;
@@ -24,6 +26,7 @@ export async function logActivity(entry: LogInput): Promise<void> {
   try {
     await db.insert(activityLog).values({
       academyId: entry.academyId,
+      studioId: entry.studioId ?? null,
       actorUserId: entry.actorUserId ?? null,
       actorType: entry.actorType ?? "user",
       actorLabel: entry.actorLabel ?? null,

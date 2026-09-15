@@ -133,6 +133,22 @@ body {
   @apply overflow-x-auto;
 }
 
+/* Compact mode: an academy setting, applied to the root by the session
+   provider. It tightens padding rather than shrinking text, so the app stays
+   readable on the Chromebooks most studios actually use. */
+:root[data-density="compact"] .card-pad {
+  @apply p-3.5;
+}
+:root[data-density="compact"] .btn {
+  @apply px-3 py-1.5;
+}
+:root[data-density="compact"] .input {
+  @apply py-1.5;
+}
+:root[data-density="compact"] .prose-wiki {
+  @apply text-sm;
+}
+
 @keyframes pulse-ring {
   0% { box-shadow: 0 0 0 0 rgb(var(--brand-500) / 0.4); }
   70% { box-shadow: 0 0 0 10px rgb(var(--brand-500) / 0); }

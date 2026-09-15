@@ -15,6 +15,8 @@ import { ElectionDetail } from "@/pages/ElectionDetail";
 import { Positions } from "@/pages/Positions";
 import { People, Profile } from "@/pages/People";
 import { Admin } from "@/pages/Admin";
+import { Settings } from "@/pages/Settings";
+import { SimpleApp } from "@/pages/Simple";
 
 type SetupStatus = {
   needsSetup: boolean;
@@ -22,7 +24,7 @@ type SetupStatus = {
 };
 
 export function App() {
-  const { user, loading } = useSession();
+  const { user, loading, settings, simpleMode } = useSession();
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [inviteRoute, inviteParams] = useRoute("/invite/:token");
 
@@ -50,10 +52,16 @@ export function App() {
     return <Login academyName={status.academy?.name} logoUrl={status.academy?.logoUrl} />;
   }
 
+  // A studio that asked for the simple view gets a different app, not the same
+  // one with bits hidden - see the note at the top of Simple.tsx.
+  if (simpleMode) return <SimpleApp />;
+
   return (
     <Layout>
       <Switch>
-        <Route path="/">{() => <Redirect to="/wiki" />}</Route>
+        {/* Which page you land on is an academy setting - a studio that lives
+            in Town Hall shouldn't have to click past the wiki every morning. */}
+        <Route path="/">{() => <Redirect to={`/${settings.display.startPage}`} />}</Route>
         <Route path="/wiki" component={Wiki} />
         <Route path="/town-hall" component={TownHall} />
         <Route path="/town-hall/:id">
@@ -65,6 +73,7 @@ export function App() {
         <Route path="/people" component={People} />
         <Route path="/people/:id">{(params) => <Profile id={Number(params.id)} />}</Route>
         <Route path="/admin" component={Admin} />
+        <Route path="/settings" component={Settings} />
         <Route>
           {() => (
             <div className="card px-6 py-14 text-center">

@@ -1,4 +1,5 @@
 import type { Role } from "./schema";
+import type { AcademySettings } from "./settings";
 
 /**
  * Who can do what.
@@ -8,10 +9,15 @@ import type { Role } from "./schema";
  * than deciders. A Guide can see everything and can be given the admin role by
  * an academy that wants that, but the default is that adults do not edit the
  * Contract, do not certify elections, and do not vote.
+ *
+ * The table is the baseline. A couple of entries move under academy settings -
+ * see `effectivePermissions`, which is what every check actually runs against.
  */
 export const PERMISSIONS = {
   admin: [
     "academy.manage",
+    "settings.manage",
+    "studios.manage",
     "users.manage",
     "invites.send",
     "documents.upload",
@@ -57,9 +63,37 @@ export const PERMISSIONS = {
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS][number];
 
-export function can(role: Role | undefined | null, permission: string): boolean {
+/**
+ * The permissions a role actually has in this academy.
+ *
+ * Two of the role boundaries are genuinely contested between Actons - whether
+ * learners edit the wiki directly, and whether a secretary can run elections -
+ * so they are settings rather than something baked into the table above.
+ */
+export function effectivePermissions(
+  role: Role | undefined | null,
+  settings?: AcademySettings | null,
+): string[] {
+  if (!role) return [];
+  const list = new Set<string>(PERMISSIONS[role] as readonly string[]);
+  if (!settings) return [...list];
+
+  if (role === "learner" && settings.governance.learnersCanEditWiki) {
+    list.add("wiki.edit");
+  }
+  if (role === "secretary" && !settings.governance.secretariesCanManageElections) {
+    list.delete("elections.manage");
+  }
+  return [...list];
+}
+
+export function can(
+  role: Role | undefined | null,
+  permission: string,
+  settings?: AcademySettings | null,
+): boolean {
   if (!role) return false;
-  return (PERMISSIONS[role] as readonly string[]).includes(permission);
+  return effectivePermissions(role, settings).includes(permission);
 }
 
 export const ROLE_LABELS: Record<Role, string> = {

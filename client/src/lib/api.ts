@@ -9,6 +9,27 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The studio every request is scoped to.
+ *
+ * Kept as a module-level value rather than threaded through each call: the
+ * studio is a property of what the person is looking at, not of any one
+ * request, and every endpoint needs it. `null` means "every studio I can see".
+ */
+let currentStudioId: number | null = null;
+
+export function setApiStudio(studioId: number | null) {
+  currentStudioId = studioId;
+}
+
+export function getApiStudio(): number | null {
+  return currentStudioId;
+}
+
+function studioHeaders(base?: Record<string, string>): Record<string, string> {
+  return { ...base, "X-Studio-Id": currentStudioId === null ? "all" : String(currentStudioId) };
+}
+
 async function handle<T>(response: Response): Promise<T> {
   const text = await response.text();
   let payload: unknown = null;
@@ -31,7 +52,7 @@ async function handle<T>(response: Response): Promise<T> {
 }
 
 export async function apiGet<T>(path: string): Promise<T> {
-  return handle<T>(await fetch(`/api${path}`, { credentials: "include" }));
+  return handle<T>(await fetch(`/api${path}`, { credentials: "include", headers: studioHeaders() }));
 }
 
 export async function apiSend<T>(
@@ -43,7 +64,9 @@ export async function apiSend<T>(
     await fetch(`/api${path}`, {
       method,
       credentials: "include",
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      headers: studioHeaders(
+        body === undefined ? undefined : { "Content-Type": "application/json" },
+      ),
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
   );
@@ -55,7 +78,12 @@ export const apiDelete = <T,>(path: string) => apiSend<T>(path, "DELETE");
 
 export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
   return handle<T>(
-    await fetch(`/api${path}`, { method: "POST", credentials: "include", body: formData }),
+    await fetch(`/api${path}`, {
+      method: "POST",
+      credentials: "include",
+      headers: studioHeaders(),
+      body: formData,
+    }),
   );
 }
 

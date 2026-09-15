@@ -4,7 +4,7 @@
 
 ### What it is your working on
 
-Welcome to Eagle_Bot, a software tool designed for use by Acton Academies. Specifically, built for use by learners (Heros, eagles, etc.)
+Welcome to Eagle Bot, a software tool designed for use by Acton Academies. Specifically, built for use by learners (Heros, eagles, etc.)
 
 ### What to build
 

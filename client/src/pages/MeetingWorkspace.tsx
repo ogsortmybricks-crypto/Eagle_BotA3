@@ -19,7 +19,7 @@ import {
   Users,
 } from "lucide-react";
 import { apiDelete, apiGet, apiPatch, apiPost } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { useDateFormat, useSession } from "@/lib/session";
 import {
   Banner,
   Chip,
@@ -30,6 +30,7 @@ import {
   type ChipTone,
 } from "@/components/ui";
 import { JobProgress, useJob, type Job } from "@/components/JobStatus";
+import { StudioTag } from "@/components/StudioSwitcher";
 
 type Item = {
   id: number;
@@ -51,6 +52,7 @@ type Meeting = {
   id: number;
   title: string;
   meetingDate: string;
+  studioId: number | null;
   status: string;
   notes: string;
   attendance: number[];
@@ -61,9 +63,32 @@ type Meeting = {
   secretaryId: number | null;
 };
 
-type Person = { id: number; name: string; role: string; studio: string | null };
+type Person = { id: number; name: string; role: string; studioId: number | null };
 
-type MeetingResponse = { meeting: Meeting; items: Item[]; job: Job | null; roster: Person[] };
+/**
+ * Quorum is computed server-side because it depends on the academy's rule, the
+ * studio's override, and who actually counts - three things the client has no
+ * business re-deriving and getting subtly wrong.
+ */
+type Quorum = {
+  eligible: number;
+  eligibleIds: number[];
+  threshold: number;
+  mode: string;
+  present: number;
+  requiredToProcess: boolean;
+};
+
+type MeetingResponse = {
+  meeting: Meeting;
+  studio: { id: number; name: string; color: string } | null;
+  items: Item[];
+  job: Job | null;
+  roster: Person[];
+  quorum: Quorum;
+  /** True once the AI has processed it and the academy locks processed notes. */
+  locked: boolean;
+};
 
 const ITEM_TYPES = [
   { value: "agenda", label: "Agenda", icon: Clock, tone: "neutral" as ChipTone },
@@ -90,7 +115,8 @@ const TYPE_PREFIXES: Record<string, string> = {
 };
 
 export function MeetingWorkspace({ id }: { id: number }) {
-  const { can, user } = useSession();
+  const { can, user, settings } = useSession();
+  const formatDate = useDateFormat();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [processOpen, setProcessOpen] = useState(false);
@@ -101,8 +127,11 @@ export function MeetingWorkspace({ id }: { id: number }) {
   });
 
   const meeting = meetingQuery.data?.meeting;
+  const studio = meetingQuery.data?.studio ?? null;
   const items = meetingQuery.data?.items ?? [];
   const roster = meetingQuery.data?.roster ?? [];
+  const quorum = meetingQuery.data?.quorum ?? null;
+  const locked = meetingQuery.data?.locked ?? false;
 
   const [jobId, setJobId] = useState<number | null>(null);
   const activeJobId = jobId ?? meeting?.lastJobId ?? null;
@@ -144,7 +173,9 @@ export function MeetingWorkspace({ id }: { id: number }) {
   if (meetingQuery.isLoading) return <LoadingPage />;
   if (!meeting) return <Banner tone="error">That meeting doesn't exist.</Banner>;
 
-  const editable = can("meetings.write") && meeting.status !== "processing";
+  const editable = can("meetings.write") && meeting.status !== "processing" && !locked;
+  const quorumMet = !quorum || quorum.threshold === 0 || quorum.present >= quorum.threshold;
+  const blockedByQuorum = Boolean(quorum?.requiredToProcess) && !quorumMet;
   const decisions = items.filter(
     (item) => item.type === "decision" || (item.type === "motion" && item.outcome),
   );
@@ -170,13 +201,13 @@ export function MeetingWorkspace({ id }: { id: number }) {
           ) : (
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">{meeting.title}</h1>
           )}
-          <p className="mt-1 px-0.5 text-sm text-gray-500">
-            {new Date(meeting.meetingDate).toLocaleDateString(undefined, {
-              weekday: "long",
-              month: "long",
-              day: "numeric",
-              year: "numeric",
-            })}
+          <p className="mt-1 flex flex-wrap items-center gap-2 px-0.5 text-sm text-gray-500">
+            <StudioTag
+              name={studio?.name}
+              color={studio?.color}
+              shared={meeting.studioId === null}
+            />
+            <span>{formatDate(meeting.meetingDate)}</span>
             {meeting.startedAt && <MeetingClock startedAt={meeting.startedAt} />}
           </p>
         </div>
@@ -191,7 +222,16 @@ export function MeetingWorkspace({ id }: { id: number }) {
             </button>
           )}
           {can("meetings.process") && meeting.status !== "processing" && (
-            <button onClick={() => setProcessOpen(true)} className="btn-primary">
+            <button
+              onClick={() => setProcessOpen(true)}
+              disabled={blockedByQuorum}
+              title={
+                blockedByQuorum
+                  ? "This academy won't write a Town Hall into the wiki without quorum."
+                  : undefined
+              }
+              className="btn-primary"
+            >
               <Sparkles className="h-4 w-4" />
               {meeting.processedAt ? "Process again" : "Process with AI"}
             </button>
@@ -201,9 +241,28 @@ export function MeetingWorkspace({ id }: { id: number }) {
 
       <div className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
+        {locked && (
+          <Banner tone="info" title="These notes are locked">
+            The AI has folded this meeting into {studio?.name ?? "the academy"}'s wiki, and this
+            academy locks notes once that happens so the record can't drift from the rules it
+            produced. An admin can turn that off in Settings.
+          </Banner>
+        )}
+        {blockedByQuorum && quorum && (
+          <Banner tone="warning" title="This meeting didn't have quorum">
+            {quorum.present} of the {quorum.threshold} people needed were present. A meeting without
+            quorum didn't decide anything, so this academy won't write it into the wiki. Mark more
+            people present if the list is wrong, or change the rule in Settings.
+          </Banner>
+        )}
         {job && <JobProgress job={job} />}
         {job && ["succeeded", "awaiting_input"].includes(job.status) && (
-          <AiReviewPanel job={job} meetingId={id} />
+          <AiReviewPanel
+            job={job}
+            meetingId={id}
+            studioId={meeting.studioId}
+            studioName={studio?.name ?? null}
+          />
         )}
 
         <div className="flex flex-col gap-4 lg:flex-row">
@@ -226,6 +285,8 @@ export function MeetingWorkspace({ id }: { id: number }) {
             <AttendancePanel
               meeting={meeting}
               roster={roster}
+              quorum={quorum}
+              studioName={studio?.name ?? null}
               editable={editable}
               onChange={(attendance, quorumNote) =>
                 patchMeeting.mutate({ attendance, quorumNote })
@@ -266,11 +327,19 @@ export function MeetingWorkspace({ id }: { id: number }) {
             <div className="card-pad text-xs text-gray-500">
               <p className="font-medium text-gray-700">How processing works</p>
               <p className="mt-1.5">
-                The AI reads these notes against the whole wiki. It adds what you decided, and
-                repeals anything anywhere that now contradicts it.
+                The AI reads these notes against {studio?.name ?? "the academy"}'s wiki — that
+                studio's rules plus anything academy-wide. Other studios' Contracts are never
+                touched.
               </p>
               <p className="mt-1.5">
-                It won't create elections on its own — it proposes them and waits for you.
+                {settings.ai.autoRepealContradictions
+                  ? "It adds what you decided and repeals anything that now contradicts it."
+                  : "It adds what you decided. This academy has asked it to flag contradictions for a human rather than repeal them itself."}
+              </p>
+              <p className="mt-1.5">
+                {settings.ai.proposeElections
+                  ? "It won't create elections on its own — it proposes them and waits for you."
+                  : "Election proposals are switched off in Settings."}
               </p>
             </div>
           </aside>
@@ -767,22 +836,34 @@ function NotesPanel({
 
 /* ------------------------------- attendance -------------------------------- */
 
+const QUORUM_LABEL: Record<string, string> = {
+  none: "no quorum rule",
+  majority: "a simple majority",
+  two_thirds: "two-thirds",
+  fixed: "a fixed number",
+};
+
 function AttendancePanel({
   meeting,
   roster,
+  quorum,
+  studioName,
   editable,
   onChange,
 }: {
   meeting: Meeting;
   roster: Person[];
+  /** Computed server-side from the academy's rule and the studio's override. */
+  quorum: Quorum | null;
+  studioName: string | null;
   editable: boolean;
   onChange: (attendance: number[], quorumNote: string | null) => void;
 }) {
   const present = new Set(meeting.attendance ?? []);
-  const eligible = roster.filter((person) => person.role !== "guide");
-  const quorum = Math.ceil(eligible.length * (2 / 3));
-  const presentEligible = eligible.filter((person) => present.has(person.id)).length;
-  const hasQuorum = presentEligible >= quorum;
+  const countsToward = new Set(quorum?.eligibleIds ?? []);
+  const presentEligible = [...present].filter((id) => countsToward.has(id)).length;
+  const threshold = quorum?.threshold ?? 0;
+  const hasQuorum = threshold === 0 || presentEligible >= threshold;
 
   function toggle(personId: number) {
     const next = new Set(present);
@@ -801,11 +882,23 @@ function AttendancePanel({
         </span>
       </div>
 
+      {/* The roster is this studio's members only - Launchpad isn't absent from
+          a Spark Town Hall, it simply isn't in it. */}
+      {studioName && (
+        <div className="border-b border-gray-100 px-4 py-2 text-xs text-gray-500">
+          {studioName} members only.
+        </div>
+      )}
+
       <div className={`px-4 py-2.5 text-xs ${hasQuorum ? "bg-emerald-50" : "bg-amber-50"}`}>
         <span className={hasQuorum ? "text-emerald-800" : "text-amber-800"}>
-          {presentEligible} of {eligible.length} voting members present.{" "}
+          {presentEligible} of {quorum?.eligible ?? 0} voting members present.{" "}
           <strong>
-            {hasQuorum ? "Quorum met" : `Need ${quorum - presentEligible} more for two-thirds`}
+            {threshold === 0
+              ? "No quorum rule in this academy"
+              : hasQuorum
+                ? "Quorum met"
+                : `Need ${threshold - presentEligible} more for ${QUORUM_LABEL[quorum?.mode ?? ""] ?? "quorum"}`}
           </strong>
           .
         </span>
@@ -858,7 +951,17 @@ type ProposedElection = {
   rationale: string;
 };
 
-function AiReviewPanel({ job, meetingId }: { job: Job; meetingId: number }) {
+function AiReviewPanel({
+  job,
+  meetingId,
+  studioId,
+  studioName,
+}: {
+  job: Job;
+  meetingId: number;
+  studioId: number | null;
+  studioName: string | null;
+}) {
   const { can } = useSession();
   const queryClient = useQueryClient();
   const result = (job.result ?? {}) as {
@@ -884,6 +987,9 @@ function AiReviewPanel({ job, meetingId }: { job: Job; meetingId: number }) {
         proposalBody: input.proposal.type === "rule" ? input.proposal.proposalBody : null,
         seats: input.proposal.seats,
         sourceMeetingId: meetingId,
+        // The ballot belongs to the studio that held the meeting, not to
+        // whatever studio the person approving it happens to be viewing.
+        studioId,
       }),
     onSuccess: (_data, variables) => {
       setCreated((current) => [...current, variables.index]);
@@ -960,7 +1066,8 @@ function AiReviewPanel({ job, meetingId }: { job: Job; meetingId: number }) {
               {proposals.length} thing{proposals.length === 1 ? "" : "s"} that might need a vote
             </h3>
             <p className="mt-0.5 text-xs text-gray-500">
-              The AI won't start an election on its own. Your call.
+              The AI won't start an election on its own. Your call
+              {studioName ? `, and ${studioName} votes on it` : ""}.
             </p>
             <ul className="mt-3 space-y-2.5">
               {proposals.map((proposal, index) => {

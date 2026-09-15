@@ -64,29 +64,42 @@ function escapeHtml(value: string) {
   );
 }
 
+function button(link: string, accent: string, label: string) {
+  return `<a href="${link}" style="display:inline-block;background:${accent};color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;font-size:15px">${escapeHtml(label)}</a>`;
+}
+
+/** "Middle Studio at Acton Riverbend", or just the academy for shared things. */
+function where(academyName: string, studioName: string | null) {
+  return studioName ? `${studioName} at ${academyName}` : academyName;
+}
+
 export function inviteEmail(opts: {
   academyName: string;
+  studioName: string | null;
   accent: string;
   inviterName: string;
   role: string;
   link: string;
+  expiryDays: number;
 }) {
+  const place = where(opts.academyName, opts.studioName);
   const html = shell(
     opts.academyName,
     opts.accent,
     `<h1 style="font-size:22px;margin:0 0 12px">You've been invited</h1>
-     <p style="font-size:15px;line-height:1.6;margin:0 0 8px">${escapeHtml(opts.inviterName)} invited you to join <strong>${escapeHtml(opts.academyName)}</strong> on Eagle Bot as a <strong>${escapeHtml(opts.role)}</strong>.</p>
-     <p style="font-size:15px;line-height:1.6;margin:0 0 24px;color:#4b5563">Eagle Bot keeps the studio's rules, Town Hall decisions, and elections in one place that's always current.</p>
-     <a href="${opts.link}" style="display:inline-block;background:${opts.accent};color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;font-size:15px">Set up your account</a>
+     <p style="font-size:15px;line-height:1.6;margin:0 0 8px">${escapeHtml(opts.inviterName)} invited you to join <strong>${escapeHtml(place)}</strong> on Eagle Bot as a <strong>${escapeHtml(opts.role)}</strong>.</p>
+     <p style="font-size:15px;line-height:1.6;margin:0 0 24px;color:#4b5563">Eagle Bot keeps your studio's rules, Town Hall decisions, and elections in one place that's always current.</p>
+     ${button(opts.link, opts.accent, "Set up your account")}
      <p style="font-size:13px;color:#6b7280;margin:20px 0 0">Or paste this link into your browser:<br><span style="word-break:break-all">${opts.link}</span></p>
-     <p style="font-size:13px;color:#6b7280;margin:12px 0 0">This invite expires in 14 days.</p>`,
+     <p style="font-size:13px;color:#6b7280;margin:12px 0 0">This invite expires in ${opts.expiryDays} days.</p>`,
   );
-  const text = `${opts.inviterName} invited you to join ${opts.academyName} on Eagle Bot as a ${opts.role}.\n\nSet up your account: ${opts.link}\n\nThis invite expires in 14 days.`;
-  return { html, text, subject: `Join ${opts.academyName} on Eagle Bot` };
+  const text = `${opts.inviterName} invited you to join ${place} on Eagle Bot as a ${opts.role}.\n\nSet up your account: ${opts.link}\n\nThis invite expires in ${opts.expiryDays} days.`;
+  return { html, text, subject: `Join ${place} on Eagle Bot` };
 }
 
 export function electionOpenEmail(opts: {
   academyName: string;
+  studioName: string | null;
   accent: string;
   title: string;
   closesAt: string | null;
@@ -96,10 +109,58 @@ export function electionOpenEmail(opts: {
     opts.academyName,
     opts.accent,
     `<h1 style="font-size:22px;margin:0 0 12px">A vote is open</h1>
-     <p style="font-size:15px;line-height:1.6;margin:0 0 8px"><strong>${escapeHtml(opts.title)}</strong> is open for voting.</p>
+     <p style="font-size:15px;line-height:1.6;margin:0 0 8px"><strong>${escapeHtml(opts.title)}</strong> is open for voting${opts.studioName ? ` in <strong>${escapeHtml(opts.studioName)}</strong>` : ""}.</p>
      ${opts.closesAt ? `<p style="font-size:15px;color:#4b5563;margin:0 0 24px">Voting closes ${escapeHtml(opts.closesAt)}.</p>` : '<div style="height:16px"></div>'}
-     <a href="${opts.link}" style="display:inline-block;background:${opts.accent};color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:600;font-size:15px">Cast your vote</a>`,
+     ${button(opts.link, opts.accent, "Cast your vote")}`,
   );
-  const text = `${opts.title} is open for voting${opts.closesAt ? ` until ${opts.closesAt}` : ""}.\n\nVote here: ${opts.link}`;
+  const text = `${opts.title} is open for voting${opts.studioName ? ` in ${opts.studioName}` : ""}${opts.closesAt ? ` until ${opts.closesAt}` : ""}.\n\nVote here: ${opts.link}`;
   return { html, text, subject: `Vote open: ${opts.title}` };
+}
+
+export function electionCertifiedEmail(opts: {
+  academyName: string;
+  studioName: string | null;
+  accent: string;
+  title: string;
+  winners: string[];
+  link: string;
+}) {
+  const list = opts.winners.length
+    ? `<ul style="font-size:15px;line-height:1.6;margin:0 0 20px;padding-left:20px">${opts.winners
+        .map((winner) => `<li>${escapeHtml(winner)}</li>`)
+        .join("")}</ul>`
+    : '<p style="font-size:15px;color:#4b5563;margin:0 0 20px">No option carried.</p>';
+
+  const html = shell(
+    opts.academyName,
+    opts.accent,
+    `<h1 style="font-size:22px;margin:0 0 12px">The result is in</h1>
+     <p style="font-size:15px;line-height:1.6;margin:0 0 8px"><strong>${escapeHtml(opts.title)}</strong>${opts.studioName ? ` in ${escapeHtml(opts.studioName)}` : ""} has been certified.</p>
+     ${list}
+     ${button(opts.link, opts.accent, "See the full result")}`,
+  );
+  const text = `${opts.title} has been certified.\n\n${opts.winners.join("\n") || "No option carried."}\n\n${opts.link}`;
+  return { html, text, subject: `Result: ${opts.title}` };
+}
+
+export function meetingProcessedEmail(opts: {
+  academyName: string;
+  studioName: string | null;
+  accent: string;
+  title: string;
+  summary: string;
+  changes: string;
+  link: string;
+}) {
+  const html = shell(
+    opts.academyName,
+    opts.accent,
+    `<h1 style="font-size:22px;margin:0 0 12px">The wiki has caught up</h1>
+     <p style="font-size:15px;line-height:1.6;margin:0 0 8px"><strong>${escapeHtml(opts.title)}</strong>${opts.studioName ? ` in ${escapeHtml(opts.studioName)}` : ""} has been folded into the ${opts.studioName ? "studio's" : "academy's"} rules.</p>
+     <p style="font-size:15px;color:#4b5563;margin:0 0 8px">${escapeHtml(opts.changes)}</p>
+     <p style="font-size:15px;line-height:1.6;margin:0 0 24px;color:#4b5563">${escapeHtml(opts.summary)}</p>
+     ${button(opts.link, opts.accent, "Read what changed")}`,
+  );
+  const text = `${opts.title} has been processed into the wiki.\n\n${opts.changes}\n\n${opts.summary}\n\n${opts.link}`;
+  return { html, text, subject: `Wiki updated: ${opts.title}` };
 }

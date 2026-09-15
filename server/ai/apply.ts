@@ -59,6 +59,8 @@ export async function applyOperations(opts: {
   sourceType: string;
   sourceRef: string | null;
   jobId: number | null;
+  /** The studio these changes belong to. New sections are filed against it. */
+  studioId: number | null;
   /** Maps a create_section op's key to the section it made, within this batch. */
   sectionKeyMap?: Map<string, number>;
 }): Promise<ApplyOutcome> {
@@ -74,12 +76,19 @@ export async function applyOperations(opts: {
 
   const keyToSectionId = opts.sectionKeyMap ?? new Map<string, number>();
 
-  // Existing sections are addressable by slug.
-  const existingSections = await db
-    .select()
-    .from(wikiSections)
-    .where(eq(wikiSections.academyId, opts.academyId));
+  // Existing sections are addressable by slug - but only the ones this studio
+  // can actually see, so an operation can never reach into another studio's
+  // Contract by naming its slug.
+  const existingSections = (
+    await db.select().from(wikiSections).where(eq(wikiSections.academyId, opts.academyId))
+  ).filter(
+    (section) =>
+      opts.studioId === null ||
+      section.studioId === opts.studioId ||
+      section.studioId === null,
+  );
   for (const section of existingSections) keyToSectionId.set(section.slug, section.id);
+  const reachableSectionIds = new Set(existingSections.map((section) => section.id));
 
   const revisionBase = {
     academyId: opts.academyId,
@@ -102,6 +111,7 @@ export async function applyOperations(opts: {
       .insert(wikiSections)
       .values({
         academyId: opts.academyId,
+        studioId: opts.studioId,
         title: op.title,
         slug,
         summary: op.summary,
@@ -110,6 +120,7 @@ export async function applyOperations(opts: {
       .returning();
     keyToSectionId.set(op.key, section.id);
     keyToSectionId.set(slug, section.id);
+    reachableSectionIds.add(section.id);
     outcome.sectionsCreated += 1;
   }
 
@@ -167,6 +178,12 @@ export async function applyOperations(opts: {
           outcome.skipped.push(`Couldn't amend rule ${op.ruleId} - it no longer exists.`);
           break;
         }
+        if (!reachableSectionIds.has(before.sectionId)) {
+          outcome.skipped.push(
+            `Skipped rule ${op.ruleId} - it belongs to a different studio's wiki.`,
+          );
+          break;
+        }
         await db
           .update(wikiRules)
           .set({ title: op.title, body: op.body, updatedAt: new Date() })
@@ -196,6 +213,12 @@ export async function applyOperations(opts: {
           outcome.skipped.push(`Couldn't repeal rule ${op.ruleId} - it no longer exists.`);
           break;
         }
+        if (!reachableSectionIds.has(before.sectionId)) {
+          outcome.skipped.push(
+            `Skipped repealing rule ${op.ruleId} - it belongs to a different studio's wiki.`,
+          );
+          break;
+        }
         if (before.status === "repealed") break;
         await db
           .update(wikiRules)
@@ -221,7 +244,7 @@ export async function applyOperations(opts: {
           .from(wikiRules)
           .where(and(eq(wikiRules.id, op.ruleId), eq(wikiRules.academyId, opts.academyId)))
           .limit(1);
-        if (!before || !sectionId) {
+        if (!before || !sectionId || !reachableSectionIds.has(before.sectionId)) {
           outcome.skipped.push(`Couldn't move rule ${op.ruleId} to "${op.sectionKey}".`);
           break;
         }
@@ -326,6 +349,7 @@ export async function revertJob(opts: {
 
 export async function saveFindings(opts: {
   academyId: number;
+  studioId: number | null;
   findings: FindingSpec[];
   sourceType: string;
   sourceRef: string | null;
@@ -341,6 +365,7 @@ export async function saveFindings(opts: {
       .filter((id): id is number => typeof id === "number");
     return {
       academyId: opts.academyId,
+      studioId: opts.studioId,
       type: finding.type,
       severity: finding.severity,
       title: finding.title,
@@ -361,16 +386,21 @@ export async function saveFindings(opts: {
 /** Inserts positions the AI detected, skipping ones that already exist by title. */
 export async function savePositions(opts: {
   academyId: number;
+  studioId: number | null;
   positions: PositionSpec[];
   sourceType: string;
   sourceRef: string | null;
 }): Promise<number> {
   if (opts.positions.length === 0) return 0;
 
-  const existing = await db
-    .select({ title: positions.title })
-    .from(positions)
-    .where(eq(positions.academyId, opts.academyId));
+  // Two studios can each have a "Hero Buck Committee"; they are different
+  // committees, so only collide titles within the same studio.
+  const existing = (
+    await db
+      .select({ title: positions.title, studioId: positions.studioId })
+      .from(positions)
+      .where(eq(positions.academyId, opts.academyId))
+  ).filter((row) => row.studioId === opts.studioId || row.studioId === null);
   const taken = new Set(existing.map((row) => row.title.trim().toLowerCase()));
 
   const fresh = opts.positions.filter((p) => !taken.has(p.title.trim().toLowerCase()));
@@ -379,6 +409,7 @@ export async function savePositions(opts: {
   await db.insert(positions).values(
     fresh.map((p) => ({
       academyId: opts.academyId,
+      studioId: opts.studioId,
       title: p.title,
       description: p.description,
       responsibilities: p.responsibilities,

@@ -3,8 +3,10 @@ import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Plus, Vote } from "lucide-react";
 import { apiGet, apiPost } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { useDateFormat, useSession } from "@/lib/session";
 import { Banner, Chip, EmptyState, LoadingPage, Modal, PageHeader, Spinner } from "@/components/ui";
+import { StudioTag } from "@/components/StudioSwitcher";
+import { StudioPicker } from "@/components/StudioPicker";
 
 type ElectionRow = {
   election: {
@@ -14,16 +16,28 @@ type ElectionRow = {
     type: string;
     status: string;
     seats: number;
+    studioId: number | null;
     closesAt: string | null;
     createdByType: string;
   };
   positionTitle: string | null;
+  studioName: string | null;
+  studioColor: string | null;
   candidateCount: number;
   voterCount: number;
   hasVoted: boolean;
+  /** Whether *this* person votes in *this* ballot - it varies per election. */
+  canVote: boolean;
 };
 
-type Position = { id: number; title: string; seats: number; elected: boolean };
+type Position = {
+  id: number;
+  title: string;
+  seats: number;
+  elected: boolean;
+  studioId: number | null;
+  studioName: string | null;
+};
 
 export const STATUS_TONE: Record<string, "neutral" | "brand" | "green" | "amber" | "red"> = {
   draft: "neutral",
@@ -34,11 +48,11 @@ export const STATUS_TONE: Record<string, "neutral" | "brand" | "green" | "amber"
 };
 
 export function Elections() {
-  const { can } = useSession();
+  const { can, studio, studioId } = useSession();
   const [creating, setCreating] = useState(false);
 
   const query = useQuery<{ elections: ElectionRow[]; canVote: boolean }>({
-    queryKey: ["elections"],
+    queryKey: ["elections", studioId],
     queryFn: () => apiGet("/elections"),
   });
 
@@ -50,7 +64,14 @@ export function Elections() {
 
   return (
     <>
-      <PageHeader title="Elections" subtitle="Positions and rule changes the studio votes on.">
+      <PageHeader
+        title={studio ? `${studio.name} — Elections` : "Elections"}
+        subtitle={
+          studio
+            ? `Positions and rule changes ${studio.name} votes on.`
+            : "Every ballot across the academy. Each one is decided by its own studio."
+        }
+      >
         {can("elections.manage") && (
           <button onClick={() => setCreating(true)} className="btn-primary">
             <Plus className="h-4 w-4" /> New election
@@ -58,11 +79,11 @@ export function Elections() {
         )}
       </PageHeader>
 
-      {!query.data?.canVote && (
+      {rows.length > 0 && !query.data?.canVote && (
         <div className="mb-4">
           <Banner tone="info">
-            You can follow every vote here, but you don't cast one — this academy keeps the ballot
-            box with the studio.
+            You can follow these votes, but you don't cast one in any of them — a ballot belongs to
+            the studio holding it.
           </Banner>
         </div>
       )}
@@ -117,7 +138,11 @@ export function Elections() {
 }
 
 function ElectionRowItem({ row }: { row: ElectionRow }) {
-  const { election, positionTitle, candidateCount, voterCount, hasVoted } = row;
+  const { election, positionTitle, studioName, studioColor, candidateCount, voterCount, hasVoted } =
+    row;
+  const { studioId } = useSession();
+  const formatDate = useDateFormat();
+
   return (
     <Link
       href={`/elections/${election.id}`}
@@ -127,11 +152,23 @@ function ElectionRowItem({ row }: { row: ElectionRow }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-semibold text-gray-900">{election.title}</span>
           <Chip tone={STATUS_TONE[election.status] ?? "neutral"}>{election.status}</Chip>
+          {/* Worth naming the studio whenever more than one is on screen. */}
+          {(studioId === null || election.studioId === null) && (
+            <StudioTag
+              name={studioName}
+              color={studioColor}
+              shared={election.studioId === null}
+            />
+          )}
           {election.createdByType === "ai" && <Chip tone="purple">from Town Hall</Chip>}
           {hasVoted && (
             <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600">
               <CheckCircle2 className="h-3.5 w-3.5" /> you voted
             </span>
+          )}
+          {/* Says plainly why there's no ballot button, instead of just not having one. */}
+          {!row.canVote && election.status === "open" && (
+            <span className="text-xs text-gray-400">not your studio's vote</span>
           )}
         </div>
         <div className="mt-0.5 flex flex-wrap gap-x-3 text-xs text-gray-500">
@@ -142,7 +179,7 @@ function ElectionRowItem({ row }: { row: ElectionRow }) {
           <span>
             {voterCount} vote{voterCount === 1 ? "" : "s"} cast
           </span>
-          {election.closesAt && <span>closes {new Date(election.closesAt).toLocaleDateString()}</span>}
+          {election.closesAt && <span>closes {formatDate(election.closesAt)}</span>}
         </div>
       </div>
     </Link>
@@ -151,16 +188,24 @@ function ElectionRowItem({ row }: { row: ElectionRow }) {
 
 function CreateElectionModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { studioId, studios, settings, effective } = useSession();
   const [type, setType] = useState<"position" | "rule">("position");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [positionId, setPositionId] = useState<number | null>(null);
   const [proposalBody, setProposalBody] = useState("");
-  const [closesAt, setClosesAt] = useState("");
+  const [targetStudio, setTargetStudio] = useState<number | null | undefined>(
+    studioId === null ? undefined : studioId,
+  );
+  // Prefilled from the academy's default voting window, or the studio's own.
+  const [closesAt, setClosesAt] = useState(() => {
+    const days = effective?.electionDurationDays ?? settings.elections.defaultDurationDays;
+    return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  });
   const [error, setError] = useState<string | null>(null);
 
   const positions = useQuery<{ positions: Position[] }>({
-    queryKey: ["positions"],
+    queryKey: ["positions", studioId],
     queryFn: () => apiGet("/positions"),
   });
 
@@ -173,6 +218,7 @@ function CreateElectionModal({ onClose }: { onClose: () => void }) {
         positionId: type === "position" ? positionId : null,
         proposalBody: type === "rule" ? proposalBody : null,
         closesAt: closesAt || null,
+        ...(targetStudio === undefined ? {} : { studioId: targetStudio }),
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["elections"] });
@@ -181,9 +227,13 @@ function CreateElectionModal({ onClose }: { onClose: () => void }) {
     onError: (createError: Error) => setError(createError.message),
   });
 
+  // A position vote inherits the seat's studio, so the picker is redundant there.
+  const chosenPosition = positions.data?.positions.find((entry) => entry.id === positionId);
+
   const valid =
     title.trim().length >= 3 &&
-    (type === "position" ? positionId !== null : proposalBody.trim().length > 0);
+    (type === "position" ? positionId !== null : proposalBody.trim().length > 0) &&
+    (type === "position" || targetStudio !== undefined);
 
   return (
     <Modal
@@ -263,12 +313,18 @@ function CreateElectionModal({ onClose }: { onClose: () => void }) {
                 .filter((position) => position.elected)
                 .map((position) => (
                   <option key={position.id} value={position.id}>
+                    {position.studioName ? `${position.studioName} — ` : ""}
                     {position.title} ({position.seats} seat{position.seats === 1 ? "" : "s"})
                   </option>
                 ))}
             </select>
             <p className="hint">
               The winners are seated automatically when the vote is certified.
+              {chosenPosition?.studioName
+                ? ` This ballot goes to ${chosenPosition.studioName}, because that's whose seat it is.`
+                : chosenPosition && chosenPosition.studioId === null
+                  ? " This one is academy-wide, so everyone votes."
+                  : ""}
             </p>
           </div>
         ) : (
@@ -303,9 +359,18 @@ function CreateElectionModal({ onClose }: { onClose: () => void }) {
           />
         </div>
 
+        {type === "rule" && (
+          <StudioPicker
+            value={targetStudio}
+            onChange={setTargetStudio}
+            label="Who votes on this?"
+            hint="Only that studio's members cast a ballot. Academy-wide opens it to everyone."
+          />
+        )}
+
         <div>
           <label className="label" htmlFor="closes">
-            Voting closes (optional)
+            Voting closes
           </label>
           <input
             id="closes"
@@ -314,6 +379,10 @@ function CreateElectionModal({ onClose }: { onClose: () => void }) {
             value={closesAt}
             onChange={(event) => setClosesAt(event.target.value)}
           />
+          <p className="hint">
+            Prefilled from this academy's default voting window. Votes close automatically at the
+            deadline{settings.elections.autoCloseOnDeadline ? "" : " only if that's switched on in Settings"}.
+          </p>
         </div>
       </div>
     </Modal>

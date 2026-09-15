@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Award, Check, Lock, Send, Trophy, UserPlus } from "lucide-react";
 import { apiDelete, apiGet, apiPost } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { useDateFormat, useSession } from "@/lib/session";
 import {
   Avatar,
   Banner,
@@ -14,6 +14,7 @@ import {
   Spinner,
 } from "@/components/ui";
 import { JobProgress, useJob, type Job } from "@/components/JobStatus";
+import { StudioTag } from "@/components/StudioSwitcher";
 import { STATUS_TONE } from "./Elections";
 
 type Candidate = {
@@ -24,7 +25,7 @@ type Candidate = {
   userName: string | null;
   userBio: string | null;
   userAvatar: string | null;
-  userStudio: string | null;
+  userStudioId: number | null;
   userNga: string | null;
   pastPositions: string[];
   votes: number | null;
@@ -40,23 +41,39 @@ type Detail = {
     seats: number;
     proposalBody: string | null;
     selfNomination: boolean;
+    studioId: number | null;
     closesAt: string | null;
     certifiedAt: string | null;
     results: { winners?: { label: string; votes: number }[] } | null;
   };
+  studio: { id: number; name: string; color: string } | null;
   candidates: Candidate[];
   myVotes: number[];
   turnout: { voters: number; eligible: number };
   canVote: boolean;
+  /** Why this person can't vote here, in words they can act on. */
+  voteBlockedReason: string | null;
+  rules: {
+    allowVoteChanges: boolean;
+    showLiveTallies: boolean;
+    quorumPercent: number;
+    minOptions: number;
+  };
 };
 
 export function ElectionDetail({ id }: { id: number }) {
-  const { can, user } = useSession();
+  const { can, user, studios } = useSession();
+  const formatDate = useDateFormat();
   const queryClient = useQueryClient();
   const [selected, setSelected] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [nominating, setNominating] = useState(false);
   const [tieResults, setTieResults] = useState<{ label: string; votes: number }[] | null>(null);
+  const [quorumShort, setQuorumShort] = useState<{
+    voters: number;
+    eligible: number;
+    needed: number;
+  } | null>(null);
 
   const query = useQuery<Detail>({
     queryKey: ["election", id],
@@ -96,17 +113,24 @@ export function ElectionDetail({ id }: { id: number }) {
   });
 
   const certify = useMutation({
-    mutationFn: () => apiPost<{ jobId: number | null }>(`/elections/${id}/certify`),
+    mutationFn: (overrideQuorum?: boolean) =>
+      apiPost<{ jobId: number | null }>(`/elections/${id}/certify`, { overrideQuorum }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["election", id] });
       void queryClient.invalidateQueries({ queryKey: ["election-job", id] });
       void queryClient.invalidateQueries({ queryKey: ["positions"] });
       setTieResults(null);
+      setQuorumShort(null);
       setError(null);
     },
     onError: (certifyError: Error & { payload?: Record<string, unknown> }) => {
       if (certifyError.payload?.tie) {
         setTieResults(certifyError.payload.results as { label: string; votes: number }[]);
+      }
+      if (certifyError.payload?.quorumShort) {
+        setQuorumShort(
+          certifyError.payload.turnout as { voters: number; eligible: number; needed: number },
+        );
       }
       setError(certifyError.message);
     },
@@ -120,7 +144,7 @@ export function ElectionDetail({ id }: { id: number }) {
   if (query.isLoading) return <LoadingPage />;
   if (!query.data) return <Banner tone="error">That election doesn't exist.</Banner>;
 
-  const { election, candidates, turnout, canVote } = query.data;
+  const { election, studio, candidates, turnout, canVote, voteBlockedReason, rules } = query.data;
   const isOpen = election.status === "open";
   const isDecided = election.status === "closed" || election.status === "certified";
   const alreadyOnBallot = candidates.some((candidate) => candidate.userId === user?.id);
@@ -156,13 +180,21 @@ export function ElectionDetail({ id }: { id: number }) {
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">{election.title}</h1>
             <Chip tone={STATUS_TONE[election.status] ?? "neutral"}>{election.status}</Chip>
+            <StudioTag
+              name={studio?.name}
+              color={studio?.color}
+              shared={election.studioId === null}
+            />
           </div>
           <p className="mt-1 text-sm text-gray-500">
             {election.type === "position"
               ? `${election.seats} seat${election.seats === 1 ? "" : "s"} to fill`
               : "Rule change"}
-            {election.closesAt && ` · closes ${new Date(election.closesAt).toLocaleDateString()}`}
-            {isOpen && ` · ${turnout.voters} of ${turnout.eligible} have voted`}
+            {election.closesAt && ` · closes ${formatDate(election.closesAt)}`}
+            {isOpen &&
+              ` · ${turnout.voters} of ${turnout.eligible} eligible ${
+                studio ? `${studio.name} ` : ""
+              }voters have voted`}
           </p>
         </div>
 
@@ -180,7 +212,7 @@ export function ElectionDetail({ id }: { id: number }) {
             )}
             {election.status === "closed" && (
               <button
-                onClick={() => certify.mutate()}
+                onClick={() => certify.mutate(undefined)}
                 disabled={certify.isPending}
                 className="btn-primary"
               >
@@ -194,6 +226,48 @@ export function ElectionDetail({ id }: { id: number }) {
       <div className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
         {job && <JobProgress job={job} />}
+
+        {quorumShort && (
+          <Banner tone="warning" title="Not enough people voted">
+            <p>
+              {quorumShort.voters} of {quorumShort.eligible} eligible voters took part, and this
+              academy asks for {quorumShort.needed} before a result counts. Reopen the vote and
+              chase turnout, or certify anyway and record why.
+            </p>
+            {can("elections.manage") && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  onClick={() => certify.mutate(true)}
+                  disabled={certify.isPending}
+                  className="btn-secondary btn-sm"
+                >
+                  {certify.isPending && <Spinner className="h-3 w-3" />} Certify anyway
+                </button>
+                <button
+                  onClick={() => {
+                    setQuorumShort(null);
+                    setError(null);
+                    setStatus.mutate("open");
+                  }}
+                  className="btn-ghost btn-sm"
+                >
+                  Reopen voting
+                </button>
+              </div>
+            )}
+          </Banner>
+        )}
+
+        {!canVote && voteBlockedReason && isOpen && (
+          <Banner tone="info">{voteBlockedReason}</Banner>
+        )}
+
+        {isOpen && rules.showLiveTallies && (
+          <Banner tone="warning">
+            This academy shows the running count while voting is open. Everyone can see where the
+            vote stands, which does change how later voters behave.
+          </Banner>
+        )}
 
         {tieResults && (
           <Banner tone="warning" title="It's a tie at the cut line">
@@ -293,7 +367,13 @@ export function ElectionDetail({ id }: { id: number }) {
                             </Chip>
                           )}
                           {isMe && <Chip tone="brand">you</Chip>}
-                          {candidate.userStudio && <Chip>{candidate.userStudio}</Chip>}
+                          {candidate.userStudioId !== null &&
+                            candidate.userStudioId !== election.studioId && (
+                              <Chip>
+                                {studios.find((entry) => entry.id === candidate.userStudioId)?.name ??
+                                  "another studio"}
+                              </Chip>
+                            )}
                         </div>
 
                         {candidate.userNga && (
@@ -360,11 +440,18 @@ export function ElectionDetail({ id }: { id: number }) {
                 {maxPicks > 1
                   ? `Pick up to ${maxPicks}. You've picked ${selected.length}.`
                   : "Pick one."}
-                {query.data.myVotes.length > 0 && " You can change your vote until voting closes."}
+                {query.data.myVotes.length > 0 &&
+                  (rules.allowVoteChanges
+                    ? " You can change your vote until voting closes."
+                    : " Your ballot is already cast, and this academy doesn't allow changing it.")}
               </div>
               <button
                 onClick={() => vote.mutate()}
-                disabled={selected.length === 0 || vote.isPending}
+                disabled={
+                  selected.length === 0 ||
+                  vote.isPending ||
+                  (query.data.myVotes.length > 0 && !rules.allowVoteChanges)
+                }
                 className="btn-primary"
               >
                 {vote.isPending ? <Spinner /> : <Check className="h-4 w-4" />}

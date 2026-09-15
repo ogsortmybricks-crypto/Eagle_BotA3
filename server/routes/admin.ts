@@ -10,15 +10,16 @@ import {
   invites,
   positionHolders,
   positions,
+  studios,
   users,
   ROLES,
-  STUDIOS,
 } from "@shared/schema";
 import { publicUser, requirePermission } from "../auth";
 import { logActivity } from "../activity";
 import { inviteEmail, sendMail } from "../mailer";
 import { aiConfigured, emailConfigured, env } from "../env";
 import { getStatusSnapshot } from "../ai/jobs";
+import { canReadStudio, requireScope, scoped, studioFilter } from "../studio";
 
 export const adminRouter = Router();
 
@@ -42,9 +43,18 @@ adminRouter.patch("/academy", requirePermission("academy.manage"), async (req, r
     .safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Couldn't save those settings." });
 
+  const patch: Record<string, unknown> = { ...parsed.data };
+  // guidesCanVote lives in both the column and the settings blob; keep them in step.
+  if (parsed.data.guidesCanVote !== undefined) {
+    patch.settings = {
+      ...req.settings!,
+      governance: { ...req.settings!.governance, guidesCanVote: parsed.data.guidesCanVote },
+    };
+  }
+
   const [academy] = await db
     .update(academies)
-    .set(parsed.data)
+    .set(patch)
     .where(eq(academies.id, req.user!.academyId))
     .returning();
 
@@ -64,10 +74,20 @@ adminRouter.patch("/academy", requirePermission("academy.manage"), async (req, r
 /* ---------------------------------- people --------------------------------- */
 
 adminRouter.get("/users", requirePermission("users.manage"), async (req, res) => {
+  const academyId = req.user!.academyId;
+  const scope = requireScope(req);
+  // Admins manage the whole roster; the studio filter here is a convenience
+  // view rather than a boundary, since users.manage is admin-only anyway.
+  const onlyStudio = req.query.scope === "studio";
+
   const rows = await db
     .select()
     .from(users)
-    .where(eq(users.academyId, req.user!.academyId))
+    .where(
+      onlyStudio
+        ? scoped(eq(users.academyId, academyId), users.studioId, scope)
+        : eq(users.academyId, academyId),
+    )
     .orderBy(asc(users.name));
 
   const held = await db
@@ -78,13 +98,19 @@ adminRouter.get("/users", requirePermission("users.manage"), async (req, res) =>
     })
     .from(positionHolders)
     .innerJoin(positions, eq(positions.id, positionHolders.positionId))
-    .where(eq(positionHolders.academyId, req.user!.academyId));
+    .where(eq(positionHolders.academyId, academyId));
+
+  const studioRows = await db.select().from(studios).where(eq(studios.academyId, academyId));
 
   res.json({
     users: rows.map((user) => ({
       ...publicUser(user),
+      studioName: user.studioId
+        ? (studioRows.find((studio) => studio.id === user.studioId)?.name ?? null)
+        : null,
       positions: held.filter((h) => h.userId === user.id && h.endedAt === null).map((h) => h.title),
     })),
+    studios: studioRows.filter((studio) => !studio.archived),
   });
 });
 
@@ -92,7 +118,7 @@ adminRouter.patch("/users/:id", requirePermission("users.manage"), async (req, r
   const parsed = z
     .object({
       role: z.enum(ROLES).optional(),
-      studio: z.enum(STUDIOS).nullable().optional(),
+      studioId: z.number().int().nullable().optional(),
       active: z.boolean().optional(),
       name: z.string().min(2).max(120).optional(),
     })
@@ -124,6 +150,20 @@ adminRouter.patch("/users/:id", requirePermission("users.manage"), async (req, r
     }
   }
 
+  if (parsed.data.studioId !== undefined && parsed.data.studioId !== null) {
+    const [studio] = await db
+      .select()
+      .from(studios)
+      .where(
+        and(eq(studios.id, parsed.data.studioId), eq(studios.academyId, req.user!.academyId)),
+      )
+      .limit(1);
+    if (!studio) return res.status(400).json({ error: "That studio doesn't exist." });
+    if (studio.archived) {
+      return res.status(400).json({ error: `${studio.name} is archived - nobody new joins it.` });
+    }
+  }
+
   const [user] = await db
     .update(users)
     .set(parsed.data)
@@ -132,13 +172,21 @@ adminRouter.patch("/users/:id", requirePermission("users.manage"), async (req, r
 
   if (!user) return res.status(404).json({ error: "That person isn't in this academy." });
 
+  const moved = parsed.data.studioId !== undefined;
+  const [studio] = user.studioId
+    ? await db.select().from(studios).where(eq(studios.id, user.studioId)).limit(1)
+    : [null];
+
   await logActivity({
     academyId: req.user!.academyId,
+    studioId: user.studioId,
     actorUserId: req.user!.id,
     action: "user.updated",
     entityType: "user",
     entityId: user.id,
-    summary: `${req.user!.name} updated ${user.name}${parsed.data.role ? ` (now ${parsed.data.role})` : ""}.`,
+    summary: `${req.user!.name} updated ${user.name}${parsed.data.role ? ` (now ${parsed.data.role})` : ""}${
+      moved ? ` — studio: ${studio?.name ?? "none"}` : ""
+    }.`,
     metadata: parsed.data,
   });
 
@@ -148,17 +196,25 @@ adminRouter.patch("/users/:id", requirePermission("users.manage"), async (req, r
 /* --------------------------------- invites --------------------------------- */
 
 adminRouter.get("/invites", requirePermission("invites.send"), async (req, res) => {
+  const academyId = req.user!.academyId;
+  const studioRows = await db.select().from(studios).where(eq(studios.academyId, academyId));
+
   const rows = await db
     .select()
     .from(invites)
-    .where(eq(invites.academyId, req.user!.academyId))
+    .where(eq(invites.academyId, academyId))
     .orderBy(desc(invites.id));
+
   res.json({
     invites: rows.map((invite) => ({
       ...invite,
+      studioName: invite.studioId
+        ? (studioRows.find((studio) => studio.id === invite.studioId)?.name ?? null)
+        : null,
       link: `${env.appUrl}/invite/${invite.token}`,
       expired: invite.expiresAt < new Date(),
     })),
+    studios: studioRows.filter((studio) => !studio.archived),
     emailConfigured,
   });
 });
@@ -167,8 +223,9 @@ adminRouter.post("/invites", requirePermission("invites.send"), async (req, res)
   const parsed = z
     .object({
       emails: z.array(z.string().email()).min(1).max(60),
-      role: z.enum(ROLES).default("learner"),
-      studio: z.enum(STUDIOS).nullable().optional(),
+      role: z.enum(ROLES).optional(),
+      /** Which studio they join. Omitted means the one being viewed. */
+      studioId: z.number().int().nullable().optional(),
       name: z.string().max(120).optional(),
     })
     .safeParse(req.body);
@@ -177,8 +234,21 @@ adminRouter.post("/invites", requirePermission("invites.send"), async (req, res)
   }
 
   const academyId = req.user!.academyId;
+  const scope = requireScope(req);
+  const settings = req.settings!;
+  const role = parsed.data.role ?? settings.access.defaultInviteRole;
+
   const [academy] = await db.select().from(academies).where(eq(academies.id, academyId)).limit(1);
   if (!academy) return res.status(404).json({ error: "Academy not found." });
+
+  const studioId =
+    parsed.data.studioId !== undefined ? parsed.data.studioId : scope.studioId;
+  if (studioId !== null && !scope.allowedIds.includes(studioId)) {
+    return res.status(400).json({ error: "That isn't a studio you can invite into." });
+  }
+  const [studio] = studioId
+    ? await db.select().from(studios).where(eq(studios.id, studioId)).limit(1)
+    : [null];
 
   const results: { email: string; status: string; detail?: string; link?: string }[] = [];
 
@@ -201,7 +271,8 @@ adminRouter.post("/invites", requirePermission("invites.send"), async (req, res)
     }
 
     const token = randomBytes(24).toString("hex");
-    const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    const expiryDays = settings.notifications.inviteExpiryDays;
+    const expiresAt = new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000);
 
     const [invite] = await db
       .insert(invites)
@@ -209,8 +280,8 @@ adminRouter.post("/invites", requirePermission("invites.send"), async (req, res)
         academyId,
         email,
         name: parsed.data.name ?? null,
-        role: parsed.data.role,
-        studio: parsed.data.studio ?? null,
+        role,
+        studioId,
         token,
         invitedBy: req.user!.id,
         expiresAt,
@@ -220,10 +291,12 @@ adminRouter.post("/invites", requirePermission("invites.send"), async (req, res)
     const link = `${env.appUrl}/invite/${token}`;
     const mail = inviteEmail({
       academyName: academy.name,
+      studioName: studio?.name ?? null,
       accent: academy.palette.accent,
       inviterName: req.user!.name,
-      role: parsed.data.role,
+      role,
       link,
+      expiryDays,
     });
     const sent = await sendMail({ to: email, ...mail });
 
@@ -239,9 +312,12 @@ adminRouter.post("/invites", requirePermission("invites.send"), async (req, res)
   const sentCount = results.filter((r) => r.status === "sent").length;
   await logActivity({
     academyId,
+    studioId,
     actorUserId: req.user!.id,
     action: "invite.sent",
-    summary: `${req.user!.name} invited ${results.length} ${parsed.data.role}${results.length === 1 ? "" : "s"} (${sentCount} emailed).`,
+    summary: `${req.user!.name} invited ${results.length} ${role}${results.length === 1 ? "" : "s"} to ${
+      studio?.name ?? "the academy"
+    } (${sentCount} emailed).`,
     metadata: { results },
   });
 
@@ -262,6 +338,7 @@ adminRouter.get("/activity", requirePermission("activity.read"), async (req, res
   const before = req.query.before ? Number(req.query.before) : null;
   const search = (req.query.q as string | undefined)?.trim();
   const actorType = req.query.actorType as string | undefined;
+  const scope = requireScope(req);
 
   const conditions = [eq(activityLog.academyId, req.user!.academyId)];
   if (before) conditions.push(lt(activityLog.id, before));
@@ -271,11 +348,14 @@ adminRouter.get("/activity", requirePermission("activity.read"), async (req, res
       or(ilike(activityLog.summary, `%${search}%`), ilike(activityLog.action, `%${search}%`))!,
     );
   }
+  const studioCondition = studioFilter(activityLog.studioId, scope);
+  if (studioCondition) conditions.push(studioCondition);
 
   const rows = await db
-    .select({ entry: activityLog, actorName: users.name })
+    .select({ entry: activityLog, actorName: users.name, studioName: studios.name })
     .from(activityLog)
     .leftJoin(users, eq(users.id, activityLog.actorUserId))
+    .leftJoin(studios, eq(studios.id, activityLog.studioId))
     .where(and(...conditions))
     .orderBy(desc(activityLog.id))
     .limit(limit);
@@ -289,13 +369,15 @@ adminRouter.get("/activity", requirePermission("activity.read"), async (req, res
 /* --------------------------------- statuses -------------------------------- */
 
 adminRouter.get("/status", requirePermission("status.read"), async (req, res) => {
-  const snapshot = await getStatusSnapshot(req.user!.academyId);
+  const snapshot = await getStatusSnapshot(req.user!.academyId, requireScope(req));
   res.json({
     ...snapshot,
     config: {
       aiConfigured,
       emailConfigured,
+      aiEnabled: req.settings!.ai.enabled,
       model: env.anthropicModel,
+      effort: req.settings!.ai.effort,
       appUrl: env.appUrl,
     },
   });
@@ -308,6 +390,9 @@ adminRouter.get("/jobs/:id", requirePermission("status.read"), async (req, res) 
     .where(and(eq(aiJobs.id, Number(req.params.id)), eq(aiJobs.academyId, req.user!.academyId)))
     .limit(1);
   if (!job) return res.status(404).json({ error: "No such job." });
+  if (!canReadStudio(requireScope(req), job.studioId)) {
+    return res.status(404).json({ error: "No such job." });
+  }
   res.json({ job });
 });
 
@@ -330,20 +415,52 @@ adminRouter.post("/jobs/:id/acknowledge", requirePermission("status.read"), asyn
 
 /* ------------------------------- dashboard --------------------------------- */
 
+/**
+ * Counts for the studio being viewed, plus a per-studio breakdown so an admin
+ * can see at a glance which studio has fallen behind.
+ */
 adminRouter.get("/overview", requirePermission("status.read"), async (req, res) => {
   const academyId = req.user!.academyId;
+  const scope = requireScope(req);
+  const studioId = scope.studioId;
+  const scopeSql = studioId === null ? sql`true` : sql`(studio_id = ${studioId} or studio_id is null)`;
+
   const counts = await db
     .select({
-      people: sql<number>`(select count(*)::int from users where academy_id = ${academyId} and active = true)`,
-      rules: sql<number>`(select count(*)::int from wiki_rules where academy_id = ${academyId} and status = 'active')`,
-      openFindings: sql<number>`(select count(*)::int from ai_findings where academy_id = ${academyId} and status = 'open')`,
-      meetings: sql<number>`(select count(*)::int from meetings where academy_id = ${academyId})`,
-      openElections: sql<number>`(select count(*)::int from elections where academy_id = ${academyId} and status = 'open')`,
-      pendingInvites: sql<number>`(select count(*)::int from invites where academy_id = ${academyId} and accepted_at is null)`,
+      people: sql<number>`(select count(*)::int from users where academy_id = ${academyId} and active = true and ${
+        studioId === null ? sql`true` : sql`studio_id = ${studioId}`
+      })`,
+      rules: sql<number>`(select count(*)::int from wiki_rules r join wiki_sections s on s.id = r.section_id
+        where r.academy_id = ${academyId} and r.status = 'active' and ${
+          studioId === null ? sql`true` : sql`(s.studio_id = ${studioId} or s.studio_id is null)`
+        })`,
+      openFindings: sql<number>`(select count(*)::int from ai_findings where academy_id = ${academyId} and status = 'open' and ${scopeSql})`,
+      meetings: sql<number>`(select count(*)::int from meetings where academy_id = ${academyId} and ${scopeSql})`,
+      openElections: sql<number>`(select count(*)::int from elections where academy_id = ${academyId} and status = 'open' and ${scopeSql})`,
+      pendingInvites: sql<number>`(select count(*)::int from invites where academy_id = ${academyId} and accepted_at is null and ${scopeSql})`,
     })
     .from(academies)
     .where(eq(academies.id, academyId))
     .limit(1);
 
-  res.json({ counts: counts[0] ?? {} });
+  const perStudio = await db
+    .select({
+      id: studios.id,
+      name: studios.name,
+      color: studios.color,
+      members: sql<number>`(select count(*)::int from users where studio_id = ${studios.id} and active = true)`,
+      rules: sql<number>`(select count(*)::int from wiki_rules r join wiki_sections s on s.id = r.section_id where s.studio_id = ${studios.id} and r.status = 'active')`,
+      openFindings: sql<number>`(select count(*)::int from ai_findings where studio_id = ${studios.id} and status = 'open')`,
+      openElections: sql<number>`(select count(*)::int from elections where studio_id = ${studios.id} and status = 'open')`,
+      lastMeeting: sql<string | null>`(select max(meeting_date)::text from meetings where studio_id = ${studios.id})`,
+    })
+    .from(studios)
+    .where(and(eq(studios.academyId, academyId), eq(studios.archived, false)))
+    .orderBy(asc(studios.orderIndex));
+
+  res.json({
+    counts: counts[0] ?? {},
+    studios: perStudio.filter((row) => scope.canSeeAll || scope.allowedIds.includes(row.id)),
+    scopedTo: scope.studio ? scope.studio.name : null,
+  });
 });

@@ -8,7 +8,8 @@ type InviteInfo = {
   email: string;
   name: string | null;
   role: string;
-  studio: string | null;
+  studio: { name: string; description: string | null; color: string } | null;
+  minPasswordLength: number;
   academy: { name?: string; palette?: Palette; logoUrl?: string | null };
 };
 
@@ -89,15 +90,39 @@ export function AcceptInvite({ token }: { token: string }) {
           <h1 className="text-xl font-bold tracking-tight text-gray-900">
             Join {invite.academy.name}
           </h1>
-          <div className="mt-2 flex items-center justify-center gap-2">
+          <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
             <span className="text-sm text-gray-500">{invite.email}</span>
             <Chip tone="brand">{invite.role}</Chip>
+            {invite.studio && (
+              <span
+                className="chip"
+                style={{ background: `${invite.studio.color}1a`, color: invite.studio.color }}
+              >
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: invite.studio.color }}
+                />
+                {invite.studio.name}
+              </span>
+            )}
           </div>
         </div>
 
         <form onSubmit={submit} className="card space-y-4 p-6">
           {error && <Banner tone="error">{error}</Banner>}
           <p className="text-sm text-gray-600">{ROLE_BLURB[invite.role]}</p>
+          {invite.studio ? (
+            <p className="text-sm text-gray-600">
+              You'll be in <strong>{invite.studio.name}</strong>
+              {invite.studio.description ? ` — ${invite.studio.description}` : ""} Its rules,
+              meetings and elections are the ones you'll see.
+            </p>
+          ) : (
+            <p className="text-sm text-amber-700">
+              You haven't been placed in a studio yet, so there won't be much to see until an admin
+              does that.
+            </p>
+          )}
           <div>
             <label className="label" htmlFor="name">
               Your name
@@ -122,15 +147,17 @@ export function AcceptInvite({ token }: { token: string }) {
               className="input"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              placeholder="At least 8 characters"
+              placeholder={`At least ${invite.minPasswordLength} characters`}
               autoComplete="new-password"
               required
-              minLength={8}
+              minLength={invite.minPasswordLength}
             />
           </div>
           <button
             type="submit"
-            disabled={busy || name.trim().length < 2 || password.length < 8}
+            disabled={
+              busy || name.trim().length < 2 || password.length < invite.minPasswordLength
+            }
             className="btn-primary w-full"
           >
             {busy && <Spinner />} Join {invite.academy.name}

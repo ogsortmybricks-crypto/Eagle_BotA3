@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Settings,
   Shield,
   Users,
   Vote,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import { useSession } from "@/lib/session";
 import { Avatar, Chip } from "./ui";
+import { StudioSwitcher } from "./StudioSwitcher";
 
 const NAV = [
   { href: "/wiki", label: "Wiki", icon: BookOpen, permission: "wiki.read" },
@@ -21,16 +23,18 @@ const NAV = [
   { href: "/positions", label: "Positions", icon: Shield, permission: "positions.read" },
   { href: "/people", label: "People", icon: Users, permission: "wiki.read" },
   { href: "/admin", label: "Admin", icon: LayoutDashboard, permission: "status.read" },
+  // Everyone gets Settings; the admin-only tabs inside it hide themselves.
+  { href: "/settings", label: "Settings", icon: Settings, permission: null },
 ] as const;
 
 export function Layout({ children }: { children: ReactNode }) {
-  const { user, academy, can, signOut } = useSession();
+  const { user, academy, studio, can, signOut } = useSession();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   if (!user || !academy) return <>{children}</>;
 
-  const items = NAV.filter((item) => can(item.permission));
+  const items = NAV.filter((item) => item.permission === null || can(item.permission));
 
   const nav = (
     <nav className="flex flex-col gap-0.5">
@@ -73,6 +77,10 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         </div>
 
+        <div className="border-b border-gray-200 p-3">
+          <StudioSwitcher />
+        </div>
+
         <div className="flex-1 overflow-y-auto p-3">{nav}</div>
 
         <div className="border-t border-gray-200 p-3">
@@ -97,7 +105,7 @@ export function Layout({ children }: { children: ReactNode }) {
       {/* Mobile header */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-gray-200 bg-white px-4 py-3 lg:hidden">
-          <div className="flex items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-2.5">
             {academy.logoUrl ? (
               <img src={academy.logoUrl} alt="" className="h-8 w-8 rounded-lg object-contain" />
             ) : (
@@ -105,11 +113,21 @@ export function Layout({ children }: { children: ReactNode }) {
                 {academy.name.slice(0, 2).toUpperCase()}
               </div>
             )}
-            <span className="text-sm font-bold text-gray-900">{academy.name}</span>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-bold text-gray-900">{academy.name}</div>
+              {/* Which studio you're in matters more than the academy name on a phone. */}
+              <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ background: studio?.color ?? "#94a3b8" }}
+                />
+                <span className="truncate">{studio?.name ?? "All studios"}</span>
+              </div>
+            </div>
           </div>
           <button
             onClick={() => setMobileOpen((open) => !open)}
-            className="btn-ghost p-2"
+            className="btn-ghost shrink-0 p-2"
             aria-label="Menu"
           >
             {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -118,6 +136,9 @@ export function Layout({ children }: { children: ReactNode }) {
 
         {mobileOpen && (
           <div className="border-b border-gray-200 bg-white p-3 lg:hidden">
+            <div className="mb-3">
+              <StudioSwitcher onNavigate={() => setMobileOpen(false)} />
+            </div>
             {nav}
             <div className="mt-2 border-t border-gray-200 pt-2">
               <Link

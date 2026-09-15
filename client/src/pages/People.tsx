@@ -3,7 +3,7 @@ import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Camera, Pencil } from "lucide-react";
 import { apiGet, apiPatch, fileToDataUrl } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { useDateFormat, useSession } from "@/lib/session";
 import {
   Avatar,
   Banner,
@@ -13,20 +13,23 @@ import {
   PageHeader,
   Spinner,
 } from "@/components/ui";
+import { StudioTag } from "@/components/StudioSwitcher";
 
-const STUDIOS = [
-  { value: "spark", label: "Spark" },
-  { value: "elementary", label: "Elementary / Discovery" },
-  { value: "middle", label: "Middle Studio" },
-  { value: "launchpad", label: "Launchpad" },
-  { value: "staff", label: "Staff" },
-];
+type StudioRow = {
+  id: number;
+  name: string;
+  color: string;
+  ageRange: string | null;
+  orderIndex: number;
+  archived: boolean;
+};
 
 type PersonRow = {
   id: number;
   name: string;
+  email: string | null;
   role: string;
-  studio: string | null;
+  studioId: number | null;
   avatarUrl: string | null;
   bio: string | null;
   nga: string | null;
@@ -34,31 +37,77 @@ type PersonRow = {
 };
 
 export function People() {
-  const query = useQuery<{ people: PersonRow[] }>({
-    queryKey: ["people"],
+  const { studioId, studios: myStudios } = useSession();
+  const [showEveryone, setShowEveryone] = useState(studioId === null);
+
+  const query = useQuery<{ people: PersonRow[]; studios: StudioRow[] }>({
+    queryKey: ["people-all"],
     queryFn: () => apiGet("/profiles"),
   });
 
   if (query.isLoading) return <LoadingPage />;
   const people = query.data?.people ?? [];
+  const studios = (query.data?.studios ?? []).filter((studio) => !studio.archived);
 
-  const byStudio = STUDIOS.map((studio) => ({
-    ...studio,
-    people: people.filter((person) => person.studio === studio.value),
-  })).filter((group) => group.people.length > 0);
-  const unassigned = people.filter((person) => !person.studio);
+  // Default to the studio you're in: a Middle Studio learner opening People
+  // wants their own roster, not ninety names across four studios.
+  const visible = showEveryone
+    ? people
+    : people.filter((person) => person.studioId === studioId);
+
+  const groups = [
+    ...studios
+      .filter((studio) => showEveryone || studio.id === studioId)
+      .map((studio) => ({
+        key: String(studio.id),
+        label: studio.name,
+        color: studio.color,
+        people: visible.filter((person) => person.studioId === studio.id),
+      })),
+    {
+      key: "none",
+      label: "Not in a studio",
+      color: null as string | null,
+      people: visible.filter((person) => person.studioId === null),
+    },
+  ].filter((group) => group.people.length > 0);
+
+  const currentStudioName = myStudios.find((entry) => entry.id === studioId)?.name;
 
   return (
     <>
-      <PageHeader title="People" subtitle={`${people.length} in the academy.`} />
+      <PageHeader
+        title="People"
+        subtitle={
+          showEveryone
+            ? `${people.length} in the academy, across ${studios.length} studio${studios.length === 1 ? "" : "s"}.`
+            : `${visible.length} in ${currentStudioName ?? "this studio"}.`
+        }
+      >
+        {studioId !== null && (
+          <button
+            onClick={() => setShowEveryone((value) => !value)}
+            className="btn-secondary btn-sm"
+          >
+            {showEveryone ? `Just ${currentStudioName ?? "my studio"}` : "Show the whole academy"}
+          </button>
+        )}
+      </PageHeader>
 
       <div className="space-y-6">
-        {[...byStudio, { value: "none", label: "No studio set", people: unassigned }]
-          .filter((group) => group.people.length > 0)
-          .map((group) => (
-            <section key={group.value}>
-              <h2 className="mb-2.5 text-sm font-semibold uppercase tracking-wide text-gray-500">
+        {groups.map((group) => (
+            <section key={group.key}>
+              <h2 className="mb-2.5 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-gray-500">
+                {group.color && (
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ background: group.color }}
+                  />
+                )}
                 {group.label}
+                <span className="font-normal normal-case text-gray-400">
+                  {group.people.length}
+                </span>
               </h2>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {group.people.map((person) => (
@@ -73,6 +122,10 @@ export function People() {
                       <Chip tone={person.role === "guide" ? "neutral" : "brand"} className="mt-1">
                         {person.role}
                       </Chip>
+                      {/* Only shown when the academy has turned addresses on. */}
+                      {person.email && (
+                        <div className="mt-1 truncate text-xs text-gray-500">{person.email}</div>
+                      )}
                       {person.currentPositions.length > 0 && (
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           {person.currentPositions.map((title) => (
@@ -102,18 +155,20 @@ type ProfileResponse = {
   person: {
     id: number;
     name: string;
-    email: string;
+    email: string | null;
     role: string;
-    studio: string | null;
+    studioId: number | null;
     bio: string | null;
     nga: string | null;
     avatarUrl: string | null;
     createdAt: string;
   };
+  studio: { id: number; name: string; color: string } | null;
   positions: {
     holder: { id: number; startedAt: string; endedAt: string | null; note: string | null };
     title: string;
     description: string | null;
+    studioId: number | null;
   }[];
   isSelf: boolean;
   canEdit: boolean;
@@ -121,6 +176,7 @@ type ProfileResponse = {
 
 export function Profile({ id }: { id: number }) {
   const [editing, setEditing] = useState(false);
+  const formatDate = useDateFormat();
 
   const query = useQuery<ProfileResponse>({
     queryKey: ["profile", id],
@@ -130,7 +186,7 @@ export function Profile({ id }: { id: number }) {
   if (query.isLoading) return <LoadingPage />;
   if (!query.data) return <Banner tone="error">No such person.</Banner>;
 
-  const { person, positions, canEdit } = query.data;
+  const { person, studio, positions, canEdit } = query.data;
   const current = positions.filter((entry) => !entry.holder.endedAt);
   const past = positions.filter((entry) => entry.holder.endedAt);
 
@@ -147,9 +203,12 @@ export function Profile({ id }: { id: number }) {
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">{person.name}</h1>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               <Chip tone={person.role === "guide" ? "neutral" : "brand"}>{person.role}</Chip>
-              {person.studio && (
-                <Chip>{STUDIOS.find((s) => s.value === person.studio)?.label ?? person.studio}</Chip>
+              {studio ? (
+                <StudioTag name={studio.name} color={studio.color} />
+              ) : (
+                <Chip>Not in a studio</Chip>
               )}
+              {person.email && <Chip>{person.email}</Chip>}
             </div>
             {person.nga && (
               <p className="mt-3 text-sm">
@@ -180,7 +239,7 @@ export function Profile({ id }: { id: number }) {
                 <li key={entry.holder.id} className="p-4">
                   <div className="font-medium text-gray-900">{entry.title}</div>
                   <div className="mt-0.5 text-xs text-gray-500">
-                    Since {new Date(entry.holder.startedAt).toLocaleDateString()}
+                    Since {formatDate(entry.holder.startedAt)}
                   </div>
                   {entry.holder.note && (
                     <p className="mt-1 text-xs text-gray-500">{entry.holder.note}</p>
@@ -203,8 +262,7 @@ export function Profile({ id }: { id: number }) {
                 <li key={entry.holder.id} className="p-4">
                   <div className="font-medium text-gray-900">{entry.title}</div>
                   <div className="mt-0.5 text-xs text-gray-500">
-                    {new Date(entry.holder.startedAt).toLocaleDateString()} —{" "}
-                    {new Date(entry.holder.endedAt!).toLocaleDateString()}
+                    {formatDate(entry.holder.startedAt)} — {formatDate(entry.holder.endedAt)}
                   </div>
                 </li>
               ))}
@@ -228,11 +286,12 @@ function EditProfileModal({
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const { refresh } = useSession();
+  const { refresh, studios, user, learnerNoun } = useSession();
+  const isAdmin = user?.role === "admin";
   const [name, setName] = useState(profile.person.name);
   const [bio, setBio] = useState(profile.person.bio ?? "");
   const [nga, setNga] = useState(profile.person.nga ?? "");
-  const [studio, setStudio] = useState(profile.person.studio ?? "");
+  const [studioId, setStudioId] = useState<number | null>(profile.person.studioId);
   const [avatarUrl, setAvatarUrl] = useState(profile.person.avatarUrl);
   const [error, setError] = useState<string | null>(null);
 
@@ -242,12 +301,14 @@ function EditProfileModal({
         name: name.trim(),
         bio: bio.trim() || null,
         nga: nga.trim() || null,
-        studio: studio || null,
         avatarUrl,
+        // Moving someone between studios changes what they can vote on, so only
+        // an admin sends this field at all.
+        ...(isAdmin ? { studioId } : {}),
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["profile", profile.person.id] });
-      await queryClient.invalidateQueries({ queryKey: ["people"] });
+      await queryClient.invalidateQueries({ queryKey: ["people-all"] });
       if (profile.isSelf) await refresh();
       onClose();
     },
@@ -316,24 +377,42 @@ function EditProfileModal({
           />
         </div>
 
-        <div>
-          <label className="label" htmlFor="profile-studio">
-            Studio
-          </label>
-          <select
-            id="profile-studio"
-            className="input"
-            value={studio}
-            onChange={(event) => setStudio(event.target.value)}
-          >
-            <option value="">Not set</option>
-            {STUDIOS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </div>
+        {isAdmin ? (
+          <div>
+            <label className="label" htmlFor="profile-studio">
+              Studio
+            </label>
+            <select
+              id="profile-studio"
+              className="input"
+              value={studioId ?? ""}
+              onChange={(event) =>
+                setStudioId(event.target.value === "" ? null : Number(event.target.value))
+              }
+            >
+              <option value="">Not in a studio</option>
+              {studios.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                  {option.ageRange ? ` (${option.ageRange})` : ""}
+                </option>
+              ))}
+            </select>
+            <p className="hint">
+              This decides which wiki they read, which Town Halls they're in, and which ballots
+              they can cast. Only an admin can change it.
+            </p>
+          </div>
+        ) : (
+          <div>
+            <span className="label">Studio</span>
+            <div className="input bg-gray-50 text-gray-500">
+              {studios.find((entry) => entry.id === profile.person.studioId)?.name ??
+                "Not in a studio"}
+            </div>
+            <p className="hint">Ask an admin if this is wrong.</p>
+          </div>
+        )}
 
         <div>
           <label className="label" htmlFor="profile-nga">
@@ -346,7 +425,9 @@ function EditProfileModal({
             onChange={(event) => setNga(event.target.value)}
             placeholder="Marine biology, or a bike shop, or still figuring it out"
           />
-          <p className="hint">Shows under your name when you run for a position.</p>
+          <p className="hint">
+            Shows under your name when you run for a position in your studio.
+          </p>
         </div>
 
         <div>

@@ -9,13 +9,14 @@ import {
   Pencil,
   Plus,
   Search,
+  Share2,
   Sparkles,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
 import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { useDateFormat, useSession } from "@/lib/session";
 import {
   Banner,
   Chip,
@@ -27,6 +28,9 @@ import {
   Spinner,
   type ChipTone,
 } from "@/components/ui";
+import { StudioTag } from "@/components/StudioSwitcher";
+import { StudioPicker } from "@/components/StudioPicker";
+import { SharedWithNote, SharedWithPicker } from "@/components/SharedWithPicker";
 import { JobProgress, useJob } from "@/components/JobStatus";
 
 type Rule = {
@@ -42,6 +46,12 @@ type Rule = {
 
 type Section = {
   id: number;
+  studioId: number | null;
+  studioName: string | null;
+  studioColor: string | null;
+  shared: boolean;
+  sharedStudioIds: number[];
+  sharedWith: string[];
   title: string;
   slug: string;
   summary: string | null;
@@ -50,6 +60,7 @@ type Section = {
 
 type Finding = {
   id: number;
+  studioId: number | null;
   type: string;
   severity: string;
   title: string;
@@ -64,6 +75,7 @@ type Doc = {
   filename: string;
   sizeBytes: number;
   status: string;
+  studioId: number | null;
   createdAt: string;
   uploaderName: string | null;
   characters: number;
@@ -84,7 +96,7 @@ const FINDING_LABEL: Record<string, string> = {
 };
 
 export function Wiki() {
-  const { can } = useSession();
+  const { can, studio, studioId } = useSession();
   const queryClient = useQueryClient();
 
   const [search, setSearch] = useState("");
@@ -93,17 +105,22 @@ export function Wiki() {
   const [docsOpen, setDocsOpen] = useState(false);
   const [editing, setEditing] = useState<Rule | null>(null);
   const [creatingIn, setCreatingIn] = useState<Section | null>(null);
+  const [addingSection, setAddingSection] = useState(false);
+  const [sharingSection, setSharingSection] = useState<Section | null>(null);
   const [historyFor, setHistoryFor] = useState<Rule | null>(null);
   const [jobId, setJobId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const wiki = useQuery<{ sections: Section[]; counts: { active: number; repealed: number } }>({
-    queryKey: ["wiki", showRepealed],
+  const wiki = useQuery<{
+    sections: Section[];
+    counts: { active: number; repealed: number; shared: number };
+  }>({
+    queryKey: ["wiki", showRepealed, studioId],
     queryFn: () => apiGet(`/wiki?includeRepealed=${showRepealed}`),
   });
 
   const findings = useQuery<{ findings: Finding[] }>({
-    queryKey: ["findings"],
+    queryKey: ["findings", studioId],
     queryFn: () => apiGet("/wiki/findings?status=open"),
   });
 
@@ -121,7 +138,7 @@ export function Wiki() {
   }
 
   const build = useMutation({
-    mutationFn: () => apiPost<{ jobId: number }>("/wiki/build"),
+    mutationFn: () => apiPost<{ jobId: number }>("/wiki/build", { studioId }),
     onSuccess: (data) => {
       setJobId(data.jobId);
       setError(null);
@@ -159,15 +176,26 @@ export function Wiki() {
   return (
     <>
       <PageHeader
-        title="Wiki"
+        title={studio ? `${studio.name} — Wiki` : "Wiki"}
         subtitle={
           isEmpty
-            ? "The studio's rules, once they're in here."
+            ? studio
+              ? `${studio.name}'s rules, once they're in here.`
+              : "Each studio's rules, once they're in here."
             : `${wiki.data?.counts.active ?? 0} rules in force${
                 wiki.data?.counts.repealed ? `, ${wiki.data.counts.repealed} repealed` : ""
+              }${
+                wiki.data?.counts.shared
+                  ? ` · ${wiki.data.counts.shared} academy-wide section${wiki.data.counts.shared === 1 ? "" : "s"}`
+                  : ""
               }.`
         }
       >
+        {can("wiki.edit") && !isEmpty && (
+          <button onClick={() => setAddingSection(true)} className="btn-secondary">
+            <Plus className="h-4 w-4" /> Section
+          </button>
+        )}
         {can("documents.upload") && (
           <button onClick={() => setDocsOpen(true)} className="btn-secondary">
             <FileText className="h-4 w-4" /> Documents
@@ -176,7 +204,17 @@ export function Wiki() {
         {can("wiki.ai_build") && (
           <button
             onClick={() => build.mutate()}
-            disabled={build.isPending || job?.status === "running" || job?.status === "queued"}
+            disabled={
+              build.isPending ||
+              studioId === null ||
+              job?.status === "running" ||
+              job?.status === "queued"
+            }
+            title={
+              studioId === null
+                ? "Pick a studio first — the AI builds one studio's wiki at a time."
+                : undefined
+            }
             className="btn-primary"
           >
             {build.isPending ? <Spinner /> : <Sparkles className="h-4 w-4" />}
@@ -187,6 +225,13 @@ export function Wiki() {
 
       <div className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
+        {studioId === null && can("wiki.ai_build") && (
+          <Banner tone="info" title="You're looking at every studio at once">
+            Rules from each studio are shown together, tagged with where they came from. Switch to
+            a single studio to build or rebuild its wiki — the AI works on one Contract at a time,
+            which is what keeps Spark's rules out of Launchpad's.
+          </Banner>
+        )}
         {job && <JobProgress job={job} />}
 
         {openFindings.length > 0 && <FindingsPanel findings={openFindings} />}
@@ -194,18 +239,20 @@ export function Wiki() {
         {isEmpty ? (
           <EmptyState
             icon={BookOpen}
-            title="Nothing in the wiki yet"
+            title={studio ? `${studio.name} has no rules recorded yet` : "Nothing in the wiki yet"}
             action={
               can("documents.upload") ? (
                 <button onClick={() => setDocsOpen(true)} className="btn-primary">
-                  <Upload className="h-4 w-4" /> Upload your documents
+                  <Upload className="h-4 w-4" /> Upload {studio ? `${studio.name}'s` : "your"}{" "}
+                  documents
                 </button>
               ) : undefined
             }
           >
-            Upload the studio's existing rule documents — the Google Docs, the contract, the ROE —
-            and Claude will read them, organize them into one wiki, and tell you where they
-            contradict each other.
+            Upload {studio ? `${studio.name}'s` : "the studio's"} existing rule documents — the
+            Google Docs, the Contract, the ROE — and Claude will read them, organize them into one
+            wiki, and tell you where they contradict each other. Each studio's documents are read
+            separately, so nothing bleeds between them.
           </EmptyState>
         ) : (
           <div className="flex flex-col gap-5 lg:flex-row">
@@ -235,13 +282,20 @@ export function Wiki() {
                   <button
                     key={section.id}
                     onClick={() => setActiveSection(section.id)}
-                    className={`flex w-full items-center justify-between gap-2 rounded-lg px-3 py-1.5 text-left text-sm ${
+                    className={`flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-sm ${
                       activeSection === section.id
                         ? "bg-brand-50 font-medium text-brand-700"
                         : "text-gray-600 hover:bg-gray-100"
                     }`}
                   >
-                    <span className="truncate">{section.title}</span>
+                    {/* A dot for the owning studio, so a mixed list stays legible. */}
+                    <span
+                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                        section.shared ? "ring-1 ring-gray-300" : ""
+                      }`}
+                      style={{ background: section.studioColor ?? "transparent" }}
+                    />
+                    <span className="min-w-0 flex-1 truncate">{section.title}</span>
                     <span className="shrink-0 text-xs text-gray-400">{section.rules.length}</span>
                   </button>
                 ))}
@@ -268,19 +322,41 @@ export function Wiki() {
                 <section key={section.id} className="card">
                   <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-5">
                     <div className="min-w-0">
-                      <h2 className="text-base font-bold text-gray-900">{section.title}</h2>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-base font-bold text-gray-900">{section.title}</h2>
+                        {/* Only worth saying when more than one studio is in view. */}
+                        {(studioId === null || section.shared) && (
+                          <StudioTag
+                            name={section.studioName}
+                            color={section.studioColor}
+                            shared={section.shared}
+                          />
+                        )}
+                        <SharedWithNote names={section.sharedWith} />
+                      </div>
                       {section.summary && (
                         <p className="mt-0.5 text-sm text-gray-500">{section.summary}</p>
                       )}
                     </div>
-                    {can("wiki.edit") && (
-                      <button
-                        onClick={() => setCreatingIn(section)}
-                        className="btn-ghost btn-sm shrink-0"
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Rule
-                      </button>
-                    )}
+                    <div className="flex shrink-0 gap-0.5">
+                      {can("academy.manage") && (
+                        <button
+                          onClick={() => setSharingSection(section)}
+                          className="btn-ghost btn-sm"
+                          title="Which studios share this section"
+                        >
+                          <Share2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                      {can("wiki.edit") && (
+                        <button
+                          onClick={() => setCreatingIn(section)}
+                          className="btn-ghost btn-sm"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> Rule
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {section.rules.length === 0 ? (
@@ -353,8 +429,172 @@ export function Wiki() {
       <DocumentsModal open={docsOpen} onClose={() => setDocsOpen(false)} />
       {editing && <RuleEditor rule={editing} onClose={() => setEditing(null)} />}
       {creatingIn && <RuleCreator section={creatingIn} onClose={() => setCreatingIn(null)} />}
+      {addingSection && <SectionCreator onClose={() => setAddingSection(false)} />}
+      {sharingSection && (
+        <SectionSharing section={sharingSection} onClose={() => setSharingSection(null)} />
+      )}
       {historyFor && <HistoryModal rule={historyFor} onClose={() => setHistoryFor(null)} />}
     </>
+  );
+}
+
+/* ------------------------------- sections --------------------------------- */
+
+function SectionCreator({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { studioId } = useSession();
+  const [title, setTitle] = useState("");
+  const [summary, setSummary] = useState("");
+  const [targetStudio, setTargetStudio] = useState<number | null | undefined>(
+    studioId === null ? undefined : studioId,
+  );
+  const [error, setError] = useState<string | null>(null);
+
+  const create = useMutation({
+    mutationFn: () =>
+      apiPost("/wiki/sections", {
+        title: title.trim(),
+        summary: summary.trim() || undefined,
+        ...(targetStudio === undefined ? {} : { studioId: targetStudio }),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["wiki"] });
+      onClose();
+    },
+    onError: (createError: Error) => setError(createError.message),
+  });
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Add a section"
+      description="A place in the Contract for rules of one kind."
+      footer={
+        <>
+          <button onClick={onClose} className="btn-secondary">
+            Cancel
+          </button>
+          <button
+            onClick={() => create.mutate()}
+            disabled={create.isPending || title.trim().length < 2 || targetStudio === undefined}
+            className="btn-primary"
+          >
+            {create.isPending && <Spinner />} Add section
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {error && <Banner tone="error">{error}</Banner>}
+        <div>
+          <label className="label" htmlFor="section-title">
+            Title
+          </label>
+          <input
+            id="section-title"
+            className="input"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Hero Bucks & Accountability"
+            autoFocus
+          />
+        </div>
+        <div>
+          <label className="label" htmlFor="section-summary">
+            What goes in here (optional)
+          </label>
+          <input
+            id="section-summary"
+            className="input"
+            value={summary}
+            onChange={(event) => setSummary(event.target.value)}
+            placeholder="How Hero Bucks are earned, spent and appealed."
+          />
+        </div>
+        <StudioPicker value={targetStudio} onChange={setTargetStudio} />
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Who this section belongs to, and who else sees it.
+ *
+ * Kept separate from the rule editor because moving a section between studios
+ * changes who a whole set of rules governs - that deserves its own decision,
+ * not a field buried in a form someone opened to fix a typo.
+ */
+function SectionSharing({ section, onClose }: { section: Section; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const { studios } = useSession();
+  const [owner, setOwner] = useState<number | null>(section.studioId);
+  const [sharedWith, setSharedWith] = useState<number[]>(section.sharedStudioIds ?? []);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = useMutation({
+    mutationFn: () =>
+      apiPatch(`/wiki/sections/${section.id}`, {
+        studioId: owner,
+        sharedStudioIds: owner === null ? [] : sharedWith.filter((id) => id !== owner),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["wiki"] });
+      onClose();
+    },
+    onError: (saveError: Error) => setError(saveError.message),
+  });
+
+  const ruleCount = section.rules.length;
+  const ownerName = studios.find((entry) => entry.id === owner)?.name;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Who sees "${section.title}"?`}
+      description={`${ruleCount} rule${ruleCount === 1 ? "" : "s"} in this section.`}
+      footer={
+        <>
+          <button onClick={onClose} className="btn-secondary">
+            Cancel
+          </button>
+          <button onClick={() => save.mutate()} disabled={save.isPending} className="btn-primary">
+            {save.isPending && <Spinner />} Save
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {error && <Banner tone="error">{error}</Banner>}
+
+        <StudioPicker
+          value={owner}
+          onChange={setOwner}
+          label="This section belongs to"
+          hint="The studio whose Contract these rules are part of, and whose Town Hall can change them."
+        />
+
+        <SharedWithPicker
+          ownerStudioId={owner}
+          value={sharedWith}
+          onChange={setSharedWith}
+          noun="section"
+        />
+
+        {owner === null ? (
+          <Banner tone="warning">
+            Academy-wide means every studio sees these rules, including the youngest. A Town Hall in
+            one studio can't change them on its own — the AI will raise it as a finding instead.
+          </Banner>
+        ) : sharedWith.length > 0 ? (
+          <Banner tone="info">
+            {ownerName} owns these rules; the studios you picked read the same copy. If{" "}
+            {ownerName} changes one, it changes for all of them.
+          </Banner>
+        ) : null}
+      </div>
+    </Modal>
   );
 }
 
@@ -514,17 +754,24 @@ function ResolveFindingModal({
 /* ------------------------------- documents -------------------------------- */
 
 function DocumentsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { can } = useSession();
+  const { can, studioId, studios } = useSession();
   const queryClient = useQueryClient();
   const [uploading, setUploading] = useState(false);
   const [failures, setFailures] = useState<{ filename: string; reason: string }[]>([]);
+  const [targetStudio, setTargetStudio] = useState<number | null | undefined>(
+    studioId === null ? undefined : studioId,
+  );
   const inputRef = useRef<HTMLInputElement>(null);
+  const formatDate = useDateFormat();
 
   const docs = useQuery<{ documents: Doc[]; acceptedExtensions: string[] }>({
-    queryKey: ["documents"],
+    queryKey: ["documents", studioId],
     queryFn: () => apiGet("/wiki/documents"),
     enabled: open,
   });
+
+  const studioName = (id: number | null) =>
+    id === null ? "Academy-wide" : (studios.find((entry) => entry.id === id)?.name ?? "Another studio");
 
   async function upload(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -532,6 +779,10 @@ function DocumentsModal({ open, onClose }: { open: boolean; onClose: () => void 
     setFailures([]);
     const form = new FormData();
     for (const file of Array.from(files)) form.append("files", file);
+    // The studio rides along so the AI reads the right pile of documents later.
+    if (targetStudio !== undefined) {
+      form.append("studioId", targetStudio === null ? "null" : String(targetStudio));
+    }
     try {
       const result = await apiUpload<{ saved: string[]; failed: typeof failures }>(
         "/wiki/documents",
@@ -562,13 +813,28 @@ function DocumentsModal({ open, onClose }: { open: boolean; onClose: () => void 
       open={open}
       onClose={onClose}
       title="Source documents"
-      description="What the AI reads when it builds the wiki."
+      description="What the AI reads when it builds a studio's wiki. Each studio's pile is read on its own."
       wide
     >
       {can("documents.upload") && (
+        <div className="mb-4">
+          <StudioPicker
+            value={targetStudio}
+            onChange={setTargetStudio}
+            label="These documents belong to"
+            hint="The AI only reads a studio's own documents, plus anything filed academy-wide."
+          />
+        </div>
+      )}
+
+      {can("documents.upload") && (
         <label
-          className={`mb-4 flex cursor-pointer flex-col items-center rounded-xl border-2 border-dashed p-8 text-center transition ${
-            uploading ? "border-brand-300 bg-brand-50" : "border-gray-300 hover:border-brand-400"
+          className={`mb-4 flex flex-col items-center rounded-xl border-2 border-dashed p-8 text-center transition ${
+            targetStudio === undefined
+              ? "cursor-not-allowed border-gray-200 opacity-60"
+              : uploading
+                ? "cursor-pointer border-brand-300 bg-brand-50"
+                : "cursor-pointer border-gray-300 hover:border-brand-400"
           }`}
         >
           {uploading ? (
@@ -577,7 +843,11 @@ function DocumentsModal({ open, onClose }: { open: boolean; onClose: () => void 
             <Upload className="h-6 w-6 text-gray-400" />
           )}
           <span className="mt-2.5 text-sm font-medium text-gray-900">
-            {uploading ? "Reading files..." : "Drop files here or click to choose"}
+            {targetStudio === undefined
+              ? "Choose a studio above first"
+              : uploading
+                ? "Reading files..."
+                : "Drop files here or click to choose"}
           </span>
           <span className="mt-1 text-xs text-gray-500">
             .docx, .md, .txt, .html, .rtf and friends. From Google Docs use File → Download.
@@ -587,7 +857,7 @@ function DocumentsModal({ open, onClose }: { open: boolean; onClose: () => void 
             type="file"
             multiple
             className="hidden"
-            disabled={uploading}
+            disabled={uploading || targetStudio === undefined}
             onChange={(event) => upload(event.target.files)}
           />
         </label>
@@ -617,10 +887,16 @@ function DocumentsModal({ open, onClose }: { open: boolean; onClose: () => void 
             <li key={doc.id} className="flex items-center gap-3 py-3">
               <FileText className="h-4 w-4 shrink-0 text-gray-400" />
               <div className="min-w-0 flex-1">
-                <div className="truncate text-sm font-medium text-gray-900">{doc.filename}</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="truncate text-sm font-medium text-gray-900">{doc.filename}</span>
+                  <Chip tone={doc.studioId === null ? "neutral" : "brand"}>
+                    {studioName(doc.studioId)}
+                  </Chip>
+                </div>
                 <div className="text-xs text-gray-500">
                   {(doc.characters / 1000).toFixed(1)}k characters
                   {doc.uploaderName && ` · ${doc.uploaderName}`}
+                  {` · ${formatDate(doc.createdAt)}`}
                   {doc.status === "included" && " · read by the AI"}
                 </div>
               </div>
@@ -645,6 +921,8 @@ function DocumentsModal({ open, onClose }: { open: boolean; onClose: () => void 
 
 function RuleEditor({ rule, onClose }: { rule: Rule; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { settings } = useSession();
+  const rationaleRequired = settings.governance.requireRationaleOnEdits;
   const [title, setTitle] = useState(rule.title);
   const [body, setBody] = useState(rule.body);
   const [rationale, setRationale] = useState("");
@@ -679,7 +957,12 @@ function RuleEditor({ rule, onClose }: { rule: Rule; onClose: () => void }) {
         <>
           <button
             onClick={() => repeal.mutate()}
-            disabled={repeal.isPending}
+            disabled={repeal.isPending || (rationaleRequired && !rationale.trim())}
+            title={
+              rationaleRequired && !rationale.trim()
+                ? "Say why you're repealing it first."
+                : undefined
+            }
             className="btn-danger mr-auto"
           >
             {repeal.isPending && <Spinner />} Repeal
@@ -687,7 +970,11 @@ function RuleEditor({ rule, onClose }: { rule: Rule; onClose: () => void }) {
           <button onClick={onClose} className="btn-secondary">
             Cancel
           </button>
-          <button onClick={() => save.mutate()} disabled={save.isPending} className="btn-primary">
+          <button
+            onClick={() => save.mutate()}
+            disabled={save.isPending || (rationaleRequired && !rationale.trim())}
+            className="btn-primary"
+          >
             {save.isPending && <Spinner />} Save
           </button>
         </>
@@ -721,6 +1008,7 @@ function RuleEditor({ rule, onClose }: { rule: Rule; onClose: () => void }) {
         <div>
           <label className="label" htmlFor="rule-why">
             Why are you changing this?
+            {rationaleRequired && <span className="ml-1 text-red-600">*</span>}
           </label>
           <input
             id="rule-why"
@@ -728,9 +1016,11 @@ function RuleEditor({ rule, onClose }: { rule: Rule; onClose: () => void }) {
             value={rationale}
             onChange={(event) => setRationale(event.target.value)}
             placeholder="Town Hall voted to raise the appeal cost"
+            required={rationaleRequired}
           />
           <p className="hint">
             Goes into the rule's history. Someone reading this in a year will want to know.
+            {rationaleRequired && " This academy requires it on every change."}
           </p>
         </div>
       </div>

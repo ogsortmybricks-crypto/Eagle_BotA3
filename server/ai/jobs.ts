@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
+  academies,
   aiFindings,
   aiJobs,
   candidates,
@@ -8,6 +9,7 @@ import {
   elections,
   meetingItems,
   meetings,
+  studios,
   users,
   votes,
   wikiRevisions,
@@ -17,12 +19,13 @@ import {
 } from "@shared/schema";
 import { logActivity } from "../activity";
 import { askClaude, describeAiError } from "./client";
-import { renderPositionsContext, renderWikiContext } from "./context";
 import {
-  APPLY_ELECTION_SYSTEM,
-  BUILD_WIKI_SYSTEM,
-  PROCESS_MEETING_SYSTEM,
-} from "./prompts";
+  loadStudio,
+  renderPositionsContext,
+  renderStudioContext,
+  renderWikiContext,
+} from "./context";
+import { buildSystemPrompt, type PromptOptions } from "./prompts";
 import {
   applyElectionResult,
   buildWikiResult,
@@ -30,16 +33,21 @@ import {
   type WikiOperation,
 } from "./schemas";
 import { applyOperations, saveFindings, savePositions, slugify } from "./apply";
+import { effectiveForStudio, studioFilter, type StudioScope } from "../studio";
+import { resolveSettings, type AcademySettings } from "@shared/settings";
+import { meetingProcessedEmail, sendMail } from "../mailer";
+import { env } from "../env";
 
 /**
  * Jobs run in-process, detached from the request that started them, and report
  * progress through the `ai_jobs` table. The admin Status page polls that table,
  * which is what "see what the AI is waiting on" means in practice.
  *
- * A single Node process is the right call here: an academy runs at most a
- * handful of these a week, and a real queue would be infrastructure nobody
- * asked for. The tradeoff is that a job in flight during a restart is lost -
- * `recoverStuckJobs` marks those failed on boot so they never hang forever.
+ * Every job carries a studio. That is the boundary the AI works inside: it
+ * reads that studio's documents and wiki, and writes back only there. A single
+ * Node process is the right call for the queue itself - an academy runs at most
+ * a handful of these a week - with `recoverStuckJobs` cleaning up after a
+ * restart so a job in flight never hangs forever.
  */
 
 async function updateJob(id: number, patch: Partial<AiJob>) {
@@ -48,6 +56,7 @@ async function updateJob(id: number, patch: Partial<AiJob>) {
 
 export async function createJob(opts: {
   academyId: number;
+  studioId: number | null;
   kind: "build_wiki" | "process_meeting" | "apply_election";
   requestedBy: number | null;
   meetingId?: number | null;
@@ -59,6 +68,7 @@ export async function createJob(opts: {
     .insert(aiJobs)
     .values({
       academyId: opts.academyId,
+      studioId: opts.studioId,
       kind: opts.kind,
       status: "queued",
       message: opts.message,
@@ -77,7 +87,8 @@ export async function recoverStuckJobs() {
     .update(aiJobs)
     .set({
       status: "failed",
-      error: "The server restarted while this job was running. Nothing was written to the wiki - run it again.",
+      error:
+        "The server restarted while this job was running. Nothing was written to the wiki - run it again.",
       finishedAt: new Date(),
     })
     .where(inArray(aiJobs.status, ["queued", "running"]))
@@ -103,6 +114,7 @@ function runDetached(job: AiJob, work: () => Promise<void>) {
       });
       await logActivity({
         academyId: job.academyId,
+        studioId: job.studioId,
         actorType: "ai",
         actorLabel: "Eagle Bot AI",
         action: `ai.${job.kind}.failed`,
@@ -114,20 +126,66 @@ function runDetached(job: AiJob, work: () => Promise<void>) {
   })();
 }
 
+/**
+ * Loads everything a run needs about the academy and the studio it's for:
+ * settings, the studio row, and the prompt options those imply.
+ */
+async function runContext(job: AiJob): Promise<{
+  settings: AcademySettings;
+  academyName: string;
+  accent: string;
+  studioName: string | null;
+  promptOptions: PromptOptions;
+  maxTokens: number;
+  effort: AcademySettings["ai"]["effort"];
+}> {
+  const [academy] = await db.select().from(academies).where(eq(academies.id, job.academyId)).limit(1);
+  const settings = resolveSettings(academy?.settings);
+  const studio = await loadStudio(job.studioId);
+  const effective = await effectiveForStudio(job.studioId, settings);
+
+  return {
+    settings,
+    academyName: academy?.name ?? "the academy",
+    accent: academy?.palette.accent ?? "#0284c7",
+    studioName: studio?.name ?? null,
+    promptOptions: {
+      studioContext: renderStudioContext(studio, academy?.learnerNoun ?? "Hero"),
+      extraGuidance: effective.aiGuidance,
+      autoRepealContradictions: settings.ai.autoRepealContradictions,
+      proposeElections: settings.ai.proposeElections,
+      detectPositions: settings.ai.detectPositions,
+    },
+    maxTokens: settings.ai.maxOutputTokens,
+    effort: settings.ai.effort,
+  };
+}
+
 /* -------------------------------------------------------------------------- */
 /*  build_wiki                                                                 */
 /* -------------------------------------------------------------------------- */
 
 export function startBuildWiki(job: AiJob) {
   runDetached(job, async () => {
+    const context = await runContext(job);
+
+    // This studio's documents, plus anything filed against the whole academy.
+    const studioCondition =
+      job.studioId === null
+        ? undefined
+        : or(eq(documents.studioId, job.studioId), isNull(documents.studioId));
     const docs = await db
       .select()
       .from(documents)
-      .where(eq(documents.academyId, job.academyId))
+      .where(
+        studioCondition
+          ? and(eq(documents.academyId, job.academyId), studioCondition)
+          : eq(documents.academyId, job.academyId),
+      )
       .orderBy(asc(documents.id));
 
     if (docs.length === 0) {
-      throw new Error("There are no documents to read. Upload something first.");
+      throw new Error("There are no documents to read for this studio. Upload something first.");
     }
 
     await updateJob(job.id, {
@@ -138,22 +196,24 @@ export function startBuildWiki(job: AiJob) {
     const corpus = docs
       .map(
         (doc, i) =>
-          `<document index="${i + 1}" filename="${doc.filename}" uploaded="${doc.createdAt.toISOString().slice(0, 10)}">\n${doc.content}\n</document>`,
+          `<document index="${i + 1}" filename="${doc.filename}" uploaded="${doc.createdAt.toISOString().slice(0, 10)}"${
+            doc.studioId === null ? ' scope="academy-wide"' : ""
+          }>\n${doc.content}\n</document>`,
       )
       .join("\n\n");
 
-    const existingWiki = await renderWikiContext(job.academyId);
-    const hasExisting = !existingWiki.includes("(The wiki is empty");
+    const existingWiki = await renderWikiContext(job.academyId, job.studioId);
+    const hasExisting = !existingWiki.includes("has no wiki yet");
 
     const { data, usage } = await askClaude({
-      system: BUILD_WIKI_SYSTEM,
+      system: buildSystemPrompt("build_wiki", context.promptOptions),
       cachedContext: `# Uploaded documents\n\n${corpus}`,
       prompt: hasExisting
-        ? `Build the wiki from the documents above.\n\nNote that a wiki already exists. Do not duplicate rules it already contains - focus on what the documents add, and raise findings where the documents and the existing wiki disagree.\n\n${existingWiki}`
-        : "Build the wiki from the documents above. This studio has no wiki yet, so everything you produce is new.",
+        ? `Build this studio's wiki from the documents above.\n\nNote that a wiki already exists for this studio. Do not duplicate rules it already contains - focus on what the documents add, and raise findings where the documents and the existing wiki disagree.\n\n${existingWiki}`
+        : "Build this studio's wiki from the documents above. It has no wiki yet, so everything you produce is new.",
       schema: buildWikiResult,
-      maxTokens: 48000,
-      effort: "high",
+      maxTokens: context.maxTokens,
+      effort: context.effort,
       onProgress: (chars) => {
         const pct = Math.min(85, 20 + Math.floor(chars / 900));
         void updateJob(job.id, { progress: pct, message: "Claude is writing the wiki..." });
@@ -170,6 +230,7 @@ export function startBuildWiki(job: AiJob) {
         .insert(wikiSections)
         .values({
           academyId: job.academyId,
+          studioId: job.studioId,
           title: spec.title,
           slug: `${slugify(spec.key || spec.title)}`,
           summary: spec.summary,
@@ -235,15 +296,19 @@ export function startBuildWiki(job: AiJob) {
       });
     }
 
-    const positionsAdded = await savePositions({
-      academyId: job.academyId,
-      positions: data.positions,
-      sourceType: "document",
-      sourceRef: String(job.id),
-    });
+    const positionsAdded = context.settings.ai.detectPositions
+      ? await savePositions({
+          academyId: job.academyId,
+          studioId: job.studioId,
+          positions: data.positions,
+          sourceType: "document",
+          sourceRef: String(job.id),
+        })
+      : 0;
 
     const findingsAdded = await saveFindings({
       academyId: job.academyId,
+      studioId: job.studioId,
       findings: data.findings,
       sourceType: "document",
       sourceRef: String(job.id),
@@ -251,19 +316,26 @@ export function startBuildWiki(job: AiJob) {
       ruleKeyMap,
     });
 
+    // Only the documents this run actually read get marked as included.
     await db
       .update(documents)
       .set({ status: "included" })
-      .where(eq(documents.academyId, job.academyId));
+      .where(
+        inArray(
+          documents.id,
+          docs.map((doc) => doc.id),
+        ),
+      );
 
     const openFindings = data.findings.length;
+    const where = context.studioName ?? "the academy";
     await updateJob(job.id, {
       status: openFindings > 0 ? "awaiting_input" : "succeeded",
       awaitingReason:
         openFindings > 0
-          ? `${openFindings} thing${openFindings === 1 ? "" : "s"} need a human decision before the wiki is trustworthy.`
+          ? `${openFindings} thing${openFindings === 1 ? "" : "s"} need a human decision before ${where}'s wiki is trustworthy.`
           : null,
-      message: `Wrote ${data.rules.length} rules across ${data.sections.length} sections.`,
+      message: `Wrote ${data.rules.length} rules across ${data.sections.length} sections for ${where}.`,
       progress: 100,
       finishedAt: new Date(),
       inputTokens: usage.inputTokens,
@@ -274,18 +346,20 @@ export function startBuildWiki(job: AiJob) {
         rules: data.rules.length,
         positions: positionsAdded,
         findings: findingsAdded,
+        studio: context.studioName,
       },
     });
 
     await logActivity({
       academyId: job.academyId,
+      studioId: job.studioId,
       actorUserId: job.requestedBy,
       actorType: "ai",
       actorLabel: "Eagle Bot AI",
       action: "wiki.built",
       entityType: "ai_job",
       entityId: job.id,
-      summary: `Built the wiki from ${docs.length} document${docs.length === 1 ? "" : "s"}: ${data.rules.length} rules, ${data.sections.length} sections, ${findingsAdded} thing${findingsAdded === 1 ? "" : "s"} flagged.`,
+      summary: `Built ${where}'s wiki from ${docs.length} document${docs.length === 1 ? "" : "s"}: ${data.rules.length} rules, ${data.sections.length} sections, ${findingsAdded} thing${findingsAdded === 1 ? "" : "s"} flagged.`,
       metadata: { rules: data.rules.length, findings: findingsAdded },
     });
   });
@@ -297,6 +371,8 @@ export function startBuildWiki(job: AiJob) {
 
 export function startProcessMeeting(job: AiJob, meetingId: number) {
   runDetached(job, async () => {
+    const context = await runContext(job);
+
     const [meeting] = await db.select().from(meetings).where(eq(meetings.id, meetingId)).limit(1);
     if (!meeting) throw new Error("That meeting no longer exists.");
 
@@ -320,6 +396,7 @@ export function startProcessMeeting(job: AiJob, meetingId: number) {
 
     const notesText = [
       `# Town Hall: ${meeting.title}`,
+      context.studioName ? `Studio: ${context.studioName}` : "Scope: the whole academy",
       `Date: ${meeting.meetingDate.toISOString().slice(0, 10)}`,
       meeting.secretaryId ? `Secretary: ${nameById.get(meeting.secretaryId) ?? "unknown"}` : "",
       `Attendance: ${(meeting.attendance ?? []).length} present`,
@@ -347,16 +424,18 @@ export function startProcessMeeting(job: AiJob, meetingId: number) {
       .filter(Boolean)
       .join("\n");
 
-    const wikiContext = await renderWikiContext(job.academyId);
-    const positionsContext = await renderPositionsContext(job.academyId);
+    const wikiContext = await renderWikiContext(job.academyId, job.studioId);
+    const positionsContext = await renderPositionsContext(job.academyId, job.studioId);
 
     const { data, usage } = await askClaude({
-      system: PROCESS_MEETING_SYSTEM,
+      system: buildSystemPrompt("process_meeting", context.promptOptions),
       cachedContext: `${wikiContext}\n\n${positionsContext}`,
-      prompt: `Here are the notes from the Town Hall that just finished. Update the wiki to match what was decided.\n\n${notesText}`,
+      prompt: `Here are the notes from the Town Hall that just finished${
+        context.studioName ? ` in ${context.studioName}` : ""
+      }. Update the wiki to match what was decided.\n\n${notesText}`,
       schema: processMeetingResult,
-      maxTokens: 32000,
-      effort: "high",
+      maxTokens: context.maxTokens,
+      effort: context.effort,
       onProgress: (chars) => {
         const pct = Math.min(85, 25 + Math.floor(chars / 500));
         void updateJob(job.id, { progress: pct, message: "Claude is updating the wiki..." });
@@ -367,6 +446,7 @@ export function startProcessMeeting(job: AiJob, meetingId: number) {
 
     const outcome = await applyOperations({
       academyId: job.academyId,
+      studioId: job.studioId,
       operations: data.operations as WikiOperation[],
       actorUserId: job.requestedBy,
       actorType: "ai",
@@ -375,15 +455,19 @@ export function startProcessMeeting(job: AiJob, meetingId: number) {
       jobId: job.id,
     });
 
-    const positionsAdded = await savePositions({
-      academyId: job.academyId,
-      positions: data.newPositions,
-      sourceType: "town_hall",
-      sourceRef: String(meetingId),
-    });
+    const positionsAdded = context.settings.ai.detectPositions
+      ? await savePositions({
+          academyId: job.academyId,
+          studioId: job.studioId,
+          positions: data.newPositions,
+          sourceType: "town_hall",
+          sourceRef: String(meetingId),
+        })
+      : 0;
 
     await saveFindings({
       academyId: job.academyId,
+      studioId: job.studioId,
       findings: data.findings,
       sourceType: "town_hall",
       sourceRef: String(meetingId),
@@ -391,32 +475,35 @@ export function startProcessMeeting(job: AiJob, meetingId: number) {
     });
 
     // Proposed elections are never created automatically - the studio decides.
+    const proposals = context.settings.ai.proposeElections ? data.proposedElections : [];
     const needsDecision =
-      data.proposedElections.length > 0 ||
-      data.unresolvedQuestions.length > 0 ||
-      outcome.skipped.length > 0;
+      proposals.length > 0 || data.unresolvedQuestions.length > 0 || outcome.skipped.length > 0;
 
     await db
       .update(meetings)
       .set({ status: "processed", processedAt: new Date(), lastJobId: job.id })
       .where(eq(meetings.id, meetingId));
 
+    const changeLine = `${outcome.created} added, ${outcome.amended} amended, ${outcome.repealed} repealed.`;
+
     await updateJob(job.id, {
       status: needsDecision ? "awaiting_input" : "succeeded",
       awaitingReason: needsDecision
         ? [
-            data.proposedElections.length > 0
-              ? `${data.proposedElections.length} election${data.proposedElections.length === 1 ? "" : "s"} to approve or skip`
+            proposals.length > 0
+              ? `${proposals.length} election${proposals.length === 1 ? "" : "s"} to approve or skip`
               : null,
             data.unresolvedQuestions.length > 0
               ? `${data.unresolvedQuestions.length} question${data.unresolvedQuestions.length === 1 ? "" : "s"} for the secretary`
               : null,
-            outcome.skipped.length > 0 ? `${outcome.skipped.length} operation(s) couldn't be applied` : null,
+            outcome.skipped.length > 0
+              ? `${outcome.skipped.length} operation(s) couldn't be applied`
+              : null,
           ]
             .filter(Boolean)
             .join("; ")
         : null,
-      message: `${outcome.created} added, ${outcome.amended} amended, ${outcome.repealed} repealed.`,
+      message: changeLine,
       progress: 100,
       finishedAt: new Date(),
       inputTokens: usage.inputTokens,
@@ -425,23 +512,61 @@ export function startProcessMeeting(job: AiJob, meetingId: number) {
         summary: data.summary,
         ...outcome,
         positionsAdded,
-        proposedElections: data.proposedElections,
+        proposedElections: proposals,
         unresolvedQuestions: data.unresolvedQuestions,
+        studio: context.studioName,
       },
     });
 
+    if (context.settings.notifications.emailOnMeetingProcessed) {
+      void notifyMeetingProcessed(job, meeting.title, data.summary, changeLine, context).catch(
+        (error) => console.error("[ai] meeting-processed notify failed", error),
+      );
+    }
+
     await logActivity({
       academyId: job.academyId,
+      studioId: job.studioId,
       actorUserId: job.requestedBy,
       actorType: "ai",
       actorLabel: "Eagle Bot AI",
       action: "townhall.processed",
       entityType: "meeting",
       entityId: meetingId,
-      summary: `Processed "${meeting.title}": ${outcome.created} rules added, ${outcome.amended} amended, ${outcome.repealed} repealed.`,
+      summary: `Processed "${meeting.title}": ${changeLine}`,
       metadata: { jobId: job.id, ...outcome },
     });
   });
+}
+
+/** Tells the studio its Contract moved. Only the studio that met, not everyone. */
+async function notifyMeetingProcessed(
+  job: AiJob,
+  title: string,
+  summary: string,
+  changes: string,
+  context: Awaited<ReturnType<typeof runContext>>,
+) {
+  const recipients = (
+    await db
+      .select({ email: users.email, studioId: users.studioId })
+      .from(users)
+      .where(and(eq(users.academyId, job.academyId), eq(users.active, true)))
+  ).filter((person) => job.studioId === null || person.studioId === job.studioId);
+
+  const mail = meetingProcessedEmail({
+    academyName: context.academyName,
+    studioName: context.studioName,
+    accent: context.accent,
+    title,
+    summary,
+    changes,
+    link: `${env.appUrl}/town-hall/${job.meetingId}`,
+  });
+
+  for (const person of recipients) {
+    await sendMail({ to: person.email, ...mail });
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -450,6 +575,8 @@ export function startProcessMeeting(job: AiJob, meetingId: number) {
 
 export function startApplyElection(job: AiJob, electionId: number) {
   runDetached(job, async () => {
+    const context = await runContext(job);
+
     const [election] = await db.select().from(elections).where(eq(elections.id, electionId)).limit(1);
     if (!election) throw new Error("That election no longer exists.");
 
@@ -475,13 +602,13 @@ export function startApplyElection(job: AiJob, electionId: number) {
 
     await updateJob(job.id, { message: "Recording the outcome in the wiki...", progress: 25 });
 
-    const wikiContext = await renderWikiContext(job.academyId);
+    const wikiContext = await renderWikiContext(job.academyId, job.studioId);
 
     const { data, usage } = await askClaude({
-      system: APPLY_ELECTION_SYSTEM,
+      system: buildSystemPrompt("apply_election", context.promptOptions),
       cachedContext: wikiContext,
       prompt: [
-        `A rule election has closed and been certified.`,
+        `A rule election has closed and been certified${context.studioName ? ` in ${context.studioName}` : ""}.`,
         ``,
         `**Title:** ${election.title}`,
         election.description ? `**Description:** ${election.description}` : "",
@@ -499,12 +626,13 @@ export function startApplyElection(job: AiJob, electionId: number) {
         .filter((line) => line !== undefined)
         .join("\n"),
       schema: applyElectionResult,
-      maxTokens: 16000,
-      effort: "high",
+      maxTokens: context.maxTokens,
+      effort: context.effort,
     });
 
     const outcome = await applyOperations({
       academyId: job.academyId,
+      studioId: job.studioId,
       operations: data.operations as WikiOperation[],
       actorUserId: job.requestedBy,
       actorType: "ai",
@@ -515,6 +643,7 @@ export function startApplyElection(job: AiJob, electionId: number) {
 
     await saveFindings({
       academyId: job.academyId,
+      studioId: job.studioId,
       findings: data.findings,
       sourceType: "election",
       sourceRef: String(electionId),
@@ -528,11 +657,12 @@ export function startApplyElection(job: AiJob, electionId: number) {
       finishedAt: new Date(),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      result: { summary: data.summary, passed, results, ...outcome },
+      result: { summary: data.summary, passed, results, ...outcome, studio: context.studioName },
     });
 
     await logActivity({
       academyId: job.academyId,
+      studioId: job.studioId,
       actorUserId: job.requestedBy,
       actorType: "ai",
       actorLabel: "Eagle Bot AI",
@@ -549,37 +679,64 @@ export function startApplyElection(job: AiJob, electionId: number) {
 /*  Status feed for the admin page                                             */
 /* -------------------------------------------------------------------------- */
 
-export async function getStatusSnapshot(academyId: number) {
+export async function getStatusSnapshot(academyId: number, scope: StudioScope) {
+  const jobFilter = studioFilter(aiJobs.studioId, scope);
   const jobs = await db
-    .select()
+    .select({ job: aiJobs, studioName: studios.name })
     .from(aiJobs)
-    .where(eq(aiJobs.academyId, academyId))
+    .leftJoin(studios, eq(studios.id, aiJobs.studioId))
+    .where(jobFilter ? and(eq(aiJobs.academyId, academyId), jobFilter) : eq(aiJobs.academyId, academyId))
     .orderBy(desc(aiJobs.id))
     .limit(20);
 
+  const meetingFilter = studioFilter(meetings.studioId, scope);
   const liveMeetings = await db
-    .select()
+    .select({ meeting: meetings, studioName: studios.name })
     .from(meetings)
-    .where(and(eq(meetings.academyId, academyId), inArray(meetings.status, ["draft", "in_progress", "processing"])))
+    .leftJoin(studios, eq(studios.id, meetings.studioId))
+    .where(
+      and(
+        eq(meetings.academyId, academyId),
+        inArray(meetings.status, ["draft", "in_progress", "processing"]),
+        meetingFilter ?? sql`true`,
+      ),
+    )
     .orderBy(desc(meetings.meetingDate));
 
+  const electionFilter = studioFilter(elections.studioId, scope);
   const openElections = await db
-    .select()
+    .select({ election: elections, studioName: studios.name })
     .from(elections)
-    .where(and(eq(elections.academyId, academyId), inArray(elections.status, ["draft", "open", "closed"])))
+    .leftJoin(studios, eq(studios.id, elections.studioId))
+    .where(
+      and(
+        eq(elections.academyId, academyId),
+        inArray(elections.status, ["draft", "open", "closed"]),
+        electionFilter ?? sql`true`,
+      ),
+    )
     .orderBy(desc(elections.id));
 
+  const findingFilter = studioFilter(aiFindings.studioId, scope);
   const findingRows = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(aiFindings)
-    .where(and(eq(aiFindings.academyId, academyId), eq(aiFindings.status, "open")));
+    .where(
+      and(
+        eq(aiFindings.academyId, academyId),
+        eq(aiFindings.status, "open"),
+        findingFilter ?? sql`true`,
+      ),
+    );
+
+  const flatJobs = jobs.map((row) => ({ ...row.job, studioName: row.studioName }));
 
   return {
-    jobs,
-    activeMeetings: liveMeetings,
-    openElections,
+    jobs: flatJobs,
+    activeMeetings: liveMeetings.map((row) => ({ ...row.meeting, studioName: row.studioName })),
+    openElections: openElections.map((row) => ({ ...row.election, studioName: row.studioName })),
     openFindings: findingRows[0]?.count ?? 0,
-    aiBusy: jobs.some((job) => job.status === "running" || job.status === "queued"),
-    awaiting: jobs.filter((job) => job.status === "awaiting_input"),
+    aiBusy: flatJobs.some((job) => job.status === "running" || job.status === "queued"),
+    awaiting: flatJobs.filter((job) => job.status === "awaiting_input"),
   };
 }

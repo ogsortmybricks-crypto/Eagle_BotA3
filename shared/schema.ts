@@ -20,8 +20,47 @@ import { relations } from "drizzle-orm";
 export const ROLES = ["admin", "guide", "secretary", "learner"] as const;
 export type Role = (typeof ROLES)[number];
 
-export const STUDIOS = ["spark", "elementary", "middle", "launchpad", "staff"] as const;
-export type Studio = (typeof STUDIOS)[number];
+/**
+ * Suggestions offered during setup, not a fixed list. Studios are rows in the
+ * `studios` table because an academy might run two Middle Studios, might call
+ * them after animals, and will certainly add one eventually.
+ */
+export const STUDIO_PRESETS = [
+  {
+    name: "Spark",
+    ageRange: "4-7",
+    color: "#f59e0b",
+    description:
+      "The youngest studio. Learners are finding their feet with self-governance, so rules stay short and concrete.",
+  },
+  {
+    name: "Discovery",
+    ageRange: "7-11",
+    color: "#10b981",
+    description:
+      "Elementary studio. Learners take on real Town Halls and start holding each other accountable in earnest.",
+  },
+  {
+    name: "Middle Studio",
+    ageRange: "11-14",
+    color: "#3b82f6",
+    description:
+      "Quests, Exhibitions and apprenticeships. Governance gets serious and the Contract gets long.",
+  },
+  {
+    name: "Launchpad",
+    ageRange: "14-18",
+    color: "#8b5cf6",
+    description:
+      "The final studio. Academics finish early so learners can build toward a Next Great Adventure.",
+  },
+  {
+    name: "Staff",
+    ageRange: "Adults",
+    color: "#64748b",
+    description: "Guides and staff. Not a governing body - a place to keep adult-facing records.",
+  },
+] as const;
 
 export const RULE_STATUSES = ["active", "proposed", "repealed"] as const;
 export const FINDING_TYPES = ["contradiction", "gap", "ambiguity", "election_needed"] as const;
@@ -46,8 +85,57 @@ export const academies = pgTable("academies", {
   guidesCanVote: boolean("guides_can_vote").notNull().default(false),
   /** What this academy calls its learners: "Hero", "Eagle", "Explorer"... */
   learnerNoun: text("learner_noun").notNull().default("Hero"),
+  /** Everything tunable. Shape lives in shared/settings.ts. */
+  settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+/* -------------------------------------------------------------------------- */
+/*  Studios                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A studio is the unit of self-governance at an Acton. Spark and Launchpad do
+ * not share a Contract, do not elect the same people, and do not hold the same
+ * Town Hall - so nearly everything else in this schema hangs off a studio.
+ *
+ * A null `studioId` on any of those tables means "academy-wide": visible in
+ * every studio, which is how shared standards and staff-level positions are
+ * recorded without duplicating them five times.
+ */
+export const studios = pgTable(
+  "studios",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    /** What this studio is for, in the academy's own words. Shown in the switcher. */
+    description: text("description"),
+    /** Free text: "7-11", "Adults", "Ages 11 and up". */
+    ageRange: text("age_range"),
+    /** Hex, used to tint the studio throughout the app. */
+    color: text("color").notNull().default("#3b82f6"),
+    /** Overrides the academy's learner noun, if this studio says something else. */
+    learnerNoun: text("learner_noun"),
+    /**
+     * Strips the app back for a studio of six-year-olds: big type, three places
+     * to go, no provenance trail or editing chrome. Applies to the learners in
+     * the studio - adults keep the full tool because they need it.
+     */
+    simpleMode: boolean("simple_mode").notNull().default(false),
+    orderIndex: integer("order_index").notNull().default(0),
+    archived: boolean("archived").notNull().default(false),
+    /** Per-studio overrides. Shape lives in shared/settings.ts. */
+    settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    academyIdx: index("studios_academy_idx").on(t.academyId),
+    slugIdx: uniqueIndex("studios_slug_idx").on(t.academyId, t.slug),
+  }),
+);
 
 /* -------------------------------------------------------------------------- */
 /*  People                                                                     */
@@ -62,7 +150,8 @@ export const users = pgTable(
     name: text("name").notNull(),
     passwordHash: text("password_hash"),
     role: text("role").$type<Role>().notNull().default("learner"),
-    studio: text("studio").$type<Studio>(),
+    /** Which studio this person belongs to. Null means they have not been placed. */
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
     bio: text("bio"),
     avatarUrl: text("avatar_url"),
     /** Free text, shown on the profile: "what I'm working toward". */
@@ -74,6 +163,7 @@ export const users = pgTable(
   (t) => ({
     emailIdx: uniqueIndex("users_email_idx").on(t.email),
     academyIdx: index("users_academy_idx").on(t.academyId),
+    studioIdx: index("users_studio_idx").on(t.studioId),
   }),
 );
 
@@ -85,7 +175,7 @@ export const invites = pgTable(
     email: text("email").notNull(),
     name: text("name"),
     role: text("role").$type<Role>().notNull().default("learner"),
-    studio: text("studio").$type<Studio>(),
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
     token: varchar("token", { length: 64 }).notNull(),
     invitedBy: integer("invited_by").references(() => users.id, { onDelete: "set null" }),
     expiresAt: timestamp("expires_at").notNull(),
@@ -109,6 +199,8 @@ export const documents = pgTable(
   {
     id: serial("id").primaryKey(),
     academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    /** Null means the document describes the whole academy, not one studio. */
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
     filename: text("filename").notNull(),
     mimeType: text("mime_type"),
     sizeBytes: integer("size_bytes").notNull().default(0),
@@ -119,7 +211,10 @@ export const documents = pgTable(
     status: text("status").notNull().default("pending"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (t) => ({ academyIdx: index("documents_academy_idx").on(t.academyId) }),
+  (t) => ({
+    academyIdx: index("documents_academy_idx").on(t.academyId),
+    studioIdx: index("documents_studio_idx").on(t.studioId),
+  }),
 );
 
 /* -------------------------------------------------------------------------- */
@@ -131,6 +226,19 @@ export const wikiSections = pgTable(
   {
     id: serial("id").primaryKey(),
     academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    /**
+     * The studio whose Contract this section belongs to. Null is an academy-wide
+     * section every studio sees. Rules inherit their studio from the section
+     * they live in, so there is exactly one place a rule's studio is decided.
+     */
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
+    /**
+     * Other studios this section is shared into - a space two studios keep in
+     * common without handing it to the whole academy. Middle and Launchpad
+     * often share a Hero Bucks system Spark has nothing to do with. Ownership
+     * stays with `studioId`; the studios listed here can read it.
+     */
+    sharedStudioIds: jsonb("shared_studio_ids").$type<number[]>().notNull().default([]),
     title: text("title").notNull(),
     slug: text("slug").notNull(),
     summary: text("summary"),
@@ -140,6 +248,7 @@ export const wikiSections = pgTable(
   },
   (t) => ({
     academyIdx: index("wiki_sections_academy_idx").on(t.academyId),
+    studioIdx: index("wiki_sections_studio_idx").on(t.studioId),
     slugIdx: uniqueIndex("wiki_sections_slug_idx").on(t.academyId, t.slug),
   }),
 );
@@ -214,6 +323,7 @@ export const aiFindings = pgTable(
   {
     id: serial("id").primaryKey(),
     academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
     type: text("type").notNull(),
     severity: text("severity").notNull().default("medium"),
     title: text("title").notNull(),
@@ -232,6 +342,7 @@ export const aiFindings = pgTable(
   },
   (t) => ({
     academyIdx: index("ai_findings_academy_idx").on(t.academyId),
+    studioIdx: index("ai_findings_studio_idx").on(t.studioId),
     statusIdx: index("ai_findings_status_idx").on(t.status),
   }),
 );
@@ -245,6 +356,10 @@ export const positions = pgTable(
   {
     id: serial("id").primaryKey(),
     academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    /** Which studio elects this role. Null is an academy-wide position. */
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
+    /** Studios that share this role - a joint committee across two studios. */
+    sharedStudioIds: jsonb("shared_studio_ids").$type<number[]>().notNull().default([]),
     title: text("title").notNull(),
     description: text("description"),
     responsibilities: jsonb("responsibilities").$type<string[]>().default([]),
@@ -258,7 +373,10 @@ export const positions = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
-  (t) => ({ academyIdx: index("positions_academy_idx").on(t.academyId) }),
+  (t) => ({
+    academyIdx: index("positions_academy_idx").on(t.academyId),
+    studioIdx: index("positions_studio_idx").on(t.studioId),
+  }),
 );
 
 export const positionHolders = pgTable(
@@ -288,6 +406,8 @@ export const meetings = pgTable(
   {
     id: serial("id").primaryKey(),
     academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    /** A Town Hall belongs to the studio that held it. */
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
     title: text("title").notNull(),
     meetingDate: timestamp("meeting_date").notNull().defaultNow(),
     status: text("status").notNull().default("draft"),
@@ -303,7 +423,10 @@ export const meetings = pgTable(
     lastJobId: integer("last_job_id"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (t) => ({ academyIdx: index("meetings_academy_idx").on(t.academyId) }),
+  (t) => ({
+    academyIdx: index("meetings_academy_idx").on(t.academyId),
+    studioIdx: index("meetings_studio_idx").on(t.studioId),
+  }),
 );
 
 /**
@@ -351,6 +474,8 @@ export const elections = pgTable(
   {
     id: serial("id").primaryKey(),
     academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    /** Who votes. Null opens the ballot to the whole academy. */
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
     title: text("title").notNull(),
     description: text("description"),
     /** position | rule */
@@ -374,7 +499,10 @@ export const elections = pgTable(
     certifiedAt: timestamp("certified_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
-  (t) => ({ academyIdx: index("elections_academy_idx").on(t.academyId) }),
+  (t) => ({
+    academyIdx: index("elections_academy_idx").on(t.academyId),
+    studioIdx: index("elections_studio_idx").on(t.studioId),
+  }),
 );
 
 export const candidates = pgTable(
@@ -420,6 +548,8 @@ export const activityLog = pgTable(
   {
     id: serial("id").primaryKey(),
     academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    /** Lets the log be read one studio at a time. Null means academy-level. */
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
     actorUserId: integer("actor_user_id").references(() => users.id, { onDelete: "set null" }),
     /** user | ai | system */
     actorType: text("actor_type").notNull().default("user"),
@@ -434,6 +564,7 @@ export const activityLog = pgTable(
   },
   (t) => ({
     academyIdx: index("activity_log_academy_idx").on(t.academyId),
+    studioIdx: index("activity_log_studio_idx").on(t.studioId),
     createdIdx: index("activity_log_created_idx").on(t.createdAt),
   }),
 );
@@ -443,6 +574,8 @@ export const aiJobs = pgTable(
   {
     id: serial("id").primaryKey(),
     academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    /** Which studio's wiki this run touches. */
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
     /** build_wiki | process_meeting | apply_election */
     kind: text("kind").notNull(),
     status: text("status").notNull().default("queued"),
@@ -476,15 +609,27 @@ export const aiJobs = pgTable(
 export const academiesRelations = relations(academies, ({ many }) => ({
   users: many(users),
   sections: many(wikiSections),
+  studios: many(studios),
+}));
+
+export const studiosRelations = relations(studios, ({ one, many }) => ({
+  academy: one(academies, { fields: [studios.academyId], references: [academies.id] }),
+  members: many(users),
+  sections: many(wikiSections),
+  positions: many(positions),
+  meetings: many(meetings),
+  elections: many(elections),
 }));
 
 export const usersRelations = relations(users, ({ one, many }) => ({
   academy: one(academies, { fields: [users.academyId], references: [academies.id] }),
+  studio: one(studios, { fields: [users.studioId], references: [studios.id] }),
   heldPositions: many(positionHolders),
 }));
 
 export const wikiSectionsRelations = relations(wikiSections, ({ one, many }) => ({
   academy: one(academies, { fields: [wikiSections.academyId], references: [academies.id] }),
+  studio: one(studios, { fields: [wikiSections.studioId], references: [studios.id] }),
   rules: many(wikiRules),
 }));
 
@@ -495,6 +640,7 @@ export const wikiRulesRelations = relations(wikiRules, ({ one, many }) => ({
 
 export const meetingsRelations = relations(meetings, ({ one, many }) => ({
   secretary: one(users, { fields: [meetings.secretaryId], references: [users.id] }),
+  studio: one(studios, { fields: [meetings.studioId], references: [studios.id] }),
   items: many(meetingItems),
 }));
 
@@ -504,6 +650,7 @@ export const meetingItemsRelations = relations(meetingItems, ({ one }) => ({
 
 export const electionsRelations = relations(elections, ({ one, many }) => ({
   position: one(positions, { fields: [elections.positionId], references: [positions.id] }),
+  studio: one(studios, { fields: [elections.studioId], references: [studios.id] }),
   candidates: many(candidates),
   votes: many(votes),
 }));
@@ -516,6 +663,7 @@ export const candidatesRelations = relations(candidates, ({ one, many }) => ({
 
 export const positionsRelations = relations(positions, ({ one, many }) => ({
   academy: one(academies, { fields: [positions.academyId], references: [academies.id] }),
+  studio: one(studios, { fields: [positions.studioId], references: [studios.id] }),
   holders: many(positionHolders),
 }));
 
@@ -529,6 +677,7 @@ export const positionHoldersRelations = relations(positionHolders, ({ one }) => 
 /* -------------------------------------------------------------------------- */
 
 export type Academy = typeof academies.$inferSelect;
+export type Studio = typeof studios.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Invite = typeof invites.$inferSelect;
 export type Document = typeof documents.$inferSelect;
