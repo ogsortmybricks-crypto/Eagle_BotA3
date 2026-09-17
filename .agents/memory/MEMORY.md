@@ -1,0 +1,1 @@
+- [Replit Vite preview hosts](replit-vite-preview-hosts.md) — allow generated proxied preview hostnames in Vite dev server configuration.
