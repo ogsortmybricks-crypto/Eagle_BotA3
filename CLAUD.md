@@ -9,3 +9,7 @@ Welcome to Eagle Bot, a software tool designed for use by Acton Academies. Speci
 ### What to build
 
 When prompted by the user, read Prompt.md to figure out what to build. 
+
+### Documentation
+
+Once done building something described in any of the MD files (minus anything in Acton_Context), delete the prompt file and write Documetation for the way that feature works and what it is on the user end. 
