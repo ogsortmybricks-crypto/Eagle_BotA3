@@ -52,6 +52,9 @@ export type SessionUser = {
   bio: string | null;
   avatarUrl: string | null;
   nga: string | null;
+  /** Granted by an admin. Opens the dev menu and the public dev profile. */
+  devStatus: boolean;
+  devHandle: string | null;
   active: boolean;
 };
 

@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Camera, Pencil } from "lucide-react";
-import { apiGet, apiPatch, fileToDataUrl } from "@/lib/api";
+import { ArrowLeft, Camera, Code2, Pencil } from "lucide-react";
+import { apiGet, apiPatch, apiPost, fileToDataUrl } from "@/lib/api";
 import { useDateFormat, useSession } from "@/lib/session";
 import {
   Avatar,
@@ -14,6 +14,7 @@ import {
   Spinner,
 } from "@/components/ui";
 import { StudioTag } from "@/components/StudioSwitcher";
+import { TaconPanels } from "@/pages/TaconPage";
 
 type StudioRow = {
   id: number;
@@ -145,6 +146,7 @@ export function People() {
             </section>
           ))}
       </div>
+      <TaconPanels host="people" />
     </>
   );
 }
@@ -162,6 +164,9 @@ type ProfileResponse = {
     nga: string | null;
     avatarUrl: string | null;
     createdAt: string;
+    /** Dev status is granted per person, not per role - see the Tac-Ons docs. */
+    devStatus: boolean;
+    devHandle: string | null;
   };
   studio: { id: number; name: string; color: string } | null;
   positions: {
@@ -209,6 +214,13 @@ export function Profile({ id }: { id: number }) {
                 <Chip>Not in a studio</Chip>
               )}
               {person.email && <Chip>{person.email}</Chip>}
+              {person.devStatus && person.devHandle && (
+                <Link href={`/devs/${person.devHandle}`}>
+                  <Chip tone="purple">
+                    <Code2 className="h-3 w-3" /> Dev
+                  </Chip>
+                </Link>
+              )}
             </div>
             {person.nga && (
               <p className="mt-3 text-sm">
@@ -271,10 +283,68 @@ export function Profile({ id }: { id: number }) {
         </div>
       </div>
 
+      <DevStatusCard person={person} />
+
       {editing && (
         <EditProfileModal profile={query.data} onClose={() => setEditing(false)} />
       )}
     </>
+  );
+}
+
+/**
+ * Dev status.
+ *
+ * An admin grants it to a learner who is ready to build Tac-Ons. It is not a
+ * promotion - it changes nothing about governance, voting or the wiki - so it
+ * sits here on the profile rather than next to the role, where it would read
+ * like a fifth role.
+ */
+function DevStatusCard({
+  person,
+}: {
+  person: { id: number; name: string; devStatus: boolean; devHandle: string | null };
+}) {
+  const queryClient = useQueryClient();
+  const { can } = useSession();
+  const [error, setError] = useState<string | null>(null);
+
+  const grant = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiPost("/tacons/devs/grant", { userId: person.id, enabled }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["profile", person.id] });
+      void queryClient.invalidateQueries({ queryKey: ["session"] });
+    },
+    onError: (grantError: Error) => setError(grantError.message),
+  });
+
+  if (!can("tacons.grant_dev")) return null;
+
+  return (
+    <div className="card-pad mt-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+            <Code2 className="h-4 w-4" /> Dev status
+          </h2>
+          <p className="mt-1 text-sm text-gray-600">
+            {person.devStatus
+              ? `${person.name} can write and publish Tac-Ons, and has a public dev profile.`
+              : `Lets ${person.name} write Tac-Ons in the dev menu and publish them to the market. It changes nothing else — they vote and read exactly as they do now.`}
+          </p>
+          {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+        </div>
+        <button
+          onClick={() => grant.mutate(!person.devStatus)}
+          disabled={grant.isPending}
+          className={person.devStatus ? "btn-danger shrink-0" : "btn-secondary shrink-0"}
+        >
+          {grant.isPending && <Spinner />}
+          {person.devStatus ? "Remove dev status" : "Give dev status"}
+        </button>
+      </div>
+    </div>
   );
 }
 

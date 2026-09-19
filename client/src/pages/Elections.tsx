@@ -7,6 +7,7 @@ import { useDateFormat, useSession } from "@/lib/session";
 import { Banner, Chip, EmptyState, LoadingPage, Modal, PageHeader, Spinner } from "@/components/ui";
 import { StudioTag } from "@/components/StudioSwitcher";
 import { StudioPicker } from "@/components/StudioPicker";
+import { TaconPanels } from "@/pages/TaconPage";
 
 type ElectionRow = {
   election: {
@@ -133,6 +134,7 @@ export function Elections() {
       )}
 
       {creating && <CreateElectionModal onClose={() => setCreating(false)} />}
+      <TaconPanels host="elections" />
     </>
   );
 }

@@ -17,6 +17,7 @@ import {
 import { StudioTag } from "@/components/StudioSwitcher";
 import { StudioPicker } from "@/components/StudioPicker";
 import { SharedWithNote, SharedWithPicker } from "@/components/SharedWithPicker";
+import { TaconPanels } from "@/pages/TaconPage";
 
 type Holder = {
   id: number;
@@ -203,6 +204,7 @@ export function Positions() {
       {appointing && (
         <AppointModal position={appointing} onClose={() => setAppointing(null)} />
       )}
+      <TaconPanels host="positions" />
     </>
   );
 }

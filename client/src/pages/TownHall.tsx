@@ -7,6 +7,7 @@ import { useDateFormat, useSession } from "@/lib/session";
 import { Banner, Chip, EmptyState, LoadingPage, Modal, PageHeader, Spinner } from "@/components/ui";
 import { StudioTag } from "@/components/StudioSwitcher";
 import { StudioPicker } from "@/components/StudioPicker";
+import { TaconPanels } from "@/pages/TaconPage";
 
 type MeetingRow = {
   meeting: {
@@ -262,6 +263,7 @@ export function TownHall() {
           />
         </div>
       </Modal>
+      <TaconPanels host="town-hall" />
     </>
   );
 }

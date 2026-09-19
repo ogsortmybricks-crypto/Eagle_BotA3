@@ -9,6 +9,8 @@ import { resolveSettings, type AcademySettings } from "@shared/settings";
 declare module "express-session" {
   interface SessionData {
     userId?: number;
+    /** A dev portal sign-in. Entirely separate from the academy session. */
+    portalDevId?: number;
     /** Last studio this person was looking at, so the app reopens where they left. */
     studioId?: number | null;
     /** An admin checking what the simple view looks like. Affects only them. */
@@ -73,7 +75,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 export function requirePermission(permission: string) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) return res.status(401).json({ error: "Sign in to continue." });
-    if (!can(req.user.role, permission, req.settings)) {
+    if (!can(req.user.role, permission, req.settings, { devStatus: req.user.devStatus })) {
       return res.status(403).json({
         error: `Your role (${req.user.role}) can't do that.`,
         permission,

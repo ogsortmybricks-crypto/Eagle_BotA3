@@ -1,20 +1,26 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
+  Code2,
   Gavel,
   LayoutDashboard,
   LogOut,
   Menu,
+  Puzzle,
   Settings,
   Shield,
   Users,
   Vote,
   X,
 } from "lucide-react";
+import { apiGet } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { Avatar, Chip } from "./ui";
 import { StudioSwitcher } from "./StudioSwitcher";
+import { PortalNotices } from "./PortalNotices";
+import type { TaconNavEntry } from "@shared/tacons/view";
 
 const NAV = [
   { href: "/wiki", label: "Wiki", icon: BookOpen, permission: "wiki.read" },
@@ -28,13 +34,32 @@ const NAV = [
 ] as const;
 
 export function Layout({ children }: { children: ReactNode }) {
-  const { user, academy, studio, can, signOut } = useSession();
+  const { user, academy, studio, studioId, can, signOut } = useSession();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  /**
+   * Pages installed Tac-Ons contribute. They get their own group at the bottom
+   * of the sidebar rather than being mixed into the app's own nav - what Eagle
+   * Bot does and what an academy added to it should never be hard to tell
+   * apart.
+   */
+  const taconNav = useQuery<{ entries: TaconNavEntry[] }>({
+    queryKey: ["tacon-nav", studioId],
+    queryFn: () => apiGet("/tacons/nav"),
+    enabled: Boolean(user),
+    staleTime: 60_000,
+  });
 
   if (!user || !academy) return <>{children}</>;
 
   const items = NAV.filter((item) => item.permission === null || can(item.permission));
+  const taconItems = taconNav.data?.entries ?? [];
+
+  const linkClass = (active: boolean) =>
+    `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+      active ? "bg-brand-50 text-brand-700" : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+    }`;
 
   const nav = (
     <nav className="flex flex-col gap-0.5">
@@ -45,17 +70,56 @@ export function Layout({ children }: { children: ReactNode }) {
             key={item.href}
             href={item.href}
             onClick={() => setMobileOpen(false)}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              active
-                ? "bg-brand-50 text-brand-700"
-                : "text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-            }`}
+            className={linkClass(active)}
           >
             <item.icon className="h-4 w-4 shrink-0" />
             {item.label}
           </Link>
         );
       })}
+
+      {(taconItems.length > 0 || can("tacons.market") || can("tacons.develop")) && (
+        <div className="mt-3 border-t border-gray-200 pt-3">
+          <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+            Tac-Ons
+          </div>
+          {taconItems.map((entry) => {
+            const href = `/t/${entry.installId}/${entry.page}`;
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setMobileOpen(false)}
+                className={linkClass(location === href)}
+                title={`${entry.taconName}${entry.studioName ? ` — ${entry.studioName}` : ""}`}
+              >
+                <Puzzle className="h-4 w-4 shrink-0" />
+                <span className="truncate">{entry.label}</span>
+              </Link>
+            );
+          })}
+          {can("tacons.market") && (
+            <Link
+              href="/tacons"
+              onClick={() => setMobileOpen(false)}
+              className={linkClass(location === "/tacons" || location.startsWith("/tacons/"))}
+            >
+              <Puzzle className="h-4 w-4 shrink-0" />
+              Market
+            </Link>
+          )}
+          {can("tacons.develop") && (
+            <Link
+              href="/dev"
+              onClick={() => setMobileOpen(false)}
+              className={linkClass(location === "/dev")}
+            >
+              <Code2 className="h-4 w-4 shrink-0" />
+              Dev menu
+            </Link>
+          )}
+        </div>
+      )}
     </nav>
   );
 
@@ -156,7 +220,10 @@ export function Layout({ children }: { children: ReactNode }) {
         )}
 
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-          <div className="mx-auto max-w-6xl">{children}</div>
+          <div className="mx-auto max-w-6xl">
+            <PortalNotices />
+            {children}
+          </div>
         </main>
       </div>
     </div>

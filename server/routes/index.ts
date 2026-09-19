@@ -11,6 +11,8 @@ import { electionsRouter } from "./elections";
 import { positionsRouter } from "./positions";
 import { adminRouter } from "./admin";
 import { profilesRouter } from "./profiles";
+import { taconsRouter } from "./tacons";
+import { portalRouter } from "./portal";
 
 export const apiRouter = Router();
 
@@ -23,6 +25,10 @@ apiRouter.use(attachStudioScope);
 apiRouter.use("/setup", setupRouter);
 apiRouter.use("/auth", authRouter);
 
+// The dev portal signs in on its own credentials, so it can't sit behind the
+// academy's requireAuth. It guards itself.
+apiRouter.use("/portal", portalRouter);
+
 // Everything else needs a session.
 apiRouter.use("/studios", requireAuth, studiosRouter);
 apiRouter.use("/settings", requireAuth, settingsRouter);
@@ -32,6 +38,7 @@ apiRouter.use("/elections", requireAuth, electionsRouter);
 apiRouter.use("/positions", requireAuth, positionsRouter);
 apiRouter.use("/profiles", requireAuth, profilesRouter);
 apiRouter.use("/admin", requireAuth, adminRouter);
+apiRouter.use("/tacons", requireAuth, taconsRouter);
 
 apiRouter.use((_req, res) => {
   res.status(404).json({ error: "No such endpoint." });

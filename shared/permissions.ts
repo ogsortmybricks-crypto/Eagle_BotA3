@@ -35,6 +35,11 @@ export const PERMISSIONS = {
     "elections.vote",
     "activity.read",
     "status.read",
+    // The market is an admin's shelf: they decide what this academy runs.
+    "tacons.use",
+    "tacons.market",
+    "tacons.install",
+    "tacons.grant_dev",
   ],
   secretary: [
     "documents.upload",
@@ -49,6 +54,7 @@ export const PERMISSIONS = {
     "elections.manage",
     "elections.vote",
     "status.read",
+    "tacons.use",
   ],
   guide: [
     "wiki.read",
@@ -57,11 +63,29 @@ export const PERMISSIONS = {
     "elections.read",
     "activity.read",
     "status.read",
+    "tacons.use",
   ],
-  learner: ["wiki.read", "positions.read", "meetings.read", "elections.read", "elections.vote"],
+  learner: [
+    "wiki.read",
+    "positions.read",
+    "meetings.read",
+    "elections.read",
+    "elections.vote",
+    "tacons.use",
+  ],
 } as const satisfies Record<Role, readonly string[]>;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS][number];
+
+/**
+ * Things that follow the person rather than their role.
+ *
+ * Dev status is the only one so far: an admin grants it to a learner who is
+ * ready to build Tac-Ons, and it has nothing to do with governance. A Hero with
+ * dev status still votes like every other Hero and still cannot touch the
+ * Contract - they can just write software.
+ */
+export type PermissionTraits = { devStatus?: boolean | null };
 
 /**
  * The permissions a role actually has in this academy.
@@ -73,9 +97,18 @@ export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS][number];
 export function effectivePermissions(
   role: Role | undefined | null,
   settings?: AcademySettings | null,
+  traits?: PermissionTraits | null,
 ): string[] {
   if (!role) return [];
   const list = new Set<string>(PERMISSIONS[role] as readonly string[]);
+
+  if (traits?.devStatus) {
+    // A dev can write and publish Tac-Ons, and needs the market to see how
+    // their own listing looks next to everyone else's.
+    list.add("tacons.develop");
+    list.add("tacons.market");
+  }
+
   if (!settings) return [...list];
 
   if (role === "learner" && settings.governance.learnersCanEditWiki) {
@@ -91,9 +124,10 @@ export function can(
   role: Role | undefined | null,
   permission: string,
   settings?: AcademySettings | null,
+  traits?: PermissionTraits | null,
 ): boolean {
   if (!role) return false;
-  return effectivePermissions(role, settings).includes(permission);
+  return effectivePermissions(role, settings, traits).includes(permission);
 }
 
 export const ROLE_LABELS: Record<Role, string> = {

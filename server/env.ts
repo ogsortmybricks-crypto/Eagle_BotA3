@@ -18,6 +18,13 @@ export const env = {
   sessionSecret: process.env.SESSION_SECRET ?? "eagle-bot-dev-secret-change-me",
   appUrl: (process.env.APP_URL ?? `http://localhost:${process.env.PORT ?? 5000}`).replace(/\/$/, ""),
 
+  /**
+   * Claims the dev portal's head account, once. Required in production - the
+   * portal publishes Tac-Ons every academy can install, so whoever holds this
+   * key holds the market.
+   */
+  portalSetupKey: process.env.DEV_PORTAL_SETUP_KEY ?? "",
+
   anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? "",
   anthropicModel: process.env.ANTHROPIC_MODEL ?? "claude-opus-5",
 

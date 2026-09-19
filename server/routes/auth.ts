@@ -107,7 +107,11 @@ authRouter.get("/me", async (req, res) => {
     user: publicUser(req.user),
     academy,
     settings,
-    permissions: effectivePermissions(req.user.role, settings),
+    // Dev status rides alongside the role rather than inside it: it grants the
+    // dev menu and nothing else in the academy changes.
+    permissions: effectivePermissions(req.user.role, settings, {
+      devStatus: req.user.devStatus,
+    }),
     currentPositions: held,
     studios: allowed,
     /** The studio this session is looking at. Null means every studio at once. */

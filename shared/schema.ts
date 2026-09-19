@@ -156,6 +156,15 @@ export const users = pgTable(
     avatarUrl: text("avatar_url"),
     /** Free text, shown on the profile: "what I'm working toward". */
     nga: text("nga"),
+    /**
+     * Dev status, granted by an admin. It opens the dev menu - writing,
+     * publishing and updating Tac-Ons - and creates the learner's global dev
+     * profile, which is the part that travels beyond their own academy.
+     */
+    devStatus: boolean("dev_status").notNull().default(false),
+    /** The handle their public dev profile lives at. Set when dev is granted. */
+    devHandle: text("dev_handle"),
+    devSince: timestamp("dev_since"),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     lastLoginAt: timestamp("last_login_at"),
@@ -164,6 +173,7 @@ export const users = pgTable(
     emailIdx: uniqueIndex("users_email_idx").on(t.email),
     academyIdx: index("users_academy_idx").on(t.academyId),
     studioIdx: index("users_studio_idx").on(t.studioId),
+    handleIdx: uniqueIndex("users_dev_handle_idx").on(t.devHandle),
   }),
 );
 
@@ -603,6 +613,223 @@ export const aiJobs = pgTable(
 );
 
 /* -------------------------------------------------------------------------- */
+/*  Tac-Ons: the extension system                                              */
+/* -------------------------------------------------------------------------- */
+
+export const TACON_VISIBILITIES = ["draft", "unlisted", "public"] as const;
+export type TaconVisibility = (typeof TACON_VISIBILITIES)[number];
+
+export const TACON_CATEGORIES = [
+  "general",
+  "governance",
+  "quests",
+  "community",
+  "tracking",
+  "fun",
+] as const;
+
+/**
+ * One Tac-On in the market.
+ *
+ * A Tac-On is to Eagle Bot what an extension is to a browser: a small, declared
+ * addition an academy chooses to install. The row here is the listing - name,
+ * blurb, who wrote it, how many academies run it. The thing that actually does
+ * something is a version, below.
+ *
+ * `academyId` is the academy whose learner wrote it. Official Tac-Ons come from
+ * the dev portal instead and carry a null academy, which is also what makes
+ * them visible everywhere rather than only at home.
+ */
+export const tacons = pgTable(
+  "tacons",
+  {
+    id: serial("id").primaryKey(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    tagline: text("tagline"),
+    /** Markdown, shown on the details page. */
+    description: text("description").notNull().default(""),
+    icon: text("icon").notNull().default("puzzle"),
+    category: text("category").notNull().default("general"),
+    /** The academy whose dev wrote it. Null for official Tac-Ons. */
+    academyId: integer("academy_id").references(() => academies.id, { onDelete: "cascade" }),
+    authorUserId: integer("author_user_id").references(() => users.id, { onDelete: "set null" }),
+    authorPortalId: integer("author_portal_id"),
+    /** Denormalised so a listing survives the author leaving the academy. */
+    authorName: text("author_name").notNull().default("Unknown"),
+    /** Published through the dev portal by the Eagle Bot team. */
+    official: boolean("official").notNull().default(false),
+    /** draft (only the author) | unlisted (link only) | public (in the market) */
+    visibility: text("visibility").$type<TaconVisibility>().notNull().default("draft"),
+    /** Lifetime installs, never decremented - the number on the tile. */
+    installCount: integer("install_count").notNull().default(0),
+    /** Installs that are currently in place. */
+    activeInstalls: integer("active_installs").notNull().default(0),
+    latestVersionId: integer("latest_version_id"),
+    /** Set by a portal dev when a Tac-On has to be pulled. Blocks new installs. */
+    suspendedReason: text("suspended_reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    slugIdx: uniqueIndex("tacons_slug_idx").on(t.slug),
+    academyIdx: index("tacons_academy_idx").on(t.academyId),
+    authorIdx: index("tacons_author_idx").on(t.authorUserId),
+  }),
+);
+
+/**
+ * A published version. Source and compiled manifest are both kept: the source
+ * so the next dev can read and fork it, the manifest so rendering a page never
+ * re-parses and an old install keeps running exactly what it installed.
+ */
+export const taconVersions = pgTable(
+  "tacon_versions",
+  {
+    id: serial("id").primaryKey(),
+    taconId: integer("tacon_id").notNull().references(() => tacons.id, { onDelete: "cascade" }),
+    version: text("version").notNull(),
+    /** The TacScript a person actually wrote. */
+    source: text("source").notNull(),
+    /** The compiled manifest. Shape lives in shared/tacons/types.ts. */
+    manifest: jsonb("manifest").$type<Record<string, unknown>>().notNull(),
+    changelog: text("changelog"),
+    /** published | yanked */
+    status: text("status").notNull().default("published"),
+    publishedByUserId: integer("published_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    publishedByPortalId: integer("published_by_portal_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    taconIdx: index("tacon_versions_tacon_idx").on(t.taconId),
+    versionIdx: uniqueIndex("tacon_versions_version_idx").on(t.taconId, t.version),
+  }),
+);
+
+/**
+ * One academy (or one studio) running one Tac-On.
+ *
+ * Installs pin a version. A dev pushing an update does not silently change what
+ * a Town Hall sees mid-session - the admin is shown that an update is waiting
+ * and chooses when to take it.
+ */
+export const taconInstalls = pgTable(
+  "tacon_installs",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    /** Null installs it academy-wide; a studio id keeps it to that studio. */
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "cascade" }),
+    taconId: integer("tacon_id").notNull().references(() => tacons.id, { onDelete: "cascade" }),
+    versionId: integer("version_id").notNull().references(() => taconVersions.id),
+    enabled: boolean("enabled").notNull().default(true),
+    /** What the installing admin filled in for the Tac-On's settings. */
+    settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+    installedBy: integer("installed_by").references(() => users.id, { onDelete: "set null" }),
+    installedAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    academyIdx: index("tacon_installs_academy_idx").on(t.academyId),
+    uniqueIdx: uniqueIndex("tacon_installs_unique_idx").on(t.academyId, t.studioId, t.taconId),
+  }),
+);
+
+/**
+ * Every row a Tac-On has ever recorded.
+ *
+ * One table for all of them, keyed by install and store name, with the row
+ * itself as JSONB. A Tac-On can only ever read rows belonging to its own
+ * install (or to an install that published the store through `provides`), so
+ * the isolation is a where-clause rather than a promise.
+ */
+export const taconRecords = pgTable(
+  "tacon_records",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    installId: integer("install_id").notNull().references(() => taconInstalls.id, { onDelete: "cascade" }),
+    /** The store this row belongs to, as named in the Tac-On. */
+    store: text("store").notNull(),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    /** user | tacon - a row written by a `when` hook has no person behind it. */
+    createdByType: text("created_by_type").notNull().default("user"),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    installIdx: index("tacon_records_install_idx").on(t.installId, t.store),
+    createdIdx: index("tacon_records_created_idx").on(t.createdAt),
+  }),
+);
+
+/* -------------------------------------------------------------------------- */
+/*  The dev portal                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Accounts for the people who maintain Eagle Bot itself.
+ *
+ * Deliberately a separate table from `users`: a portal dev is not a member of
+ * any academy, holds no studio, votes in nothing, and signs in through a door
+ * most people never see (Ctrl+D). Keeping the two apart means no academy admin
+ * can ever grant portal access by editing a role.
+ */
+export const portalDevs = pgTable(
+  "portal_devs",
+  {
+    id: serial("id").primaryKey(),
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    passwordHash: text("password_hash").notNull(),
+    /** The head dev can invite others and suspend a Tac-On. */
+    head: boolean("head").notNull().default(false),
+    active: boolean("active").notNull().default(true),
+    bio: text("bio"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    lastLoginAt: timestamp("last_login_at"),
+  },
+  (t) => ({ emailIdx: uniqueIndex("portal_devs_email_idx").on(t.email) }),
+);
+
+export const portalInvites = pgTable(
+  "portal_invites",
+  {
+    id: serial("id").primaryKey(),
+    email: text("email").notNull(),
+    name: text("name"),
+    token: varchar("token", { length: 64 }).notNull(),
+    invitedBy: integer("invited_by").references(() => portalDevs.id, { onDelete: "set null" }),
+    expiresAt: timestamp("expires_at").notNull(),
+    acceptedAt: timestamp("accepted_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({ tokenIdx: uniqueIndex("portal_invites_token_idx").on(t.token) }),
+);
+
+/**
+ * A notice from the portal, shown to every academy running this deployment.
+ * The channel exists so "the market is down for an hour" doesn't have to
+ * travel by word of mouth between academies.
+ */
+export const portalNotices = pgTable("portal_notices", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  /** info | warning | release */
+  tone: text("tone").notNull().default("info"),
+  /** everyone | admins | devs */
+  audience: text("audience").notNull().default("admins"),
+  active: boolean("active").notNull().default(true),
+  publishedBy: integer("published_by").references(() => portalDevs.id, { onDelete: "set null" }),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+/* -------------------------------------------------------------------------- */
 /*  Relations                                                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -667,6 +894,27 @@ export const positionsRelations = relations(positions, ({ one, many }) => ({
   holders: many(positionHolders),
 }));
 
+export const taconsRelations = relations(tacons, ({ one, many }) => ({
+  author: one(users, { fields: [tacons.authorUserId], references: [users.id] }),
+  versions: many(taconVersions),
+  installs: many(taconInstalls),
+}));
+
+export const taconVersionsRelations = relations(taconVersions, ({ one }) => ({
+  tacon: one(tacons, { fields: [taconVersions.taconId], references: [tacons.id] }),
+}));
+
+export const taconInstallsRelations = relations(taconInstalls, ({ one, many }) => ({
+  tacon: one(tacons, { fields: [taconInstalls.taconId], references: [tacons.id] }),
+  version: one(taconVersions, { fields: [taconInstalls.versionId], references: [taconVersions.id] }),
+  studio: one(studios, { fields: [taconInstalls.studioId], references: [studios.id] }),
+  records: many(taconRecords),
+}));
+
+export const taconRecordsRelations = relations(taconRecords, ({ one }) => ({
+  install: one(taconInstalls, { fields: [taconRecords.installId], references: [taconInstalls.id] }),
+}));
+
 export const positionHoldersRelations = relations(positionHolders, ({ one }) => ({
   position: one(positions, { fields: [positionHolders.positionId], references: [positions.id] }),
   user: one(users, { fields: [positionHolders.userId], references: [users.id] }),
@@ -694,3 +942,10 @@ export type Candidate = typeof candidates.$inferSelect;
 export type Vote = typeof votes.$inferSelect;
 export type ActivityEntry = typeof activityLog.$inferSelect;
 export type AiJob = typeof aiJobs.$inferSelect;
+export type Tacon = typeof tacons.$inferSelect;
+export type TaconVersion = typeof taconVersions.$inferSelect;
+export type TaconInstall = typeof taconInstalls.$inferSelect;
+export type TaconRecord = typeof taconRecords.$inferSelect;
+export type PortalDev = typeof portalDevs.$inferSelect;
+export type PortalInvite = typeof portalInvites.$inferSelect;
+export type PortalNotice = typeof portalNotices.$inferSelect;

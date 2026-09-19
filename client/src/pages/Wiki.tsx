@@ -32,6 +32,7 @@ import { StudioTag } from "@/components/StudioSwitcher";
 import { StudioPicker } from "@/components/StudioPicker";
 import { SharedWithNote, SharedWithPicker } from "@/components/SharedWithPicker";
 import { JobProgress, useJob } from "@/components/JobStatus";
+import { TaconPanels } from "@/pages/TaconPage";
 
 type Rule = {
   id: number;
@@ -434,6 +435,7 @@ export function Wiki() {
         <SectionSharing section={sharingSection} onClose={() => setSharingSection(null)} />
       )}
       {historyFor && <HistoryModal rule={historyFor} onClose={() => setHistoryFor(null)} />}
+      <TaconPanels host="wiki" />
     </>
   );
 }

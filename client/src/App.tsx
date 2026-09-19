@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Redirect, Route, Switch, useRoute } from "wouter";
+import { Redirect, Route, Switch, useLocation, useRoute } from "wouter";
 import { apiGet } from "@/lib/api";
 import { applyPalette, useSession, type Palette } from "@/lib/session";
 import { Layout } from "@/components/Layout";
@@ -17,6 +17,11 @@ import { People, Profile } from "@/pages/People";
 import { Admin } from "@/pages/Admin";
 import { Settings } from "@/pages/Settings";
 import { SimpleApp } from "@/pages/Simple";
+import { Market, TaconDetail } from "@/pages/Market";
+import { TaconPage } from "@/pages/TaconPage";
+import { DevMenu } from "@/pages/DevMenu";
+import { DevProfile } from "@/pages/DevProfile";
+import { DevPortal } from "@/pages/DevPortal";
 
 type SetupStatus = {
   needsSetup: boolean;
@@ -27,6 +32,9 @@ export function App() {
   const { user, loading, settings, simpleMode } = useSession();
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [inviteRoute, inviteParams] = useRoute("/invite/:token");
+  const [portalRoute] = useRoute("/dev-portal");
+  const [portalInviteRoute, portalInviteParams] = useRoute("/dev-portal/invite/:token");
+  const [, navigate] = useLocation();
 
   useEffect(() => {
     apiGet<SetupStatus>("/setup/status")
@@ -38,6 +46,32 @@ export function App() {
       })
       .catch(() => setStatus({ needsSetup: false, academy: null }));
   }, []);
+
+  /**
+   * Ctrl+D opens the dev portal.
+   *
+   * It is a door rather than a link: nobody who isn't looking for it needs to
+   * know it exists, and the portal turns away anyone without portal
+   * credentials. The browser's own bookmark shortcut is given up in exchange,
+   * which is a fair trade inside an app people live in all day.
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "d") return;
+      if (event.altKey || event.shiftKey) return;
+      event.preventDefault();
+      navigate("/dev-portal");
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [navigate]);
+
+  // The portal is not part of the academy app: no setup check, no academy
+  // session, its own sign-in.
+  if (portalInviteRoute && portalInviteParams?.token) {
+    return <DevPortal inviteToken={portalInviteParams.token} />;
+  }
+  if (portalRoute) return <DevPortal />;
 
   // The invite flow has to work while signed out and before anything else.
   if (inviteRoute && inviteParams?.token) {
@@ -74,6 +108,17 @@ export function App() {
         <Route path="/people/:id">{(params) => <Profile id={Number(params.id)} />}</Route>
         <Route path="/admin" component={Admin} />
         <Route path="/settings" component={Settings} />
+
+        {/* Tac-Ons: the market, one listing, and the pages installed Tac-Ons
+            add. A Tac-On page lives at /t/ so it can never shadow a real one. */}
+        <Route path="/tacons" component={Market} />
+        <Route path="/tacons/:slug">{(params) => <TaconDetail slug={params.slug} />}</Route>
+        <Route path="/t/:installId/:page">
+          {(params) => <TaconPage installId={Number(params.installId)} page={params.page} />}
+        </Route>
+        <Route path="/dev" component={DevMenu} />
+        <Route path="/devs/:handle">{(params) => <DevProfile handle={params.handle} />}</Route>
+
         <Route>
           {() => (
             <div className="card px-6 py-14 text-center">

@@ -24,6 +24,7 @@ import {
   Stat,
   type ChipTone,
 } from "@/components/ui";
+import { TaconPanels } from "@/pages/TaconPage";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: Activity },
@@ -83,6 +84,7 @@ export function Admin() {
       {tab === "invites" && <Invites />}
       {tab === "status" && <AiStatus />}
       {tab === "activity" && <ActivityLog />}
+      <TaconPanels host="admin" />
     </>
   );
 }
