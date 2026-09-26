@@ -76,7 +76,8 @@ async function main() {
   );
 
   // An empty Tac-Ons market teaches nobody anything, so the official ones are
-  // published on first boot. Failing here is never worth refusing to start.
+  // published on boot - and the ones that no longer ship are deleted on the
+  // same pass. Failing here is never worth refusing to start.
   await seedStarters().catch((error) =>
     console.error("[boot] couldn't seed the Tac-Ons market", error),
   );

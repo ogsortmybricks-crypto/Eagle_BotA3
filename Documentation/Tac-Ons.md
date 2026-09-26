@@ -39,7 +39,7 @@ Press **Install**. You will be asked one question that matters:
 > **Install for:** a studio, or the whole academy.
 
 A studio install shows up only in that studio — its pages, its sidebar entry,
-its records. An academy-wide install shows up everywhere. A Hero Bucks ledger
+its records. An academy-wide install shows up everywhere. An Eagle Bucks ledger
 almost always belongs to one studio; a notice board might belong to all of them.
 You can install the same Tac-On separately in two studios, and they keep
 completely separate records.
@@ -85,7 +85,7 @@ changed underneath it mid-meeting.
 You can also **Turn off** an install — it disappears from the sidebar and keeps
 its records — or **Remove** it.
 
-> **Removing a Tac-On deletes everything it recorded.** A term of Hero Bucks
+> **Removing a Tac-On deletes everything it recorded.** A term of Eagle Bucks
 > entries goes with it. The confirmation says so, and the activity log records
 > how many rows were deleted. Turn it off instead if you are not sure.
 
@@ -188,10 +188,10 @@ reached anybody yet.
 A Tac-On can list what another one publishes:
 
 ```
-use hero-bucks as bucks
+use eagle-bucks as bucks
 ...
 note "You have {bucks.balance} bucks."
-list bucks.entry { columns hero, amount }
+list bucks.ledger { columns hero, amount }
 ```
 
 This only works for things the other Tac-On listed under `provides`, only inside
@@ -242,15 +242,25 @@ would own the market.
 
 ## What ships with Eagle Bot
 
-Four official Tac-Ons are published the first time the server starts. They are
-ordinary Tac-Ons: installable, removable, and readable as worked examples.
+One official Tac-On is published when the server starts. It is an ordinary
+Tac-On: installable, removable, and readable as a worked example.
 
 | Tac-On | What it does |
 | --- | --- |
-| **Hero Bucks** | A ledger for the currency the studio already runs on, with a running total per Hero. Awards bucks automatically when an election is certified. |
-| **Quest Board** | Every quest the studio is running, who signed up, and a panel on Town Hall showing what is live. |
-| **Gratitude Wall** | Anyone can thank anyone, in public, and it stays up. The simplest useful Tac-On there is. |
-| **Buck Shop** | A shop that spends the balance Hero Bucks keeps — the worked example of one Tac-On reading another. |
+| **Eagle Bucks** | The whole economy: points logged against Core Skills, Quest and community work; a ledger only Admin and Secretary can post to; a price list; and requests between learners, with a panel on Town Hall for the ones waiting on a debate. |
+
+Eagle Bucks publishes `points`, `ledger` and `balance` under `provides`, so it is
+also the thing to read from if you are writing a raffle, a shop of your own or an
+end-of-term summary.
+
+### Tac-Ons that used to ship
+
+Hero Bucks, Quest Board, Gratitude Wall and Buck Shop were published by earlier
+versions and are not published any more. A server that seeded them deletes them
+on the next start, along with their installs and everything those installs
+recorded, and logs how much went. `RETIRED_STARTER_SLUGS` in
+[`server/tacons/starters.ts`](../server/tacons/starters.ts) is the list, and
+anything added to it is removed the same way.
 
 ---
 

@@ -6,13 +6,13 @@
  * learner opening the dev menu can read the source of a Tac-On they have
  * already seen working, which is how most people start writing their first.
  *
- * They are seeded once, when the registry is empty, and are ordinary Tac-Ons
- * afterwards: an academy can uninstall them, and a dev can fork the source.
+ * They are ordinary Tac-Ons once published: an academy can uninstall them, and
+ * a dev can fork the source.
  */
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
-import { taconVersions, tacons } from "@shared/schema";
+import { taconInstalls, taconRecords, taconVersions, tacons } from "@shared/schema";
 import { compile } from "@shared/tacons";
 
 type Starter = {
@@ -23,331 +23,290 @@ type Starter = {
   source: string;
 };
 
+/**
+ * Official Tac-Ons that used to ship and no longer do.
+ *
+ * Kept as a list rather than quietly dropped, because removing a Tac-On from
+ * `STARTERS` is not enough on a server that already seeded it - the listing,
+ * its installs and the rows those installs recorded are all still there. The
+ * seeder deletes them by slug, once, and says how much it deleted.
+ */
+export const RETIRED_STARTER_SLUGS = [
+  "hero-bucks",
+  "quest-board",
+  "gratitude-wall",
+  "buck-shop",
+] as const;
+
 export const STARTERS: Starter[] = [
   {
-    slug: "hero-bucks",
-    tagline: "A ledger for the currency your studio already runs on.",
+    slug: "eagle-bucks",
+    tagline: "The Shopkeeper's ledger: points earned, bucks exchanged, guardrails paid.",
     category: "tracking",
-    description: `Most Actons run some form of Hero Bucks, and most of them run it on a
-whiteboard that gets wiped. This keeps the ledger where the rest of governance lives.
+    description: `The Eagle Bucks economy, written down where everybody can see it instead of
+kept in one person's notebook.
 
 **What it adds**
 
-- A *Hero Bucks* page with every entry, and a running total.
-- A form the Secretary and Admin can log earnings and spends with.
-- A balance for each Hero, readable by other Tac-Ons.
-- Ten bucks awarded automatically to whoever wins an election.
+- An *Eagle Bucks* page: your balance, the points you have banked, and every
+  buck the studio has moved in or out.
+- A form any learner can log Core Skills, Quest or community points with, once
+  the work is documented on the Journey Tracker.
+- A ledger only Admin and Secretary can post to - the Shopkeeper's counter.
+  Eagle Bot has no Shopkeeper role, so the position's name is a setting and the
+  posting rights sit with Admin and Secretary.
+- A *Shop* page with the price list, and what has been bought lately.
+- Requests between learners, and a panel on Town Hall showing the ones waiting
+  on a debate.
 
-Other Tac-Ons can read \`entry\` and \`balance\`, so a shop or a raffle can be
-built on top of it without copying the ledger.`,
-    source: `# Hero Bucks - the ledger, not the whiteboard.
-tacon hero-bucks {
-  name "Hero Bucks"
+**The rules it carries**
+
+100 points make one Hero Buck and nobody holds more than ten, both settings you
+can change at install. Eagle Bucks may go negative; points may not. A standard
+guardrail costs 1 buck and a malicious one costs 2, also settings.
+
+Nothing here edits a row after it is filed: a request that Town Hall settles is
+cleared from the list and the outcome is posted to the ledger, which keeps the
+ledger the only place a balance can change.
+
+Other Tac-Ons can read \`points\`, \`ledger\` and \`balance\`, so a raffle or an
+end-of-term summary can be built on top without copying the ledger.`,
+    source: `# Eagle Bucks - the economy, on the same shelf as the Contract.
+tacon eagle-bucks {
+  name "Eagle Bucks"
   version 1.0.0
-  about "Every buck earned and spent, in one place instead of on a whiteboard."
+  about "Points in, bucks out, and every guardrail and purchase in between."
   icon coins
   category tracking
-  provides entry, balance
+  provides points, ledger, balance
 
-  setting election_award {
-    label "Bucks for winning an election"
+  setting shopkeeper {
+    label "Who holds the Shopkeeper position"
+    type text
+    default "Jian Kramer"
+    hint "The Shopkeeper oversees the economy. Change this when the position changes hands."
+  }
+
+  setting points_per_buck {
+    label "Points that make one Hero Buck"
+    type number
+    default 100
+  }
+
+  setting hold_limit {
+    label "Most Hero Bucks one person may hold"
     type number
     default 10
   }
 
-  store entry {
-    label "Ledger entry"
+  setting standard_guardrail {
+    label "What a standard guardrail costs"
+    type number
+    default 1
+    hint "A non-malicious guardrail."
+  }
+
+  setting malicious_guardrail {
+    label "What a malicious guardrail costs"
+    type number
+    default 2
+  }
+
+  # Points come first: they are what the work turns into.
+  store points {
+    label "Points earned"
+    field hero person required
+    field source choice core-skills, quest, community required
+    field amount number required
+    field evidence text
+  }
+
+  # Everything that moves a buck. Bucks going out are a negative amount, which
+  # is why a balance can end up below zero - it is allowed to.
+  store ledger {
+    label "Eagle Bucks entry"
     field hero person required
     field amount number required
-    field kind choice earn, spend
+    field kind choice exchange, guardrail, purchase, borrow, transfer, correction required
+    field points_used number
     field reason text
   }
 
-  ask balance sum of entry.amount where entry.hero is me.id
+  # A learner may ask another learner for bucks. Town Hall decides whether the
+  # request is a fair one; if it stands, the Shopkeeper posts the transfer.
+  store request {
+    label "Request"
+    field hero person required
+    field asked person required
+    field amount number required
+    field why longtext required
+  }
+
+  store price {
+    label "Price"
+    field item text required
+    field cost number required
+    field notes text
+  }
+
+  ask balance sum of ledger.amount where ledger.hero is me.id
+  ask banked_points sum of points.amount where points.hero is me.id
+  ask traded_points sum of ledger.points_used where ledger.hero is me.id
+  ask spare_points my.banked_points minus my.traded_points
+  ask worth my.spare_points divided by setting.points_per_buck
+  ask waiting count of request
 
   page bucks {
-    title "Hero Bucks"
+    title "Eagle Bucks"
     icon coins
     nav true
-    subtitle "The studio's ledger. Every line says who, how much and why."
+    subtitle "What you have earned, what you have spent, and what it cost."
 
-    note "You're holding {my.balance} bucks."
+    note "{setting.shopkeeper} is the Shopkeeper. Bucks have to be earned - they can't be borrowed or loaned." info
+
+    stat "Your balance" {
+      value my.balance
+      hint "Eagle Bucks can go into the negatives. Points can't."
+    }
+
+    stat "Points not yet exchanged" {
+      value my.spare_points
+      hint "{setting.points_per_buck} points make one Hero Buck."
+    }
+
+    stat "Room to earn" {
+      value setting.hold_limit minus my.balance
+      hint "Nobody holds more than {setting.hold_limit} Hero Bucks."
+    }
 
     stat "In circulation" {
-      value sum of entry.amount
-      hint "Across every entry in the ledger."
+      value sum of ledger.amount
+      hint "Every buck the studio is holding, added up."
     }
 
-    stat "Entries" count of entry
+    note "Those points come to {my.worth} Hero Bucks - the till only pays out whole ones."
 
-    form "Log some bucks" {
-      into entry
-      ask hero "Who?"
-      ask amount "How many?"
-      ask kind
-      ask reason "What for?"
-      allow admin, secretary
-      submit "Log it"
+    divider
+
+    heading "Log the work"
+
+    note "Document the work on the Journey Tracker first. Core Skills work, Quest work and serving the community all count."
+
+    form "Log points" {
+      into points
+      ask hero "Who did the work?"
+      ask source "What kind of work?"
+      ask amount "How many points?"
+      ask evidence "Where is it documented?"
+      submit "Log the points"
+      then { notify "Points logged, waiting on the Shopkeeper to exchange them." }
     }
 
-    list entry {
-      title "The ledger"
-      columns hero, amount, kind, reason, created
+    list points {
+      title "Points earned"
+      columns hero, source, amount, evidence, created
       sort newest
       limit 50
-      empty "Nothing logged yet. The first entry is usually somebody being kind."
-      allow remove admin
-    }
-  }
-
-  # Winning an election is worth something.
-  when election.certified {
-    only if event.winner above 0
-    add entry {
-      hero: event.winner
-      amount: setting.election_award
-      kind: "earn"
-      reason: "Elected"
-    }
-    notify "Awarded bucks for a certified election."
-  }
-}`,
-  },
-  {
-    slug: "quest-board",
-    tagline: "The quests running right now, and who signed up.",
-    category: "quests",
-    description: `A studio runs several quests at once and the list of them lives, at best,
-on a wall. This puts the board in the app, next to the Contract that governs it.
-
-**What it adds**
-
-- A *Quests* page listing every quest, its badge and its status.
-- A sign-up form for Heroes.
-- A panel on the Town Hall page showing what's running, so the Secretary can see it while taking notes.`,
-    source: `# The quest board, on the same shelf as the Contract.
-tacon quest-board {
-  name "Quest Board"
-  version 1.0.0
-  about "Every quest the studio is running, who is on it, and what it is worth."
-  icon compass
-  category quests
-  provides quest
-
-  store quest {
-    label "Quest"
-    field title text required
-    field badge text
-    field status choice running, planned, finished
-    field guide person
-    field notes longtext
-  }
-
-  store signup {
-    label "Sign-up"
-    field hero person required
-    field quest text required
-  }
-
-  ask running count of quest where quest.status is "running"
-
-  page quests {
-    title "Quests"
-    icon compass
-    nav true
-    subtitle "What the studio is working on right now."
-
-    stat "Running now" count of quest where quest.status is "running"
-    stat "Finished" count of quest where quest.status is "finished"
-
-    list quest {
-      title "The board"
-      columns title, badge, status, guide
-      where quest.status is not "finished"
-      sort newest
-      limit 30
-      empty "No quests on the board yet."
+      empty "No points logged yet. Document the work first, then log it here."
       allow remove admin, secretary
-    }
-
-    form "Add a quest" {
-      into quest
-      ask title
-      ask badge "Badge it earns"
-      ask status
-      ask guide "Guide running it"
-      allow admin, secretary, guide
-      submit "Put it on the board"
     }
 
     divider
 
-    heading "Sign-ups"
+    heading "The ledger"
 
-    form "Sign up for a quest" {
-      into signup
-      ask hero "Who?"
-      ask quest "Which quest?"
-      submit "Sign me up"
+    note "A standard or non-malicious guardrail costs {setting.standard_guardrail}. A malicious one costs {setting.malicious_guardrail}. Borrowing any school item has to be bought with Eagle Bucks." warning
+
+    form "Move some bucks" {
+      into ledger
+      ask hero "Whose bucks?"
+      ask amount "How many? Put a minus in front of bucks going out."
+      ask kind "What moved them?"
+      ask points_used "Points handed in, if this is an exchange"
+      ask reason "Why?"
+      allow admin, secretary
+      submit "Post it to the ledger"
     }
 
-    list signup {
-      columns hero, quest, created
+    list ledger {
+      title "Every buck in and out"
+      columns hero, amount, kind, points_used, reason, by, created
       sort newest
+      limit 60
+      empty "The ledger is empty. The first line is usually somebody cashing in points."
+      allow remove admin
+    }
+
+    divider
+
+    heading "Asking another learner"
+
+    note "A learner may ask another for Eagle Bucks. Town Hall can debate whether the request is a fair one - if it stands, the Shopkeeper posts a transfer to the ledger and the request comes off this list."
+
+    form "Ask someone for bucks" {
+      into request
+      ask hero "Who is asking?"
+      ask asked "Who are they asking?"
+      ask amount "How many bucks?"
+      ask why "What for?"
+      submit "File the request"
+    }
+
+    list request {
+      title "On the table"
+      columns hero, asked, amount, why, created
+      sort newest
+      limit 30
+      empty "No requests waiting."
+      allow remove admin, secretary
+    }
+  }
+
+  page shop {
+    title "The Shop"
+    icon shopping-bag
+    nav true
+    subtitle "What Eagle Bucks buy, and what they bought lately."
+
+    note "Your balance: {my.balance} Eagle Bucks. {setting.shopkeeper} keeps the till." info
+
+    list price {
+      title "The price list"
+      columns item, cost, notes
+      sort az
       limit 40
-      empty "Nobody has signed up yet."
+      empty "Nothing priced yet. A lunch period of video games is 2 Eagle Bucks; first pick of the Studio-Maintenance job is 1."
+      allow remove admin, secretary
+    }
+
+    form "Price something" {
+      into price
+      ask item "What's for sale?"
+      ask cost "How many Eagle Bucks?"
+      ask notes "Anything to know?"
+      allow admin, secretary
+      submit "Add it to the list"
+    }
+
+    divider
+
+    list ledger {
+      title "Bought lately"
+      columns hero, amount, reason, created
+      where ledger.kind is "purchase"
+      sort newest
+      limit 20
+      empty "Nothing bought yet."
     }
   }
 
   panel on town-hall {
-    title "Quests running"
-    note "{my.running} quests are running right now."
-    list quest {
-      columns title, status
-      where quest.status is "running"
+    title "Eagle Bucks on the table"
+    note "Requests waiting on a debate: {my.waiting}."
+    list request {
+      columns hero, asked, amount, why
       limit 5
-      empty "Nothing running."
-    }
-  }
-}`,
-  },
-  {
-    slug: "gratitude-wall",
-    tagline: "Say something true about somebody, in public.",
-    category: "community",
-    description: `A one-screen Tac-On: anybody can post a short thank-you naming another
-Hero, and the wall keeps them. No roles, no approvals, no editing - which is
-the point.
-
-**What it adds**
-
-- A *Gratitude* page with a form and the wall.
-- A panel on the People page showing the most recent few.`,
-    source: `# The simplest useful Tac-On there is.
-tacon gratitude-wall {
-  name "Gratitude Wall"
-  version 1.0.0
-  about "Anyone can thank anyone, in public, and it stays up."
-  icon heart
-  category community
-
-  store thanks {
-    label "Thank-you"
-    field about person required
-    field message longtext required
-  }
-
-  page gratitude {
-    title "Gratitude"
-    icon heart
-    nav true
-    subtitle "Say something true about somebody."
-
-    stat "Thank-yous" count of thanks
-
-    form "Thank someone" {
-      into thanks
-      ask about "Who?"
-      ask message "What did they do?"
-      submit "Put it on the wall"
-    }
-
-    list thanks {
-      title "The wall"
-      columns about, message, by, created
-      sort newest
-      limit 60
-      empty "The wall is empty. Somebody has to go first."
-      allow remove admin
-    }
-  }
-
-  panel on people {
-    title "Lately on the wall"
-    list thanks {
-      columns about, message
-      limit 3
-      empty "Nothing on the wall yet."
-    }
-  }
-}`,
-  },
-  {
-    slug: "buck-shop",
-    tagline: "Spend Hero Bucks on things the studio actually stocks.",
-    category: "fun",
-    description: `Built on top of **Hero Bucks**, and a worked example of one Tac-On
-reading another. It does not keep its own ledger - it reads the balance the
-Hero Bucks Tac-On publishes, and records purchases of its own.
-
-Install Hero Bucks first; without it the shop still lists its stock, but the
-balance line reads zero.`,
-    source: `# Reads another Tac-On rather than copying it.
-tacon buck-shop {
-  name "Buck Shop"
-  version 1.0.0
-  about "A shop that spends the balance Hero Bucks keeps."
-  icon shopping-bag
-  category fun
-  use hero-bucks as bucks
-
-  store item {
-    label "Item"
-    field name text required
-    field price number required
-    field stock number
-  }
-
-  store purchase {
-    label "Purchase"
-    field hero person required
-    field item text required
-    field paid number
-  }
-
-  page shop {
-    title "Buck Shop"
-    icon shopping-bag
-    nav true
-    subtitle "What the studio stocks, and what it costs."
-
-    note "You have {bucks.balance} bucks to spend." info
-
-    list item {
-      title "In stock"
-      columns name, price, stock
-      sort az
-      limit 40
-      empty "The shelves are empty. An admin can stock them below."
-      allow remove admin
-    }
-
-    form "Stock an item" {
-      into item
-      ask name
-      ask price
-      ask stock
-      allow admin, secretary
-      submit "Add to the shop"
-    }
-
-    divider
-
-    form "Record a purchase" {
-      into purchase
-      ask hero "Who bought it?"
-      ask item "What?"
-      ask paid "How much?"
-      allow admin, secretary
-      submit "Record it"
-    }
-
-    list purchase {
-      title "Recent purchases"
-      columns hero, item, paid, created
-      sort newest
-      limit 20
-      empty "Nothing bought yet."
+      empty "No requests waiting."
     }
   }
 }`,
@@ -355,13 +314,15 @@ tacon buck-shop {
 ];
 
 /**
- * Publishes the starters, once. Anything that fails to compile is skipped with
- * a loud log rather than taking the server down with it - a broken starter is
- * a bug in Eagle Bot, not a reason an academy can't sign in.
+ * Publishes the starters and deletes the retired ones.
+ *
+ * Runs every boot and is idempotent: a Tac-On already in the market is left
+ * exactly as it is, version and all. Anything that fails to compile is skipped
+ * with a loud log rather than taking the server down with it - a broken starter
+ * is a bug in Eagle Bot, not a reason an academy can't sign in.
  */
 export async function seedStarters(): Promise<void> {
-  const [existing] = await db.select({ total: sql<number>`count(*)` }).from(tacons);
-  if (Number(existing?.total ?? 0) > 0) return;
+  await retireStarters();
 
   for (const starter of STARTERS) {
     const result = compile(starter.source);
@@ -374,6 +335,15 @@ export async function seedStarters(): Promise<void> {
     }
 
     const manifest = result.manifest;
+    const [already] = await db
+      .select({ id: tacons.id })
+      .from(tacons)
+      .where(eq(tacons.slug, manifest.slug))
+      .limit(1);
+    // Someone is already running it. Publishing over a version that exists is
+    // refused everywhere else in Eagle Bot, and startup is no exception.
+    if (already) continue;
+
     const [tacon] = await db
       .insert(tacons)
       .values({
@@ -405,7 +375,47 @@ export async function seedStarters(): Promise<void> {
       .update(tacons)
       .set({ latestVersionId: version.id })
       .where(eq(tacons.id, tacon.id));
+
+    console.log(`[tacons] published the official Tac-On "${manifest.slug}" to the market`);
+  }
+}
+
+/**
+ * Removes the official Tac-Ons that no longer ship.
+ *
+ * This deletes rows an academy recorded, which is the same bargain removing any
+ * Tac-On makes - so it counts them first and says so in the log. Only official
+ * listings are touched: a learner's own Tac-On is never anybody else's to pull.
+ */
+async function retireStarters(): Promise<void> {
+  const doomed = await db
+    .select({ id: tacons.id, slug: tacons.slug })
+    .from(tacons)
+    .where(and(inArray(tacons.slug, [...RETIRED_STARTER_SLUGS]), eq(tacons.official, true)));
+
+  if (doomed.length === 0) return;
+
+  const ids = doomed.map((row) => row.id);
+  const installs = await db
+    .select({ id: taconInstalls.id })
+    .from(taconInstalls)
+    .where(inArray(taconInstalls.taconId, ids));
+
+  let records = 0;
+  if (installs.length > 0) {
+    const [counted] = await db
+      .select({ total: sql<number>`count(*)` })
+      .from(taconRecords)
+      .where(inArray(taconRecords.installId, installs.map((row) => row.id)));
+    records = Number(counted?.total ?? 0);
   }
 
-  console.log(`[tacons] seeded ${STARTERS.length} official Tac-Ons into the market`);
+  // Versions, installs and records all cascade from the listing.
+  await db.delete(tacons).where(inArray(tacons.id, ids));
+
+  console.log(
+    `[tacons] retired ${doomed.length} official Tac-On(s) (${doomed
+      .map((row) => row.slug)
+      .join(", ")}): ${installs.length} install(s) and ${records} recorded row(s) deleted`,
+  );
 }

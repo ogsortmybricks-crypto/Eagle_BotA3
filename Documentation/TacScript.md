@@ -41,7 +41,7 @@ tacon hero-bucks {          # lowercase letters, numbers and hyphens
   when ...                   # things that happen by themselves
 
   provides entry, balance    # what other Tac-Ons may read
-  use quest-board as quests  # what you read from them
+  use eagle-bucks as bucks   # what you read from them
 }
 ```
 
@@ -335,14 +335,14 @@ note "You have {my.balance} bucks, {me.name}."
 ## `provides` and `use`
 
 ```
-# in hero-bucks
-provides entry, balance
+# in eagle-bucks
+provides ledger, balance
 
 # in your Tac-On
-use hero-bucks as bucks
+use eagle-bucks as bucks
 
 note "You have {bucks.balance} bucks."
-list bucks.entry { columns hero, amount }
+list bucks.ledger { columns hero, amount }
 ```
 
 Reading only, same academy only, and only what the other Tac-On listed. If it is
