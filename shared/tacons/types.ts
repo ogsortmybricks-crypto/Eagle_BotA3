@@ -231,6 +231,42 @@ export type PanelDef = {
 };
 
 /**
+ * A position the Tac-On adds to the academy's Positions page.
+ *
+ * Installing the Tac-On creates a real position - elected or appointed like any
+ * other, with the same seats and history - and the Tac-On gets to decide what
+ * whoever holds it sees: the widgets in the block are that person's desk, and
+ * the position's name works as an audience anywhere a role does.
+ */
+export type PositionDef = {
+  name: string;
+  title: string;
+  about: string | null;
+  duties: string[];
+  seats: number;
+  term: string | null;
+  elected: boolean;
+  /** The holder's desk, shown on the Positions page to whoever holds it now. */
+  widgets: Widget[];
+};
+
+/**
+ * How a position is written inside an audience list. Role names and position
+ * names share one vocabulary in TacScript (`allow admin, treasurer`), so the
+ * compiled form marks which is which.
+ */
+export const POSITION_AUDIENCE = "position:";
+
+export function positionAudience(name: string): string {
+  return `${POSITION_AUDIENCE}${name}`;
+}
+
+/** The position name in an audience entry, or null for a role. */
+export function audiencePosition(entry: string): string | null {
+  return entry.startsWith(POSITION_AUDIENCE) ? entry.slice(POSITION_AUDIENCE.length) : null;
+}
+
+/**
  * Events a Tac-On can react to. These are the activity-log verbs the base app
  * already writes, which is why the list reads like a summary of the product:
  * anything the academy considers worth recording, a Tac-On can hear.
@@ -301,6 +337,8 @@ export type Manifest = {
   stores: StoreDef[];
   pages: PageDef[];
   panels: PanelDef[];
+  /** Absent on manifests published before positions existed. */
+  positions: PositionDef[];
   hooks: HookDef[];
   computes: ComputeDef[];
 };
@@ -321,6 +359,9 @@ export type CompileResult =
   | { ok: true; manifest: Manifest; diagnostics: Diagnostic[] }
   | { ok: false; manifest: null; diagnostics: Diagnostic[] };
 
-/** Roles a `show to` / `allow` clause accepts, plus the two shorthands. */
+/**
+ * Roles a `show to` / `allow` clause accepts, plus the two shorthands. The
+ * Tac-On's own positions are accepted too, by name.
+ */
 export const AUDIENCES = ["everyone", "admin", "guide", "secretary", "learner", "dev"] as const;
 export type Audience = (typeof AUDIENCES)[number];

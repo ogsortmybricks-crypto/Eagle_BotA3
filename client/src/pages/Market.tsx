@@ -38,7 +38,7 @@ import {
   Stat,
 } from "@/components/ui";
 import { StudioPicker } from "@/components/StudioPicker";
-import type { Manifest } from "@shared/tacons";
+import { audiencePosition, type Manifest } from "@shared/tacons";
 
 type Listing = {
   id: number;
@@ -220,6 +220,17 @@ const NEEDS_WORDS: Record<string, string> = {
   "activity.read": "Read the activity log",
 };
 
+/** `["admin", "position:treasurer"]` as "admin, Treasurer". */
+function audienceLabel(audience: string[], manifest: Manifest): string {
+  return audience
+    .map((entry) => {
+      const name = audiencePosition(entry);
+      if (name === null) return entry;
+      return manifest.positions.find((position) => position.name === name)?.title ?? name;
+    })
+    .join(", ");
+}
+
 export function TaconDetail({ slug }: { slug: string }) {
   const { can } = useSession();
   const formatDate = useDateFormat();
@@ -240,6 +251,7 @@ export function TaconDetail({ slug }: { slug: string }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["tacon-detail", slug] });
       void queryClient.invalidateQueries({ queryKey: ["tacon-nav"] });
+      void queryClient.invalidateQueries({ queryKey: ["positions"] });
       void queryClient.invalidateQueries({ queryKey: ["tacon-market"] });
     },
     onError: (removeError: Error) => setError(removeError.message),
@@ -250,6 +262,7 @@ export function TaconDetail({ slug }: { slug: string }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["tacon-detail", slug] });
       void queryClient.invalidateQueries({ queryKey: ["tacon-nav"] });
+      void queryClient.invalidateQueries({ queryKey: ["positions"] });
     },
     onError: (updateError: Error) => setError(updateError.message),
   });
@@ -260,6 +273,7 @@ export function TaconDetail({ slug }: { slug: string }) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["tacon-detail", slug] });
       void queryClient.invalidateQueries({ queryKey: ["tacon-nav"] });
+      void queryClient.invalidateQueries({ queryKey: ["positions"] });
     },
   });
 
@@ -338,17 +352,26 @@ export function TaconDetail({ slug }: { slug: string }) {
             <div className="card-pad">
               <h2 className="font-semibold text-gray-900">What it adds</h2>
               <ul className="mt-2 space-y-1.5 text-sm text-gray-600">
+                {manifest.positions.map((position) => (
+                  <li key={`position-${position.name}`}>
+                    <span className="font-medium text-gray-800">{position.title}</span> — a position
+                    on the Positions page ({position.elected ? "elected" : "appointed"},{" "}
+                    {position.seats} seat{position.seats === 1 ? "" : "s"})
+                    {position.widgets.length > 0 && ", with a desk only its holder sees"}
+                  </li>
+                ))}
                 {manifest.pages.map((page) => (
                   <li key={page.name}>
                     <span className="font-medium text-gray-800">{page.title}</span> — a page
                     {page.nav ? " in the sidebar" : ", reachable by link"}
-                    {page.showTo.length > 0 && ` (${page.showTo.join(", ")} only)`}
+                    {page.showTo.length > 0 && ` (${audienceLabel(page.showTo, manifest)} only)`}
                   </li>
                 ))}
                 {manifest.panels.map((panel, index) => (
                   <li key={index}>
                     <span className="font-medium text-gray-800">{panel.title}</span> — a panel on the{" "}
                     {panel.host} page
+                    {panel.showTo.length > 0 && ` (${audienceLabel(panel.showTo, manifest)} only)`}
                   </li>
                 ))}
                 {manifest.hooks.map((hook, index) => (
@@ -517,6 +540,7 @@ export function TaconDetail({ slug }: { slug: string }) {
             setInstalling(false);
             void queryClient.invalidateQueries({ queryKey: ["tacon-detail", slug] });
             void queryClient.invalidateQueries({ queryKey: ["tacon-nav"] });
+            void queryClient.invalidateQueries({ queryKey: ["positions"] });
             void queryClient.invalidateQueries({ queryKey: ["tacon-market"] });
           }}
         />

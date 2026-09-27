@@ -27,8 +27,16 @@ import {
 import { requireAuth, requirePermission } from "../auth";
 import { logActivity } from "../activity";
 import { requireScope, writeStudioId, StudioChoiceError } from "../studio";
-import { compile, type Manifest, type PageDef, type PanelDef, type Widget } from "@shared/tacons";
-import type { TaconNavEntry, TaconPanelView, TaconView } from "@shared/tacons/view";
+import {
+  compile,
+  positionAudience,
+  type Manifest,
+  type PageDef,
+  type PanelDef,
+  type PositionDef,
+  type Widget,
+} from "@shared/tacons";
+import type { TaconDeskView, TaconNavEntry, TaconPanelView, TaconView } from "@shared/tacons/view";
 import {
   loadInstall,
   marketListings,
@@ -40,10 +48,12 @@ import {
   addRecord,
   audienceAllows,
   buildRuntime,
+  renderDesk,
   renderPage,
   renderPanel,
   runActions,
 } from "../tacons/runtime";
+import { heldNames, heldPositions, setPositionsArchived, syncPositions } from "../tacons/positions";
 
 export const taconsRouter = Router();
 
@@ -54,12 +64,14 @@ export const taconsRouter = Router();
 /** The sidebar entries installed Tac-Ons contribute, for the current studio. */
 taconsRouter.get("/nav", requirePermission("tacons.use"), async (req, res) => {
   const installs = await visibleInstalls(req.user!.academyId, req.scope);
+  const held = await heldPositions(req.user!.id, installs.map((entry) => entry.install.id));
   const entries: TaconNavEntry[] = [];
 
   for (const entry of installs) {
+    const mine = new Set(held.get(entry.install.id)?.keys() ?? []);
     for (const page of entry.manifest.pages) {
       if (!page.nav) continue;
-      if (!audienceAllows(page.showTo, req.user!)) continue;
+      if (!audienceAllows(page.showTo, req.user!, mine)) continue;
       entries.push({
         installId: entry.install.id,
         page: page.name,
@@ -78,11 +90,13 @@ taconsRouter.get("/nav", requirePermission("tacons.use"), async (req, res) => {
 taconsRouter.get("/panels/:host", requirePermission("tacons.use"), async (req, res) => {
   const host = req.params.host;
   const installs = await visibleInstalls(req.user!.academyId, req.scope);
+  const held = await heldPositions(req.user!.id, installs.map((entry) => entry.install.id));
   const panels: TaconPanelView[] = [];
 
   for (const entry of installs) {
+    const mine = new Set(held.get(entry.install.id)?.keys() ?? []);
     const matching = entry.manifest.panels.filter(
-      (panel) => panel.host === host && audienceAllows(panel.showTo, req.user!),
+      (panel) => panel.host === host && audienceAllows(panel.showTo, req.user!, mine),
     );
     if (matching.length === 0) continue;
 
@@ -101,6 +115,37 @@ taconsRouter.get("/panels/:host", requirePermission("tacons.use"), async (req, r
   res.json({ panels });
 });
 
+/**
+ * The desks of every Tac-On position this person holds - what the Positions
+ * page shows them and nobody else.
+ */
+taconsRouter.get("/desks", requirePermission("tacons.use"), async (req, res) => {
+  const installs = await visibleInstalls(req.user!.academyId, req.scope);
+  const held = await heldPositions(req.user!.id, installs.map((entry) => entry.install.id));
+  const desks: TaconDeskView[] = [];
+
+  for (const entry of installs) {
+    const mine = held.get(entry.install.id);
+    if (!mine) continue;
+    const defs = entry.manifest.positions.filter((def) => mine.has(def.name) && def.widgets.length > 0);
+    if (defs.length === 0) continue;
+
+    const runtime = await buildRuntime({
+      academy: req.academy!,
+      settings: req.settings!,
+      user: req.user!,
+      scope: req.scope,
+      install: entry,
+    });
+    for (const def of defs) {
+      const seat = mine.get(def.name)!;
+      desks.push(await renderDesk(runtime, def, seat.positionId, seat.title));
+    }
+  }
+
+  res.json({ desks });
+});
+
 /* -------------------------------------------------------------------------- */
 /*  Running a Tac-On's page                                                    */
 /* -------------------------------------------------------------------------- */
@@ -117,8 +162,8 @@ taconsRouter.get("/view/:installId/:page", requirePermission("tacons.use"), asyn
 
   const page = entry.manifest.pages.find((candidate) => candidate.name === req.params.page);
   if (!page) return res.status(404).json({ error: "That Tac-On has no such page." });
-  if (!audienceAllows(page.showTo, req.user!)) {
-    return res.status(403).json({ error: "This page isn't open to your role." });
+  if (!audienceAllows(page.showTo, req.user!, await heldNames(req.user!.id, entry.install.id))) {
+    return res.status(403).json({ error: "This page isn't open to your role or your positions." });
   }
 
   const runtime = await buildRuntime({
@@ -132,23 +177,34 @@ taconsRouter.get("/view/:installId/:page", requirePermission("tacons.use"), asyn
   res.json({ view });
 });
 
-/** Finds the widget a submission refers to, in the page or panel it came from. */
+/**
+ * Who may see the widgets in a page, panel or position desk. A desk is for
+ * whoever holds the position right now, and nobody else.
+ */
+function ownerAudience(owner: PageDef | PanelDef | PositionDef): string[] {
+  return "showTo" in owner ? owner.showTo : [positionAudience(owner.name)];
+}
+
+/** Finds the widget a submission refers to, in the page, panel or desk it came from. */
 function findWidget(
   manifest: Manifest,
-  location: { page?: string; panel?: string },
+  location: { page?: string; panel?: string; position?: string },
   index: number,
-): { widget: Widget; owner: PageDef | PanelDef } | null {
-  const owner: PageDef | PanelDef | undefined = location.page
+): { widget: Widget; audience: string[] } | null {
+  const owner: PageDef | PanelDef | PositionDef | undefined = location.page
     ? manifest.pages.find((page) => page.name === location.page)
-    : manifest.panels.find((panel) => panel.host === location.panel);
+    : location.position
+      ? manifest.positions.find((position) => position.name === location.position)
+      : manifest.panels.find((panel) => panel.host === location.panel);
   if (!owner) return null;
   const widget = owner.widgets[index];
-  return widget ? { widget, owner } : null;
+  return widget ? { widget, audience: ownerAudience(owner) } : null;
 }
 
 const submitSchema = z.object({
   page: z.string().max(60).optional(),
   panel: z.string().max(60).optional(),
+  position: z.string().max(60).optional(),
   index: z.number().int().min(0).max(200),
   values: z.record(z.unknown()).default({}),
 });
@@ -168,10 +224,6 @@ taconsRouter.post("/view/:installId/submit", requirePermission("tacons.use"), as
   }
   const form = found.widget;
 
-  if (!audienceAllows(found.owner.showTo, req.user!) || !audienceAllows(form.allow, req.user!)) {
-    return res.status(403).json({ error: "Your role can't add to this." });
-  }
-
   const runtime = await buildRuntime({
     academy: req.academy!,
     settings: req.settings!,
@@ -179,6 +231,13 @@ taconsRouter.post("/view/:installId/submit", requirePermission("tacons.use"), as
     scope: req.scope,
     install: entry,
   });
+
+  if (
+    !audienceAllows(found.audience, req.user!, runtime.held) ||
+    !audienceAllows(form.allow, req.user!, runtime.held)
+  ) {
+    return res.status(403).json({ error: "Your role can't add to this." });
+  }
 
   // Only the fields the form actually asked for are accepted, whatever the
   // browser sent. A form is a contract about what gets written.
@@ -225,9 +284,6 @@ taconsRouter.post("/view/:installId/run", requirePermission("tacons.use"), async
   if (!found || found.widget.kind !== "button") {
     return res.status(404).json({ error: "That button isn't part of this Tac-On." });
   }
-  if (!audienceAllows(found.widget.allow, req.user!)) {
-    return res.status(403).json({ error: "Your role can't do that." });
-  }
 
   const runtime = await buildRuntime({
     academy: req.academy!,
@@ -236,6 +292,13 @@ taconsRouter.post("/view/:installId/run", requirePermission("tacons.use"), async
     scope: req.scope,
     install: entry,
   });
+  if (
+    !audienceAllows(found.audience, req.user!, runtime.held) ||
+    !audienceAllows(found.widget.allow, req.user!, runtime.held)
+  ) {
+    return res.status(403).json({ error: "Your role can't do that." });
+  }
+
   const result = await runActions(runtime, found.widget.does, {
     actorUserId: req.user!.id,
     studioId: entry.install.studioId,
@@ -266,8 +329,10 @@ taconsRouter.delete(
 
     // Removal is only ever offered by a list that said who may remove, so the
     // permission question is "does any such list exist, for this person?".
-    const allowed = [...entry.manifest.pages, ...entry.manifest.panels].some((owner) =>
-      audienceAllows(owner.showTo, req.user!) &&
+    const held = await heldNames(req.user!.id, entry.install.id);
+    const owners = [...entry.manifest.pages, ...entry.manifest.panels, ...entry.manifest.positions];
+    const allowed = owners.some((owner) =>
+      audienceAllows(ownerAudience(owner), req.user!, held) &&
       owner.widgets.some(
         (widget) =>
           widget.kind === "list" &&
@@ -275,7 +340,7 @@ taconsRouter.delete(
           widget.source.store.length === 1 &&
           widget.source.store[0] === record.store &&
           widget.allowRemove.length > 0 &&
-          audienceAllows(widget.allowRemove, req.user!),
+          audienceAllows(widget.allowRemove, req.user!, held),
       ),
     );
     if (!allowed) return res.status(403).json({ error: "Your role can't remove this." });
@@ -453,6 +518,18 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
     })
     .where(eq(tacons.id, tacon.id));
 
+  // Positions the Tac-On declares go onto the Positions page now, in the studio
+  // it was installed into.
+  const [version] = await db
+    .select()
+    .from(taconVersions)
+    .where(eq(taconVersions.id, install.versionId))
+    .limit(1);
+  const manifest = version ? readManifest(version) : null;
+  if (manifest) {
+    await syncPositions({ install, taconName: tacon.name, manifest, actorUserId: req.user!.id });
+  }
+
   await logActivity({
     academyId,
     studioId,
@@ -489,6 +566,11 @@ taconsRouter.patch("/installs/:id", requirePermission("tacons.install"), async (
     .where(eq(taconInstalls.id, entry.install.id))
     .returning();
 
+  // A Tac-On that is off has no positions to hold; its holders come back with it.
+  if (parsed.data.enabled !== undefined && parsed.data.enabled !== entry.install.enabled) {
+    await setPositionsArchived(install, entry.manifest, !parsed.data.enabled);
+  }
+
   res.json({ install });
 });
 
@@ -507,10 +589,21 @@ taconsRouter.post("/installs/:id/update", requirePermission("tacons.install"), a
     .limit(1);
   if (!version) return res.status(409).json({ error: "There's no newer version to move to." });
 
-  await db
+  const [updated] = await db
     .update(taconInstalls)
     .set({ versionId: version.id, updatedAt: new Date() })
-    .where(eq(taconInstalls.id, entry.install.id));
+    .where(eq(taconInstalls.id, entry.install.id))
+    .returning();
+
+  const manifest = readManifest(version);
+  if (manifest) {
+    await syncPositions({
+      install: updated,
+      taconName: entry.tacon.name,
+      manifest,
+      actorUserId: req.user!.id,
+    });
+  }
 
   await logActivity({
     academyId: req.user!.academyId,
@@ -534,6 +627,10 @@ taconsRouter.delete("/installs/:id", requirePermission("tacons.install"), async 
     .from(taconRecords)
     .where(eq(taconRecords.installId, entry.install.id));
 
+  // Its positions are archived, not deleted: who held them is the studio's
+  // history, not the Tac-On's.
+  const archivedPositions = await setPositionsArchived(entry.install, entry.manifest, true);
+
   // Uninstalling takes the Tac-On's rows with it, so the count goes in the log
   // where an admin can find it afterwards.
   await db.delete(taconInstalls).where(eq(taconInstalls.id, entry.install.id));
@@ -549,11 +646,11 @@ taconsRouter.delete("/installs/:id", requirePermission("tacons.install"), async 
     action: "tacon.uninstalled",
     entityType: "tacon",
     entityId: entry.tacon.id,
-    summary: `${req.user!.name} removed "${entry.tacon.name}" and its ${Number(total)} saved row${Number(total) === 1 ? "" : "s"}.`,
-    metadata: { slug: entry.tacon.slug, records: Number(total) },
+    summary: `${req.user!.name} removed "${entry.tacon.name}" and its ${Number(total)} saved row${Number(total) === 1 ? "" : "s"}${archivedPositions ? `, and archived the ${archivedPositions} position${archivedPositions === 1 ? "" : "s"} it added` : ""}.`,
+    metadata: { slug: entry.tacon.slug, records: Number(total), archivedPositions },
   });
 
-  res.json({ ok: true, removedRecords: Number(total) });
+  res.json({ ok: true, removedRecords: Number(total), archivedPositions });
 });
 
 /* -------------------------------------------------------------------------- */

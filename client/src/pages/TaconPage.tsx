@@ -14,7 +14,7 @@ import { apiGet } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { Banner, Chip, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
 import { TaconViewBody, Widgets } from "@/tacons/Renderer";
-import type { TaconView } from "@shared/tacons/view";
+import type { TaconDeskView, TaconView } from "@shared/tacons/view";
 
 export function TaconPage({ installId, page }: { installId: number; page: string }) {
   const { studioId, can } = useSession();
@@ -118,6 +118,68 @@ export function TaconPanels({ host }: { host: string }) {
                 installId: panel.installId,
                 panel: host,
                 people: panel.people,
+                onChanged: refresh,
+              }}
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The desks of the Tac-On positions the person looking holds.
+ *
+ * A Tac-On that adds a position decides what its holder sees, and this is where
+ * they see it: at the top of the Positions page, one card per seat. Nobody who
+ * doesn't hold the position is sent a desk at all, so it renders nothing for
+ * them - same as a panel that fails.
+ */
+export function TaconDesks() {
+  const { studioId, can } = useSession();
+  const queryClient = useQueryClient();
+
+  const query = useQuery<{ desks: TaconDeskView[] }>({
+    queryKey: ["tacon-desks", studioId],
+    queryFn: () => apiGet("/tacons/desks"),
+    retry: false,
+    enabled: can("tacons.use"),
+  });
+
+  const desks = query.data?.desks ?? [];
+  if (desks.length === 0) return null;
+
+  const refresh = () => {
+    void queryClient.invalidateQueries({ queryKey: ["tacon-desks"] });
+  };
+
+  return (
+    <div className="mb-6 space-y-4">
+      {desks.map((desk) => (
+        <div
+          key={`${desk.installId}-${desk.position}`}
+          className="card-pad border-brand-200 ring-1 ring-brand-100"
+        >
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="text-xs font-medium uppercase tracking-wide text-brand-700">
+                Your desk
+              </div>
+              <h2 className="font-semibold text-gray-900">{desk.title}</h2>
+            </div>
+            <Chip>{desk.taconName}</Chip>
+          </div>
+          {desk.widgets.length === 0 ? (
+            <Banner tone="info">This desk has nothing to show right now.</Banner>
+          ) : (
+            <Widgets
+              widgets={desk.widgets}
+              compact
+              target={{
+                installId: desk.installId,
+                position: desk.position,
+                people: desk.people,
                 onChanged: refresh,
               }}
             />

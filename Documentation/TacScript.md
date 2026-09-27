@@ -38,6 +38,7 @@ tacon hero-bucks {          # lowercase letters, numbers and hyphens
   ask ...                    # numbers worked out from those tables
   page ...                   # pages in the sidebar
   panel ...                  # cards on Eagle Bot's own pages
+  position ...               # positions on the Positions page, and their holder's desk
   when ...                   # things that happen by themselves
 
   provides entry, balance    # what other Tac-Ons may read
@@ -45,8 +46,8 @@ tacon hero-bucks {          # lowercase letters, numbers and hyphens
 }
 ```
 
-Only `name`, `version` and one of `page` / `panel` / `when` are required. The
-compiler will tell you if something is missing.
+Only `name`, `version` and one of `page` / `panel` / `position` / `when` are
+required. The compiler will tell you if something is missing.
 
 ---
 
@@ -236,6 +237,81 @@ Panels can attach to `wiki`, `town-hall`, `elections`, `positions`, `people` and
 
 ---
 
+## `position` — a seat on the Positions page
+
+```
+position treasurer {
+  title "Treasurer"
+  about "Keeps the ledger honest and reports at every Town Hall."
+  seats 1                  # 1 to 20
+  term "One session"
+  elected true             # or `appointed`
+  duties "Post every entry the same day", "Report the balance at Town Hall"
+
+  # Everything else in the block is the holder's desk.
+  note "{my.waiting} requests are waiting on you."
+  form "Post to the ledger" {
+    into entry
+    ask hero
+    ask amount
+  }
+}
+```
+
+When an admin installs the Tac-On, this becomes a real position on the
+Positions page, in the studio the Tac-On was installed into. The studio elects
+or appoints someone to it exactly as it would any other position.
+
+**The desk.** Any widget inside the block — `note`, `stat`, `list`, `form`,
+`button` — is shown at the top of the Positions page to whoever holds the
+position right now, under *Your desk*, and to nobody else. Not even admins see
+it unless they hold the seat. When their term ends, the desk goes to the next
+holder.
+
+**The position as an audience.** A position's name works anywhere a role does:
+
+```
+page ledger {
+  show to treasurer, admin       # only the Treasurer and admins see the page
+  ...
+  form "Correct an entry" {
+    allow treasurer              # only the Treasurer can submit
+    ...
+  }
+  list entry { allow remove treasurer }
+}
+```
+
+A page shown only to a position appears in the holder's sidebar and nobody
+else's. You can name a position before you declare it, as long as it is
+declared somewhere in the file. A position can't share its name with a role
+(`admin`, `learner` and so on).
+
+**Who holds it.** `position.treasurer` reads the holders' names, or *nobody
+yet*:
+
+```
+note "The Treasurer is {position.treasurer}."
+```
+
+| | |
+| --- | --- |
+| `position.treasurer` | The holders' names, joined with commas |
+| `position.treasurer.holder` | The first holder's id (for a `person` field, or `is me.id`) |
+| `position.treasurer.holders` | How many people hold it |
+
+These work inside `when` reactions too. A Tac-On can only read its own
+positions this way.
+
+**Updates and removal.** Publishing a new version doesn't change anybody's
+position until their admin presses Update. Then the title, duties, seats and
+term are reset to what the new version declares. A position you drop from the
+source is archived; its history stays. Turning the Tac-On off archives its
+positions, turning it on brings them back with the same holders, and removing
+it archives them for good.
+
+---
+
 ## `when` — reacting on its own
 
 ```
@@ -291,6 +367,7 @@ quietly.
 | `my.balance` | One of your own `ask` values |
 | `setting.rate` | What the admin filled in |
 | `event.winner` | Inside a `when` only |
+| `position.treasurer` | Who holds one of your positions |
 | `entry.amount` | A field of the row being tested |
 | `bucks.balance` | Another Tac-On's, via `use` |
 
@@ -354,7 +431,8 @@ working.
 ## Audiences
 
 `show to` and `allow` take any of `everyone`, `admin`, `guide`, `secretary`,
-`learner`, `dev`. Leaving the line out means everyone who can open the page.
+`learner`, `dev`, plus the names of your own `position`s, which mean *whoever
+holds it right now*. Leaving the line out means everyone who can open the page.
 
 ---
 
@@ -364,7 +442,8 @@ working.
 - A new `version` every time you publish. Versions already published are frozen.
 - Lists, forms and reactions have to name a store that exists.
 - `provides` has to name a store or value that exists.
-- A Tac-On has to add something: a page, a panel or a `when`.
+- A Tac-On has to add something: a page, a panel, a position or a `when`.
+- A position needs its own name — not a role's, and not another position's.
 
 The editor checks all of this as you type, with the line number. If it says
 **Compiles**, it will publish.

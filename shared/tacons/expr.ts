@@ -331,6 +331,11 @@ export type EvalContext = {
   records: (source: string[]) => Row[];
   /** Named values: ["balance"] for our own, ["bucks", "balance"] for another's. */
   compute: (path: string[]) => unknown;
+  /**
+   * The Tac-On's own positions, by name: `{ names, holder, holders, title }`.
+   * `position.treasurer` reads the names; `.holder` is the first holder's id.
+   */
+  positions: Record<string, Row>;
 };
 
 export function evaluate(expr: Expr | null, ctx: EvalContext): unknown {
@@ -401,6 +406,11 @@ function resolvePath(parts: string[], ctx: EvalContext): unknown {
     return dig(ctx.me, rest);
   }
   if (lower === "event") return dig(ctx.event, rest);
+  if ((lower === "position" || lower === "positions") && rest.length > 0) {
+    // `position.treasurer` on its own means who holds it, as words.
+    const [name, ...field] = rest;
+    return dig(ctx.positions[name] ?? { names: "nobody yet", holder: null, holders: 0 }, field.length ? field : ["names"]);
+  }
   if (lower === "setting" || lower === "settings") return dig(ctx.setting, rest);
   if (lower === "row" || lower === "it" || lower === "this") return dig(ctx.row ?? {}, rest);
   if (ctx.rowAliases.includes(root)) return dig(ctx.row ?? {}, rest);

@@ -31,9 +31,16 @@ export type LoadedInstall = {
   studioName: string | null;
 };
 
-/** A manifest that survived the round trip through JSONB, or null. */
+/**
+ * A manifest that survived the round trip through JSONB, or null.
+ *
+ * Versions published before the language grew a feature are stored without
+ * it, so missing lists are filled in here rather than checked everywhere.
+ */
 export function readManifest(version: Pick<TaconVersion, "manifest">): Manifest | null {
-  return isManifest(version.manifest) ? (version.manifest as unknown as Manifest) : null;
+  if (!isManifest(version.manifest)) return null;
+  const manifest = version.manifest as unknown as Manifest;
+  return { ...manifest, positions: manifest.positions ?? [] };
 }
 
 /**

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 620" font-family="Helvetica, Arial, sans-serif">
+  <title>Eagle Bot sales funnel</title>
+  <rect width="900" height="620" fill="#FBF8F2"/>
+  <text x="450" y="44" text-anchor="middle" font-size="26" font-weight="700" fill="#1F2A44">The Eagle Bot Funnel</text>
+  <text x="450" y="70" text-anchor="middle" font-size="14" fill="#5B6478">From "never heard of it" to "our learners ship Tac-Ons to other academies"</text>
+
+  <!-- Stage 1 -->
+  <path d="M60 95 H600 L570 170 H90 Z" fill="#1F2A44"/>
+  <text x="330" y="128" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">1 · AWARE</text>
+  <text x="330" y="152" text-anchor="middle" font-size="13" fill="#D5DAE6">Owner forums · conferences · learner-built Tac-Ons</text>
+
+  <!-- Stage 2 -->
+  <path d="M90 180 H570 L540 255 H120 Z" fill="#2E4A7D"/>
+  <text x="330" y="213" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">2 · CURIOUS</text>
+  <text x="330" y="237" text-anchor="middle" font-size="13" fill="#D5DAE6">Free "Contract → Wiki" scan of their own Contract</text>
+
+  <!-- Stage 3 -->
+  <path d="M120 265 H540 L510 340 H150 Z" fill="#3F6BB0"/>
+  <text x="330" y="298" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">3 · CONVINCED</text>
+  <text x="330" y="322" text-anchor="middle" font-size="13" fill="#E6ECF7">Live demo run by Eagle learners</text>
+
+  <!-- Stage 4 -->
+  <path d="M150 350 H510 L480 425 H180 Z" fill="#E08A2E"/>
+  <text x="330" y="383" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">4 · PILOT</text>
+  <text x="330" y="407" text-anchor="middle" font-size="13" fill="#FFF1E0">30 days, one studio, no card</text>
+
+  <!-- Stage 5 -->
+  <path d="M180 435 H480 L450 510 H210 Z" fill="#C4691B"/>
+  <text x="330" y="468" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">5 · PAYING</text>
+  <text x="330" y="492" text-anchor="middle" font-size="13" fill="#FFF1E0">Founding Academy plan</text>
+
+  <!-- Stage 6 -->
+  <path d="M210 520 H450 L430 585 H230 Z" fill="#2F8F6B"/>
+  <text x="330" y="550" text-anchor="middle" font-size="18" font-weight="700" fill="#fff">6 · ADVOCATE</text>
+  <text x="330" y="571" text-anchor="middle" font-size="12" fill="#E1F4EC">All studios · learners publish</text>
+
+  <!-- Loop back arrow -->
+  <path d="M455 555 C 700 555, 720 140, 612 132" fill="none" stroke="#2F8F6B" stroke-width="3" stroke-dasharray="8 6"/>
+  <polygon points="612,132 626,124 624,142" fill="#2F8F6B"/>
+  <text x="690" y="340" font-size="13" fill="#2F8F6B" font-weight="700">Referral loop</text>
+  <text x="690" y="358" font-size="12" fill="#5B6478">Tac-Ons installed at</text>
+  <text x="690" y="374" font-size="12" fill="#5B6478">other academies carry</text>
+  <text x="690" y="390" font-size="12" fill="#5B6478">the author's academy name</text>
+
+  <!-- Target rates -->
+  <g font-size="12" fill="#5B6478">
+    <text x="612" y="178">↓ 25% ask for a scan</text>
+    <text x="582" y="263">↓ 50% book a demo</text>
+    <text x="552" y="348">↓ 60% start a pilot</text>
+    <text x="522" y="433">↓ 50% convert</text>
+    <text x="492" y="518">↓ 40% expand</text>
+  </g>
+</svg>

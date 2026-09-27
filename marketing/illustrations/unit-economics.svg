@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <title>Monthly cost vs revenue as academies join</title>
+  <rect width="900" height="560" fill="#FBF8F2"/>
+  <text x="450" y="42" text-anchor="middle" font-size="24" font-weight="700" fill="#1F2A44">Monthly revenue vs. cost as academies join</text>
+  <text x="450" y="66" text-anchor="middle" font-size="13" fill="#5B6478">Estimates from 03-pricing-and-costs.md · Academy plan at $149/mo · ~$18 of Claude API per academy</text>
+
+  <!-- axes: x from 110 to 840 (0..20 academies), y from 470 (0) to 110 ($3000) -->
+  <g stroke="#D5DAE6" stroke-width="1">
+    <line x1="110" y1="470" x2="840" y2="470"/>
+    <line x1="110" y1="398" x2="840" y2="398"/>
+    <line x1="110" y1="326" x2="840" y2="326"/>
+    <line x1="110" y1="254" x2="840" y2="254"/>
+    <line x1="110" y1="182" x2="840" y2="182"/>
+    <line x1="110" y1="110" x2="840" y2="110"/>
+  </g>
+  <g font-size="12" fill="#5B6478" text-anchor="end">
+    <text x="100" y="474">$0</text>
+    <text x="100" y="402">$600</text>
+    <text x="100" y="330">$1,200</text>
+    <text x="100" y="258">$1,800</text>
+    <text x="100" y="186">$2,400</text>
+    <text x="100" y="114">$3,000</text>
+  </g>
+  <g font-size="12" fill="#5B6478" text-anchor="middle">
+    <text x="110" y="492">0</text>
+    <text x="292.5" y="492">5</text>
+    <text x="475" y="492">10</text>
+    <text x="657.5" y="492">15</text>
+    <text x="840" y="492">20</text>
+    <text x="475" y="520" font-size="13">Paying academies</text>
+  </g>
+
+  <!-- Revenue: 149*n -> y = 470 - 149n*0.12 ; n=20 -> 2980 -> y=112.4 -->
+  <polyline points="110,470 840,112.4" fill="none" stroke="#2F8F6B" stroke-width="4"/>
+  <!-- Cost: 45 fixed + 18n (+ ~$10/academy hosting at scale ≈ 28n) ; n=0 ->45 -> y=464.6 ; n=20 -> 605 -> y=397.4 -->
+  <polyline points="110,464.6 840,397.4" fill="none" stroke="#C4691B" stroke-width="4"/>
+
+  <!-- break-even marker at n=1 -->
+  <circle cx="146.5" cy="452.1" r="7" fill="#1F2A44"/>
+  <line x1="146.5" y1="445" x2="200" y2="380" stroke="#1F2A44" stroke-width="1.5"/>
+  <text x="204" y="372" font-size="13" font-weight="700" fill="#1F2A44">Break-even: 1 academy</text>
+  <text x="204" y="389" font-size="12" fill="#5B6478">covers Claude + Replit subscriptions</text>
+
+  <!-- labels -->
+  <text x="700" y="150" font-size="14" font-weight="700" fill="#2F8F6B">Revenue</text>
+  <text x="700" y="168" font-size="12" fill="#5B6478">$149 × academies</text>
+  <text x="700" y="385" font-size="14" font-weight="700" fill="#C4691B">Cost</text>
+  <text x="700" y="440" font-size="12" fill="#5B6478">$45 fixed + ~$28 per academy</text>
+  <text x="700" y="456" font-size="12" fill="#5B6478">(API + hosting headroom)</text>
+
+  <text x="450" y="545" text-anchor="middle" font-size="12" fill="#5B6478">At 20 academies: ≈ $2,980 in, ≈ $605 out, ≈ 80% gross margin</text>
+</svg>

@@ -12,14 +12,16 @@
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
-import { taconInstalls, taconRecords, taconVersions, tacons } from "@shared/schema";
-import { compile } from "@shared/tacons";
+import { positions, taconInstalls, taconRecords, taconVersions, tacons } from "@shared/schema";
+import { compile, type Manifest } from "@shared/tacons";
 
 type Starter = {
   slug: string;
   tagline: string;
   description: string;
   category: string;
+  /** What changed in the version `source` declares. */
+  changelog: string;
   source: string;
 };
 
@@ -43,6 +45,8 @@ export const STARTERS: Starter[] = [
     slug: "eagle-bucks",
     tagline: "The Shopkeeper's ledger: points earned, bucks exchanged, guardrails paid.",
     category: "tracking",
+    changelog:
+      "Adds a Shopkeeper position to the Positions page, with a desk for whoever holds it. The Shopkeeper can post to the ledger and price the shop; the Shopkeeper setting is gone.",
     description: `The Eagle Bucks economy, written down where everybody can see it instead of
 kept in one person's notebook.
 
@@ -52,9 +56,11 @@ kept in one person's notebook.
   buck the studio has moved in or out.
 - A form any learner can log Core Skills, Quest or community points with, once
   the work is documented on the Journey Tracker.
-- A ledger only Admin and Secretary can post to - the Shopkeeper's counter.
-  Eagle Bot has no Shopkeeper role, so the position's name is a setting and the
-  posting rights sit with Admin and Secretary.
+- A **Shopkeeper** position on the Positions page, elected like any other. Only
+  the Shopkeeper, Admin and Secretary can post to the ledger or price the shop.
+- The Shopkeeper's desk: whoever holds the position sees the points waiting to
+  be exchanged, the requests on the table and a counter to post from, right on
+  their Positions page.
 - A *Shop* page with the price list, and what has been bought lately.
 - Requests between learners, and a panel on Town Hall showing the ones waiting
   on a debate.
@@ -74,18 +80,11 @@ end-of-term summary can be built on top without copying the ledger.`,
     source: `# Eagle Bucks - the economy, on the same shelf as the Contract.
 tacon eagle-bucks {
   name "Eagle Bucks"
-  version 1.0.0
+  version 1.1.0
   about "Points in, bucks out, and every guardrail and purchase in between."
   icon coins
   category tracking
   provides points, ledger, balance
-
-  setting shopkeeper {
-    label "Who holds the Shopkeeper position"
-    type text
-    default "Jian Kramer"
-    hint "The Shopkeeper oversees the economy. Change this when the position changes hands."
-  }
 
   setting points_per_buck {
     label "Points that make one Hero Buck"
@@ -155,6 +154,51 @@ tacon eagle-bucks {
   ask spare_points my.banked_points minus my.traded_points
   ask worth my.spare_points divided by setting.points_per_buck
   ask waiting count of request
+  ask unexchanged sum of points.amount minus sum of ledger.points_used
+
+  # The Shopkeeper runs the till. Installing Eagle Bucks puts this position on
+  # the Positions page; whoever the studio elects to it gets the desk below,
+  # and the ledger and price list open up to them.
+  position shopkeeper {
+    title "Shopkeeper"
+    about "Oversees the Eagle Bucks economy: exchanges points for bucks, keeps the ledger and prices the shop."
+    seats 1
+    term "One session"
+    elected true
+    duties "Exchange documented points for Hero Bucks", "Post every buck in and out to the ledger", "Post the transfer when Town Hall upholds a request", "Keep the price list current"
+
+    stat "Points waiting to be exchanged" {
+      value my.unexchanged
+      hint "Every point logged, minus every point already handed in. {setting.points_per_buck} make one Hero Buck."
+    }
+
+    form "Post to the ledger" {
+      into ledger
+      ask hero "Whose bucks?"
+      ask amount "How many? Put a minus in front of bucks going out."
+      ask kind "What moved them?"
+      ask points_used "Points handed in, if this is an exchange"
+      ask reason "Why?"
+      submit "Post it"
+    }
+
+    list request {
+      title "Requests on the table"
+      columns hero, asked, amount, why, created
+      sort oldest
+      limit 20
+      empty "No requests waiting."
+      allow remove shopkeeper, admin, secretary
+    }
+
+    list points {
+      title "Points logged lately"
+      columns hero, source, amount, evidence, created
+      sort newest
+      limit 15
+      empty "Nothing logged yet."
+    }
+  }
 
   page bucks {
     title "Eagle Bucks"
@@ -162,7 +206,7 @@ tacon eagle-bucks {
     nav true
     subtitle "What you have earned, what you have spent, and what it cost."
 
-    note "{setting.shopkeeper} is the Shopkeeper. Bucks have to be earned - they can't be borrowed or loaned." info
+    note "The Shopkeeper is {position.shopkeeper}. Bucks have to be earned - they can't be borrowed or loaned." info
 
     stat "Your balance" {
       value my.balance
@@ -208,7 +252,7 @@ tacon eagle-bucks {
       sort newest
       limit 50
       empty "No points logged yet. Document the work first, then log it here."
-      allow remove admin, secretary
+      allow remove shopkeeper, admin, secretary
     }
 
     divider
@@ -224,7 +268,7 @@ tacon eagle-bucks {
       ask kind "What moved them?"
       ask points_used "Points handed in, if this is an exchange"
       ask reason "Why?"
-      allow admin, secretary
+      allow shopkeeper, admin, secretary
       submit "Post it to the ledger"
     }
 
@@ -258,7 +302,7 @@ tacon eagle-bucks {
       sort newest
       limit 30
       empty "No requests waiting."
-      allow remove admin, secretary
+      allow remove shopkeeper, admin, secretary
     }
   }
 
@@ -268,7 +312,7 @@ tacon eagle-bucks {
     nav true
     subtitle "What Eagle Bucks buy, and what they bought lately."
 
-    note "Your balance: {my.balance} Eagle Bucks. {setting.shopkeeper} keeps the till." info
+    note "Your balance: {my.balance} Eagle Bucks. The Shopkeeper, {position.shopkeeper}, keeps the till." info
 
     list price {
       title "The price list"
@@ -276,7 +320,7 @@ tacon eagle-bucks {
       sort az
       limit 40
       empty "Nothing priced yet. A lunch period of video games is 2 Eagle Bucks; first pick of the Studio-Maintenance job is 1."
-      allow remove admin, secretary
+      allow remove shopkeeper, admin, secretary
     }
 
     form "Price something" {
@@ -284,7 +328,7 @@ tacon eagle-bucks {
       ask item "What's for sale?"
       ask cost "How many Eagle Bucks?"
       ask notes "Anything to know?"
-      allow admin, secretary
+      allow shopkeeper, admin, secretary
       submit "Add it to the list"
     }
 
@@ -316,10 +360,12 @@ tacon eagle-bucks {
 /**
  * Publishes the starters and deletes the retired ones.
  *
- * Runs every boot and is idempotent: a Tac-On already in the market is left
- * exactly as it is, version and all. Anything that fails to compile is skipped
- * with a loud log rather than taking the server down with it - a broken starter
- * is a bug in Eagle Bot, not a reason an academy can't sign in.
+ * Runs every boot and is idempotent. A starter already in the market gets a new
+ * version only when its source declares one that isn't published yet - never
+ * an overwrite - and academies running it are offered the update like any
+ * other. Anything that fails to compile is skipped with a loud log rather than
+ * taking the server down with it - a broken starter is a bug in Eagle Bot, not
+ * a reason an academy can't sign in.
  */
 export async function seedStarters(): Promise<void> {
   await retireStarters();
@@ -336,13 +382,17 @@ export async function seedStarters(): Promise<void> {
 
     const manifest = result.manifest;
     const [already] = await db
-      .select({ id: tacons.id })
+      .select({ id: tacons.id, official: tacons.official })
       .from(tacons)
       .where(eq(tacons.slug, manifest.slug))
       .limit(1);
-    // Someone is already running it. Publishing over a version that exists is
-    // refused everywhere else in Eagle Bot, and startup is no exception.
-    if (already) continue;
+    if (already) {
+      // Publishing over a version that exists is refused everywhere else in
+      // Eagle Bot, and startup is no exception. A slug somebody else owns is
+      // theirs.
+      if (already.official) await publishNewVersion(already.id, starter, manifest);
+      continue;
+    }
 
     const [tacon] = await db
       .insert(tacons)
@@ -367,7 +417,7 @@ export async function seedStarters(): Promise<void> {
         version: manifest.version,
         source: starter.source,
         manifest: manifest as unknown as Record<string, unknown>,
-        changelog: "First release.",
+        changelog: starter.changelog,
       })
       .returning();
 
@@ -378,6 +428,43 @@ export async function seedStarters(): Promise<void> {
 
     console.log(`[tacons] published the official Tac-On "${manifest.slug}" to the market`);
   }
+}
+
+/** Publishes the starter's version on a listing that doesn't have it yet. */
+async function publishNewVersion(taconId: number, starter: Starter, manifest: Manifest): Promise<void> {
+  const [published] = await db
+    .select({ id: taconVersions.id })
+    .from(taconVersions)
+    .where(and(eq(taconVersions.taconId, taconId), eq(taconVersions.version, manifest.version)))
+    .limit(1);
+  if (published) return;
+
+  const [version] = await db
+    .insert(taconVersions)
+    .values({
+      taconId,
+      version: manifest.version,
+      source: starter.source,
+      manifest: manifest as unknown as Record<string, unknown>,
+      changelog: starter.changelog,
+    })
+    .returning();
+
+  await db
+    .update(tacons)
+    .set({
+      name: manifest.name,
+      icon: manifest.icon,
+      tagline: starter.tagline,
+      description: starter.description,
+      latestVersionId: version.id,
+      updatedAt: new Date(),
+    })
+    .where(eq(tacons.id, taconId));
+
+  console.log(
+    `[tacons] published ${manifest.version} of the official Tac-On "${manifest.slug}"; installs keep their version until an admin updates`,
+  );
 }
 
 /**
@@ -408,6 +495,14 @@ async function retireStarters(): Promise<void> {
       .from(taconRecords)
       .where(inArray(taconRecords.installId, installs.map((row) => row.id)));
     records = Number(counted?.total ?? 0);
+  }
+
+  // Positions they added outlive them, archived, with their history.
+  if (installs.length > 0) {
+    await db
+      .update(positions)
+      .set({ archived: true, updatedAt: new Date() })
+      .where(inArray(positions.taconInstallId, installs.map((row) => row.id)));
   }
 
   // Versions, installs and records all cascade from the listing.

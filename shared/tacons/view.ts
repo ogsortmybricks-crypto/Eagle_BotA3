@@ -100,6 +100,19 @@ export type TaconPanelView = {
   people: ViewPerson[];
 };
 
+/** What a Tac-On shows the holder of one of its positions, on the Positions page. */
+export type TaconDeskView = {
+  installId: number;
+  taconName: string;
+  /** The position's name in the Tac-On's source - how a submission finds it. */
+  position: string;
+  /** The row on the Positions page this desk belongs to. */
+  positionId: number;
+  title: string;
+  widgets: ViewWidget[];
+  people: ViewPerson[];
+};
+
 /** The sidebar entry an installed Tac-On contributes. */
 export type TaconNavEntry = {
   installId: number;

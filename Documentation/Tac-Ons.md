@@ -75,6 +75,31 @@ An installed Tac-On's pages appear in the sidebar under a **Tac-Ons** heading,
 kept separate from Eagle Bot's own pages on purpose. Panels appear at the bottom
 of whichever page they attach to, each labelled with the Tac-On it came from.
 
+### Positions a Tac-On adds
+
+Some Tac-Ons add a position. Eagle Bucks, for example, adds a **Shopkeeper**.
+The details page lists these under *What it adds*. Installing puts the position
+on the **Positions** page, in the studio you installed into, with a purple tag
+naming the Tac-On. From then on it is an ordinary position: the studio elects or
+appoints someone to it, and its history is kept like any other.
+
+The difference is that the Tac-On decides what the holder sees:
+
+- **Their desk.** At the top of the Positions page, the holder sees a *Your desk*
+  card with whatever the Tac-On gives them — for the Shopkeeper, the points
+  waiting to be exchanged, the requests on the table, and a form to post to the
+  ledger. Nobody else sees it, including admins who don't hold the seat.
+- **What they can open and do.** A Tac-On can open a page, panel, form or button
+  to a position's holder. On the Eagle Bucks page, the ledger form works for the
+  Shopkeeper, the Admin and the Secretary, and is read-only for everyone else.
+
+When the term ends, all of that passes to whoever holds the position next.
+
+You can edit a Tac-On's position like any other. Updating the Tac-On resets its
+title, duties and seats to what the new version declares. **Turn off** archives
+the position and **Turn on** brings it back with the same holder. **Remove**
+archives it for good, and the record of who held it stays.
+
 ### Updates
 
 When a dev publishes a new version, nothing changes for you until you say so.
@@ -247,7 +272,12 @@ Tac-On: installable, removable, and readable as a worked example.
 
 | Tac-On | What it does |
 | --- | --- |
-| **Eagle Bucks** | The whole economy: points logged against Core Skills, Quest and community work; a ledger only Admin and Secretary can post to; a price list; and requests between learners, with a panel on Town Hall for the ones waiting on a debate. |
+| **Eagle Bucks** | The whole economy: points logged against Core Skills, Quest and community work; a **Shopkeeper** position with its own desk; a ledger and price list only the Shopkeeper, Admin and Secretary can post to; and requests between learners, with a panel on Town Hall for the ones waiting on a debate. |
+
+Version 1.1.0 added the Shopkeeper position and dropped the old free-text
+*Shopkeeper* setting. A server that already published 1.0.0 publishes 1.1.0 on
+its next start. Academies running 1.0.0 keep it until an admin presses
+**Update**, which is when the Shopkeeper appears on their Positions page.
 
 Eagle Bucks publishes `points`, `ledger` and `balance` under `provides`, so it is
 also the thing to read from if you are writing a raffle, a shop of your own or an
@@ -274,7 +304,8 @@ npm run db:push
 
 New tables: `tacons`, `tacon_versions`, `tacon_installs`, `tacon_records`,
 `portal_devs`, `portal_invites`, `portal_notices`, plus three columns on `users`
-(`dev_status`, `dev_handle`, `dev_since`).
+(`dev_status`, `dev_handle`, `dev_since`) and two on `positions`
+(`tacon_install_id`, `tacon_position`) for positions a Tac-On added.
 
 Optional environment variable:
 

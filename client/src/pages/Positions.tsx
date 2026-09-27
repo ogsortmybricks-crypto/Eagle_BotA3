@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Pencil, Plus, Shield, UserPlus, Vote, X } from "lucide-react";
+import { Archive, Pencil, Plus, Puzzle, Shield, UserPlus, Vote, X } from "lucide-react";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { useDateFormat, useSession } from "@/lib/session";
 import {
@@ -17,7 +17,7 @@ import {
 import { StudioTag } from "@/components/StudioSwitcher";
 import { StudioPicker } from "@/components/StudioPicker";
 import { SharedWithNote, SharedWithPicker } from "@/components/SharedWithPicker";
-import { TaconPanels } from "@/pages/TaconPage";
+import { TaconDesks, TaconPanels } from "@/pages/TaconPage";
 
 type Holder = {
   id: number;
@@ -43,6 +43,8 @@ type Position = {
   elected: boolean;
   archived: boolean;
   sourceType: string;
+  /** For a Tac-On's position, the Tac-On's name. */
+  sourceRef: string | null;
   current: Holder[];
   past: { id: number; name: string; endedAt: string }[];
   activeElection: { id: number; title: string; status: string } | null;
@@ -82,6 +84,8 @@ export function Positions() {
         )}
       </PageHeader>
 
+      <TaconDesks />
+
       {positions.length === 0 ? (
         <EmptyState icon={Shield} title="No positions recorded">
           When the AI reads {studio ? `${studio.name}'s` : "a studio's"} documents it pulls out
@@ -110,6 +114,11 @@ export function Positions() {
                       {position.seats} seat{position.seats === 1 ? "" : "s"}
                     </Chip>
                     {position.termLength && <Chip>{position.termLength}</Chip>}
+                    {position.sourceType === "tacon" && (
+                      <Chip tone="purple">
+                        <Puzzle className="h-3 w-3" /> {position.sourceRef ?? "Tac-On"}
+                      </Chip>
+                    )}
                   </div>
                 </div>
                 {can("positions.manage") && (
@@ -288,6 +297,13 @@ function PositionModal({ position, onClose }: { position: Position | null; onClo
     >
       <div className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
+        {position?.sourceType === "tacon" && (
+          <Banner tone="info">
+            The Tac-On {position.sourceRef ?? ""} added this position and decides what its holder
+            sees. Your edits stick until the Tac-On is updated, which resets the title, duties and
+            seats to what it declares. Removing the Tac-On archives the position.
+          </Banner>
+        )}
         <div>
           <label className="label" htmlFor="pos-title">
             Title
@@ -444,6 +460,9 @@ function AppointModal({ position, onClose }: { position: Position; onClose: () =
     mutationFn: () => apiPost(`/positions/${position.id}/holders`, { userId, note }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["positions"] });
+      // Holding a Tac-On's position can open a desk and pages in the sidebar.
+      void queryClient.invalidateQueries({ queryKey: ["tacon-desks"] });
+      void queryClient.invalidateQueries({ queryKey: ["tacon-nav"] });
       onClose();
     },
     onError: (appointError: Error) => setError(appointError.message),

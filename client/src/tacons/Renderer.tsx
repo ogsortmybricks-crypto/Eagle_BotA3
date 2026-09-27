@@ -24,9 +24,10 @@ import type {
 
 export type RenderTarget = {
   installId: number;
-  /** One of these is set - a Tac-On page, or a panel on a base page. */
+  /** One of these is set - a Tac-On page, a panel on a base page, or a position's desk. */
   page?: string;
   panel?: string;
+  position?: string;
   people: ViewPerson[];
   /** Refetches the view after something is written. */
   onChanged: () => void;
@@ -191,6 +192,7 @@ function FormView({ form, target }: { form: ViewForm; target: RenderTarget }) {
       apiPost(`/tacons/view/${target.installId}/submit`, {
         page: target.page,
         panel: target.panel,
+        position: target.position,
         index: form.index,
         values,
       }),
@@ -344,6 +346,7 @@ function ButtonView({
       apiPost<{ notices: string[] }>(`/tacons/view/${target.installId}/run`, {
         page: target.page,
         panel: target.panel,
+        position: target.position,
         index,
       }),
     onSuccess: (result) => {

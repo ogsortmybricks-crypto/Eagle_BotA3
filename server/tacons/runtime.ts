@@ -52,8 +52,9 @@ import {
   type StoreDef,
   type Widget,
 } from "@shared/tacons";
-import { SOURCE_PERMISSIONS } from "@shared/tacons";
+import { SOURCE_PERMISSIONS, audiencePosition, type PositionDef } from "@shared/tacons";
 import type {
+  TaconDeskView,
   TaconPanelView,
   TaconView,
   ViewColumn,
@@ -65,6 +66,7 @@ import { logActivity } from "../activity";
 import { scoped, studioFilter, type StudioScope } from "../studio";
 import type { LoadedInstall } from "./registry";
 import { resolveUses } from "./registry";
+import { heldNames, positionFacts, type PositionFacts } from "./positions";
 
 /**
  * How many rows one store contributes to a `sum` or a filtered list.
@@ -88,6 +90,10 @@ export type Runtime = {
   computed: Map<string, unknown>;
   resolving: Set<string>;
   people: Map<number, string>;
+  /** The Tac-On's positions the viewer holds right now, by name. */
+  held: Set<string>;
+  /** What `position.<name>` reads. */
+  positions: PositionFacts;
 };
 
 export async function buildRuntime(options: {
@@ -105,6 +111,10 @@ export async function buildRuntime(options: {
     .where(and(eq(users.academyId, options.academy.id), eq(users.active, true)));
   for (const person of roster) people.set(person.id, person.name);
 
+  const installId = options.install.install.id;
+  const held = options.user ? await heldNames(options.user.id, installId) : new Set<string>();
+  const positions = await positionFacts(installId, options.install.manifest);
+
   return {
     academyId: options.academy.id,
     user: options.user,
@@ -116,6 +126,8 @@ export async function buildRuntime(options: {
     computed: new Map(),
     resolving: new Set(),
     people,
+    held,
+    positions,
   };
 }
 
@@ -123,13 +135,24 @@ export async function buildRuntime(options: {
 /*  Audiences                                                                  */
 /* -------------------------------------------------------------------------- */
 
-/** An empty list means everyone who can already open the page. */
-export function audienceAllows(audience: string[], user: User | null): boolean {
+const NOTHING_HELD: ReadonlySet<string> = new Set();
+
+/**
+ * An empty list means everyone who can already open the page. `held` is the
+ * Tac-On's positions this person holds, for audiences that name one.
+ */
+export function audienceAllows(
+  audience: string[],
+  user: User | null,
+  held: ReadonlySet<string> = NOTHING_HELD,
+): boolean {
   if (audience.length === 0) return true;
   if (!user) return false;
-  return audience.some((entry) =>
-    entry === "dev" ? user.devStatus : entry === user.role,
-  );
+  return audience.some((entry) => {
+    const position = audiencePosition(entry);
+    if (position !== null) return held.has(position);
+    return entry === "dev" ? user.devStatus : entry === user.role;
+  });
 }
 
 const AUDIENCE_PLURALS: Record<string, string> = {
@@ -140,9 +163,13 @@ const AUDIENCE_PLURALS: Record<string, string> = {
   dev: "devs",
 };
 
-function audienceWords(audience: string[]): string {
+function audienceWords(audience: string[], manifest: Manifest): string {
   if (audience.length === 0) return "anyone";
-  const words = audience.map((role) => AUDIENCE_PLURALS[role] ?? `${role}s`);
+  const words = audience.map((role) => {
+    const position = audiencePosition(role);
+    if (position === null) return AUDIENCE_PLURALS[role] ?? `${role}s`;
+    return `the ${manifest.positions.find((def) => def.name === position)?.title ?? position}`;
+  });
   if (words.length === 1) return words[0];
   return `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
 }
@@ -344,6 +371,9 @@ export function contextFor(
       : {},
     event: options.event ?? {},
     setting: settingValues(runtime),
+    // Another Tac-On's positions are its own business, so a borrowed value
+    // reads none of them.
+    positions: prefix.length === 0 ? runtime.positions : {},
     row: options.row ?? null,
     rowAliases: [],
     records: (source) => {
@@ -640,7 +670,11 @@ async function renderList(runtime: Runtime, widget: ListWidget): Promise<ViewWid
   }
 
   const columns: ViewColumn[] = widget.columns.map((key) => ({ key, ...columnLabel(store, key) }));
-  const canRemove = storeName !== null && !storeName.includes(".") && audienceAllows(widget.allowRemove, runtime.user) && widget.allowRemove.length > 0;
+  const canRemove =
+    storeName !== null &&
+    !storeName.includes(".") &&
+    widget.allowRemove.length > 0 &&
+    audienceAllows(widget.allowRemove, runtime.user, runtime.held);
 
   const viewRows: ViewRow[] = sorted.slice(0, widget.limit).map((row) => ({
     id: (row.id as number | string) ?? "",
@@ -690,14 +724,16 @@ async function renderWidget(runtime: Runtime, widget: Widget, index: number): Pr
     case "form": {
       const store = storeDef(runtime.install.manifest, widget.into);
       if (!store) return null;
-      const allowed = audienceAllows(widget.allow, runtime.user);
+      const allowed = audienceAllows(widget.allow, runtime.user, runtime.held);
       return {
         kind: "form",
         index,
         title: widget.title,
         submitLabel: widget.submitLabel,
         allowed,
-        deniedReason: allowed ? null : `Only ${audienceWords(widget.allow)} can add to this.`,
+        deniedReason: allowed
+          ? null
+          : `Only ${audienceWords(widget.allow, runtime.install.manifest)} can add to this.`,
         fields: widget.fields.flatMap((entry) => {
           const field = store.fields.find((candidate) => candidate.name === entry.field);
           if (!field) return [];
@@ -720,7 +756,7 @@ async function renderWidget(runtime: Runtime, widget: Widget, index: number): Pr
         index,
         label: widget.label,
         confirm: widget.confirm,
-        allowed: audienceAllows(widget.allow, runtime.user),
+        allowed: audienceAllows(widget.allow, runtime.user, runtime.held),
       };
   }
 }
@@ -784,6 +820,32 @@ export async function renderPanel(runtime: Runtime, panel: PanelDef): Promise<Ta
     taconName: runtime.install.tacon.name,
     title: panel.title,
     icon: runtime.install.manifest.icon,
+    widgets,
+    people: peopleList(runtime),
+  };
+}
+
+/** A position holder's desk, for the Positions page. Only called for holders. */
+export async function renderDesk(
+  runtime: Runtime,
+  def: PositionDef,
+  positionId: number,
+  title: string,
+): Promise<TaconDeskView> {
+  await preloadForWidgets(runtime, def.widgets);
+
+  const widgets: ViewWidget[] = [];
+  for (const [index, widget] of def.widgets.entries()) {
+    const rendered = await renderWidget(runtime, widget, index);
+    if (rendered) widgets.push(rendered);
+  }
+
+  return {
+    installId: runtime.install.install.id,
+    taconName: runtime.install.tacon.name,
+    position: def.name,
+    positionId,
+    title,
     widgets,
     people: peopleList(runtime),
   };

@@ -391,6 +391,7 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
                   <li>
                     {manifest.pages.length} page{manifest.pages.length === 1 ? "" : "s"},{" "}
                     {manifest.panels.length} panel{manifest.panels.length === 1 ? "" : "s"},{" "}
+                    {manifest.positions.length} position{manifest.positions.length === 1 ? "" : "s"},{" "}
                     {manifest.hooks.length} reaction{manifest.hooks.length === 1 ? "" : "s"}
                   </li>
                   <li>

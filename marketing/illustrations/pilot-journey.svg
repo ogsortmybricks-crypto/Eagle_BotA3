@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 400" font-family="Helvetica, Arial, sans-serif">
+  <title>The 30-day pilot journey</title>
+  <rect width="960" height="400" fill="#FBF8F2"/>
+  <text x="480" y="42" text-anchor="middle" font-size="24" font-weight="700" fill="#1F2A44">The 30-Day Pilot</text>
+  <text x="480" y="66" text-anchor="middle" font-size="13" fill="#5B6478">Four "aha" moments. If a studio hits all four, it almost always pays.</text>
+
+  <line x1="80" y1="200" x2="880" y2="200" stroke="#1F2A44" stroke-width="4"/>
+  <polygon points="880,192 896,200 880,208" fill="#1F2A44"/>
+
+  <g>
+    <circle cx="140" cy="200" r="22" fill="#1F2A44"/>
+    <text x="140" y="206" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">1</text>
+    <text x="140" y="140" text-anchor="middle" font-size="13" font-weight="700" fill="#1F2A44">Day 1</text>
+    <text x="140" y="250" text-anchor="middle" font-size="14" font-weight="700" fill="#1F2A44">Wiki built</text>
+    <text x="140" y="270" text-anchor="middle" font-size="12" fill="#5B6478">Contract + ROE uploaded,</text>
+    <text x="140" y="286" text-anchor="middle" font-size="12" fill="#5B6478">contradictions found</text>
+
+    <circle cx="340" cy="200" r="22" fill="#3F6BB0"/>
+    <text x="340" y="206" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">2</text>
+    <text x="340" y="140" text-anchor="middle" font-size="13" font-weight="700" fill="#1F2A44">Week 1</text>
+    <text x="340" y="250" text-anchor="middle" font-size="14" font-weight="700" fill="#1F2A44">First Town Hall</text>
+    <text x="340" y="270" text-anchor="middle" font-size="12" fill="#5B6478">notes → Contract updates</text>
+    <text x="340" y="286" text-anchor="middle" font-size="12" fill="#5B6478">approved by learners</text>
+
+    <circle cx="540" cy="200" r="22" fill="#E08A2E"/>
+    <text x="540" y="206" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">3</text>
+    <text x="540" y="140" text-anchor="middle" font-size="13" font-weight="700" fill="#1F2A44">Week 2</text>
+    <text x="540" y="250" text-anchor="middle" font-size="14" font-weight="700" fill="#1F2A44">Election + Eagle Bucks</text>
+    <text x="540" y="270" text-anchor="middle" font-size="12" fill="#5B6478">positions filled, ledger</text>
+    <text x="540" y="286" text-anchor="middle" font-size="12" fill="#5B6478">Tac-On installed</text>
+
+    <circle cx="740" cy="200" r="22" fill="#2F8F6B"/>
+    <text x="740" y="206" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">4</text>
+    <text x="740" y="140" text-anchor="middle" font-size="13" font-weight="700" fill="#1F2A44">Week 3</text>
+    <text x="740" y="250" text-anchor="middle" font-size="14" font-weight="700" fill="#1F2A44">Learner dev</text>
+    <text x="740" y="270" text-anchor="middle" font-size="12" fill="#5B6478">one learner publishes</text>
+    <text x="740" y="286" text-anchor="middle" font-size="12" fill="#5B6478">their first Tac-On</text>
+  </g>
+
+  <rect x="820" y="120" width="120" height="50" rx="10" fill="#C4691B"/>
+  <text x="880" y="142" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">Day 28</text>
+  <text x="880" y="160" text-anchor="middle" font-size="12" fill="#FFF1E0">Owner call</text>
+
+  <text x="480" y="350" text-anchor="middle" font-size="13" fill="#5B6478">Track each moment in the pilot tracker (05-launch-playbook.md). A stalled step = a call from us that week.</text>
+</svg>

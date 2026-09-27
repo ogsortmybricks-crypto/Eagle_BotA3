@@ -23,6 +23,7 @@ import {
   HOOK_EVENTS,
   PANEL_HOSTS,
   SOURCE_PERMISSIONS,
+  positionAudience,
   type Action,
   type Audience,
   type BaseSource,
@@ -38,6 +39,7 @@ import {
   type PageDef,
   type PanelDef,
   type PanelHost,
+  type PositionDef,
   type SettingDef,
   type StoreDef,
   type StoreField,
@@ -57,6 +59,8 @@ type Ctx = {
   computes: Set<string>;
   uses: Map<string, UseDef>;
   needs: Set<string>;
+  /** Position names, collected up front so any `allow` can name one. */
+  positions: Set<string>;
 };
 
 function error(ctx: Ctx, node: { line: number; column: number }, message: string) {
@@ -67,17 +71,22 @@ function warn(ctx: Ctx, node: { line: number; column: number }, message: string)
   ctx.diagnostics.push({ line: node.line, column: node.column, severity: "warning", message });
 }
 
-/** `show to admin, secretary` / `allow learner` / `show to everyone`. */
+/** `show to admin, secretary` / `allow learner` / `show to everyone` / `allow treasurer`. */
 function audiences(ctx: Ctx, node: Node): string[] {
   const list = words(node.args).filter((word) => word.toLowerCase() !== "to");
   const roles: string[] = [];
   for (const entry of list) {
     const lower = entry.toLowerCase();
+    if (ctx.positions.has(entry)) {
+      roles.push(positionAudience(entry));
+      continue;
+    }
     if (!(AUDIENCES as readonly string[]).includes(lower)) {
+      const own = [...ctx.positions];
       error(
         ctx,
         node,
-        `"${entry}" isn't an audience. Use ${AUDIENCES.join(", ")}.`,
+        `"${entry}" isn't an audience. Use ${[...AUDIENCES, ...own].join(", ")}.`,
       );
       continue;
     }
@@ -721,6 +730,76 @@ function compilePanel(ctx: Ctx, node: Node): PanelDef | null {
   return panel;
 }
 
+/** The lines that describe a position rather than draw on its holder's desk. */
+const POSITION_KEYS = ["title", "about", "description", "duties", "duty", "seats", "term", "elected", "appointed"];
+
+function compilePosition(ctx: Ctx, node: Node): PositionDef | null {
+  const name = text(node.args[0]);
+  if (!IDENTIFIER.test(name)) {
+    error(ctx, node, 'A position needs a one-word name, like `position treasurer { ... }`.');
+    return null;
+  }
+
+  const position: PositionDef = {
+    name,
+    title: titleCase(name),
+    about: null,
+    duties: [],
+    seats: 1,
+    term: null,
+    elected: true,
+    widgets: [],
+  };
+
+  for (const child of node.children) {
+    const keyword = child.keyword.toLowerCase();
+    switch (keyword) {
+      case "title":
+        position.title = joined(child.args) || position.title;
+        break;
+      case "about":
+      case "description":
+        position.about = joined(child.args) || null;
+        break;
+      case "duties":
+      case "duty":
+        // `duties "Keep the ledger", "Report at Town Hall"` - one quoted line
+        // each. Unquoted words are read as a single duty.
+        if (child.args.every((token) => token.kind === "string")) {
+          position.duties.push(...words(child.args));
+        } else if (joined(child.args)) {
+          position.duties.push(joined(child.args));
+        }
+        break;
+      case "seats": {
+        const seats = Number(text(child.args[0]));
+        if (!Number.isInteger(seats) || seats < 1 || seats > 20) {
+          error(ctx, child, "Seats is a whole number from 1 to 20, like `seats 2`.");
+        } else {
+          position.seats = seats;
+        }
+        break;
+      }
+      case "term":
+        position.term = joined(child.args) || null;
+        break;
+      case "elected":
+        position.elected = flag(child);
+        break;
+      case "appointed":
+        position.elected = !flag(child);
+        break;
+    }
+  }
+
+  // Anything else in the block is the holder's desk.
+  position.widgets = compileWidgets(
+    ctx,
+    node.children.filter((child) => !POSITION_KEYS.includes(child.keyword.toLowerCase())),
+  );
+  return position;
+}
+
 function compileHook(ctx: Ctx, node: Node): HookDef | null {
   const eventName = text(node.args[0]);
   if (!(HOOK_EVENTS as readonly string[]).includes(eventName)) {
@@ -768,6 +847,7 @@ export function compile(source: string): CompileResult {
     computes: new Set(),
     uses: new Map(),
     needs: new Set(),
+    positions: new Set(),
   };
 
   const roots = parsed.nodes.filter((node) => node.keyword.toLowerCase() === "tacon");
@@ -814,6 +894,7 @@ export function compile(source: string): CompileResult {
     stores: [],
     pages: [],
     panels: [],
+    positions: [],
     hooks: [],
     computes: [],
   };
@@ -842,6 +923,17 @@ export function compile(source: string): CompileResult {
     } else if (keyword === "setting") {
       const setting = compileSetting(ctx, node);
       if (setting) manifest.settings.push(setting);
+    } else if (keyword === "position") {
+      // Only the name for now, so a page above the position can `allow` it.
+      const name = text(node.args[0]);
+      if (!IDENTIFIER.test(name)) continue; // compilePosition reports it.
+      if ((AUDIENCES as readonly string[]).includes(name.toLowerCase())) {
+        error(ctx, node, `"${name}" is already a role. Give the position its own name.`);
+      } else if (ctx.positions.has(name)) {
+        error(ctx, node, `There's already a position called "${name}".`);
+      } else {
+        ctx.positions.add(name);
+      }
     }
   }
 
@@ -907,6 +999,15 @@ export function compile(source: string): CompileResult {
         break;
       }
 
+      case "position": {
+        const position = compilePosition(ctx, node);
+        // A duplicate or a role's name was reported in the first pass.
+        if (position && ctx.positions.has(position.name) && !manifest.positions.some((entry) => entry.name === position.name)) {
+          manifest.positions.push(position);
+        }
+        break;
+      }
+
       case "when": {
         const hook = compileHook(ctx, node);
         if (hook) manifest.hooks.push(hook);
@@ -935,7 +1036,7 @@ export function compile(source: string): CompileResult {
         error(
           ctx,
           node,
-          `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, page, panel, when, ask, needs, provides or use.`,
+          `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, page, panel, position, when, ask, needs, provides or use.`,
         );
     }
   }
@@ -957,9 +1058,10 @@ export function compile(source: string): CompileResult {
   if (
     manifest.pages.length === 0 &&
     manifest.panels.length === 0 &&
+    manifest.positions.length === 0 &&
     manifest.hooks.length === 0
   ) {
-    error(ctx, root, "This Tac-On doesn't add anything: give it a page, a panel or a `when`.");
+    error(ctx, root, "This Tac-On doesn't add anything: give it a page, a panel, a position or a `when`.");
   }
 
   const failed = ctx.diagnostics.some((entry) => entry.severity === "error");

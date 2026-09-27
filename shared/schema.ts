@@ -380,12 +380,23 @@ export const positions = pgTable(
     archived: boolean("archived").notNull().default(false),
     sourceType: text("source_type").notNull().default("manual"),
     sourceRef: text("source_ref"),
+    /**
+     * Set when a Tac-On added this position (`sourceType` "tacon"). The Tac-On
+     * decides what its holder sees; `taconPosition` is its name in the source.
+     * Removing the Tac-On archives the position and keeps who held it - the
+     * history of who held what is the point of this table.
+     */
+    taconInstallId: integer("tacon_install_id").references(() => taconInstalls.id, {
+      onDelete: "set null",
+    }),
+    taconPosition: text("tacon_position"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (t) => ({
     academyIdx: index("positions_academy_idx").on(t.academyId),
     studioIdx: index("positions_studio_idx").on(t.studioId),
+    taconIdx: index("positions_tacon_idx").on(t.taconInstallId),
   }),
 );
 

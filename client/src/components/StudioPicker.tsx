@@ -27,7 +27,10 @@ export function StudioPicker({
 }) {
   const { studios, studio, studioId, can } = useSession();
   const canShare = allowShared ?? can("academy.manage");
-  const resolved = value === undefined ? studioId : value;
+  // Following the view while viewing every studio means nothing is chosen yet.
+  // Resolving that to `null` used to show "Academy-wide" as picked without ever
+  // reporting it, so re-picking it fired no change and the form stayed locked.
+  const resolved = value === undefined ? (studioId ?? undefined) : value;
 
   // With one studio and no academy-wide option there is nothing to ask.
   if (studios.length <= 1 && !canShare && studioId !== null) {

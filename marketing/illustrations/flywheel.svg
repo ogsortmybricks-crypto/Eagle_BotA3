@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 640" font-family="Helvetica, Arial, sans-serif">
+  <title>The Tac-On flywheel</title>
+  <rect width="800" height="640" fill="#FBF8F2"/>
+  <text x="400" y="44" text-anchor="middle" font-size="26" font-weight="700" fill="#1F2A44">The Tac-On Flywheel</text>
+  <text x="400" y="70" text-anchor="middle" font-size="14" fill="#5B6478">Every academy that joins makes Eagle Bot more valuable to the next one</text>
+
+  <circle cx="400" cy="350" r="190" fill="none" stroke="#D5DAE6" stroke-width="28"/>
+  <!-- arrows along ring -->
+  <g fill="#3F6BB0">
+    <polygon points="560,230 578,262 548,258"/>
+    <polygon points="545,480 515,500 520,470"/>
+    <polygon points="250,470 232,440 262,444"/>
+    <polygon points="255,220 285,200 280,230"/>
+  </g>
+
+  <!-- nodes -->
+  <g>
+    <rect x="300" y="120" width="200" height="74" rx="14" fill="#1F2A44"/>
+    <text x="400" y="152" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">Academy joins</text>
+    <text x="400" y="174" text-anchor="middle" font-size="12" fill="#D5DAE6">gives a learner dev status</text>
+
+    <rect x="560" y="312" width="200" height="74" rx="14" fill="#3F6BB0"/>
+    <text x="660" y="344" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">Learner builds</text>
+    <text x="660" y="366" text-anchor="middle" font-size="12" fill="#E6ECF7">a Tac-On in TacScript</text>
+
+    <rect x="300" y="506" width="200" height="74" rx="14" fill="#E08A2E"/>
+    <text x="400" y="538" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">Market grows</text>
+    <text x="400" y="560" text-anchor="middle" font-size="12" fill="#FFF1E0">other academies install it</text>
+
+    <rect x="40" y="312" width="200" height="74" rx="14" fill="#2F8F6B"/>
+    <text x="140" y="344" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">Word spreads</text>
+    <text x="140" y="366" text-anchor="middle" font-size="12" fill="#E1F4EC">"who made this?" → a new lead</text>
+  </g>
+
+  <circle cx="400" cy="350" r="88" fill="#fff" stroke="#1F2A44" stroke-width="2"/>
+  <text x="400" y="340" text-anchor="middle" font-size="15" font-weight="700" fill="#1F2A44">Real World,</text>
+  <text x="400" y="360" text-anchor="middle" font-size="15" font-weight="700" fill="#1F2A44">Real Stakes</text>
+  <text x="400" y="382" text-anchor="middle" font-size="11" fill="#5B6478">real users, real installs</text>
+</svg>
