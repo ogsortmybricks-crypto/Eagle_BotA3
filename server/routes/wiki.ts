@@ -1,7 +1,7 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import multer from "multer";
 import { z } from "zod";
-import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, ne, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
   aiFindings,
@@ -11,12 +11,26 @@ import {
   wikiRevisions,
   wikiRules,
   wikiSections,
+  type ProposedOperation,
 } from "@shared/schema";
 import { requirePermission } from "../auth";
 import { logActivity } from "../activity";
 import { extractText, UnsupportedFileError, ACCEPTED_EXTENSIONS } from "../extract";
-import { createJob, startBuildWiki } from "../ai/jobs";
-import { applyOperations, revertJob, slugify } from "../ai/apply";
+import {
+  createJob,
+  queueProposals,
+  settleFinding,
+  startBuildWiki,
+  startResolveFinding,
+} from "../ai/jobs";
+import {
+  applyOperations,
+  changedSince,
+  findingRevisions,
+  revertFinding,
+  revertJob,
+  slugify,
+} from "../ai/apply";
 import { aiConfigured } from "../env";
 import {
   canReadShared,
@@ -632,21 +646,289 @@ wikiRouter.post("/jobs/:id/revert", requirePermission("wiki.edit"), async (req, 
 
 /* ------------------------------- findings --------------------------------- */
 
+/**
+ * One line of a proposed fix, in words: what it adds, changes or strikes out,
+ * with the rule's current text alongside so nobody approves a change blind.
+ */
+type ChangePreview = {
+  kind: "section" | "add" | "change" | "repeal" | "move";
+  title: string;
+  /** The section it lands in, for adds and moves. */
+  where: string | null;
+  before: string | null;
+  after: string | null;
+  /** The rule it names is gone or already repealed - the fix is out of date. */
+  stale: boolean;
+};
+
+async function previewOperations(
+  academyId: number,
+  operations: ProposedOperation[],
+): Promise<ChangePreview[]> {
+  const ruleIds = operations.flatMap((op) => ("ruleId" in op ? [op.ruleId] : []));
+  const rules = ruleIds.length
+    ? await db
+        .select()
+        .from(wikiRules)
+        .where(and(eq(wikiRules.academyId, academyId), inArray(wikiRules.id, ruleIds)))
+    : [];
+  const sections = await db
+    .select({ slug: wikiSections.slug, title: wikiSections.title })
+    .from(wikiSections)
+    .where(eq(wikiSections.academyId, academyId));
+  const sectionTitle = (key: string) => {
+    const created = operations.find((op) => op.op === "create_section" && op.key === key);
+    if (created?.op === "create_section") return created.title;
+    return sections.find((section) => section.slug === key)?.title ?? key;
+  };
+
+  return operations.map((op): ChangePreview => {
+    const rule = "ruleId" in op ? rules.find((entry) => entry.id === op.ruleId) : undefined;
+    const missing = "ruleId" in op && (!rule || rule.status === "repealed");
+    switch (op.op) {
+      case "create_section":
+        return { kind: "section", title: op.title, where: null, before: null, after: op.summary, stale: false };
+      case "create_rule":
+        return { kind: "add", title: op.title, where: sectionTitle(op.sectionKey), before: null, after: op.body, stale: false };
+      case "amend_rule":
+        return {
+          kind: "change",
+          title: op.title,
+          where: null,
+          before: rule ? (rule.title === op.title ? rule.body : `**${rule.title}**\n\n${rule.body}`) : null,
+          after: op.body,
+          stale: missing,
+        };
+      case "repeal_rule":
+        return { kind: "repeal", title: rule?.title ?? `Rule ${op.ruleId}`, where: null, before: rule?.body ?? null, after: null, stale: missing };
+      case "move_rule":
+        return { kind: "move", title: rule?.title ?? `Rule ${op.ruleId}`, where: sectionTitle(op.sectionKey), before: null, after: null, stale: missing };
+    }
+  });
+}
+
 wikiRouter.get("/findings", requirePermission("wiki.read"), async (req, res) => {
   const status = (req.query.status as string) || "open";
   const scope = requireScope(req);
+  const academyId = req.user!.academyId;
+
+  // "settled" is the recent history the Wiki page offers an undo on.
   const base =
     status === "all"
-      ? eq(aiFindings.academyId, req.user!.academyId)
-      : and(eq(aiFindings.academyId, req.user!.academyId), eq(aiFindings.status, status));
+      ? eq(aiFindings.academyId, academyId)
+      : status === "settled"
+        ? and(
+            eq(aiFindings.academyId, academyId),
+            eq(aiFindings.status, "resolved"),
+            gte(aiFindings.resolvedAt, new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)),
+          )
+        : and(eq(aiFindings.academyId, academyId), eq(aiFindings.status, status));
 
   const rows = await db
     .select()
     .from(aiFindings)
     .where(scoped(base, aiFindings.studioId, scope))
-    .orderBy(desc(aiFindings.severity), desc(aiFindings.id));
-  res.json({ findings: rows });
+    .orderBy(
+      ...(status === "settled"
+        ? [desc(aiFindings.resolvedAt)]
+        : [desc(aiFindings.severity), desc(aiFindings.id)]),
+    )
+    .limit(status === "settled" ? 10 : 500);
+
+  const findings = [];
+  for (const row of rows) {
+    const operations = row.proposal?.operations ?? [];
+    const settled = row.status === "resolved";
+    const revisions = settled ? await findingRevisions(academyId, row.id) : [];
+    findings.push({
+      ...row,
+      // An open finding's preview is checked against the wiki as it is now;
+      // a settled one's is history, so staleness means nothing there.
+      preview: settled || operations.length === 0 ? [] : await previewOperations(academyId, operations),
+      changes: revisions.length,
+      canUndo: settled && revisions.length > 0,
+    });
+  }
+  res.json({ findings });
 });
+
+/** A finding this person may act on, or null after sending the 404. */
+async function loadFinding(req: Request, res: Response) {
+  const scope = requireScope(req);
+  const [finding] = await db
+    .select()
+    .from(aiFindings)
+    .where(and(eq(aiFindings.id, Number(req.params.id)), eq(aiFindings.academyId, req.user!.academyId)))
+    .limit(1);
+  if (!finding || !canReadStudio(scope, finding.studioId)) {
+    res.status(404).json({ error: "That finding doesn't exist." });
+    return null;
+  }
+  return finding;
+}
+
+/** The same switches the wiki build checks, as a 4xx the page can show. */
+function aiUnavailable(req: Request, res: Response): boolean {
+  if (!aiConfigured) {
+    res.status(503).json({ error: "The Claude API key isn't set, so AI features are off." });
+    return true;
+  }
+  if (!req.settings!.ai.enabled) {
+    res.status(403).json({ error: "AI features are switched off in this academy's settings." });
+    return true;
+  }
+  return false;
+}
+
+/** Asks the AI to draft (or redraft) a fix for one finding. */
+wikiRouter.post(
+  "/findings/:id/propose",
+  requirePermission("findings.resolve"),
+  async (req, res) => {
+    if (aiUnavailable(req, res)) return;
+    const finding = await loadFinding(req, res);
+    if (!finding) return;
+    if (finding.status !== "open") return res.status(409).json({ error: "That's already settled." });
+    if (finding.proposalState === "drafting") {
+      return res.status(409).json({ error: "A fix is already being written for this." });
+    }
+
+    const job = await queueProposals({
+      academyId: finding.academyId,
+      studioId: finding.studioId,
+      requestedBy: req.user!.id,
+      findingIds: [finding.id],
+    });
+    res.status(202).json({ jobId: job?.id ?? null });
+  },
+);
+
+/** Puts the AI's drafted fix into the wiki. */
+wikiRouter.post(
+  "/findings/:id/approve",
+  requirePermission("findings.resolve"),
+  requirePermission("wiki.edit"),
+  async (req, res) => {
+    const finding = await loadFinding(req, res);
+    if (!finding) return;
+    if (finding.status !== "open") return res.status(409).json({ error: "That's already settled." });
+    if (finding.proposalState !== "ready" || !finding.proposal) {
+      return res.status(409).json({ error: "There's no fix ready to approve yet." });
+    }
+
+    // A fix drafted against yesterday's wiki can name a rule that has since been
+    // repealed. Applying half of it would be worse than applying none.
+    const preview = await previewOperations(finding.academyId, finding.proposal.operations);
+    const stale = preview.filter((change) => change.stale);
+    if (stale.length > 0) {
+      await db
+        .update(aiFindings)
+        .set({
+          proposalState: "failed",
+          proposalError: `The wiki changed since this fix was drafted (${stale.map((change) => `"${change.title}"`).join(", ")}). Ask for a new one, or say what you want.`,
+        })
+        .where(eq(aiFindings.id, finding.id));
+      return res.status(409).json({ error: "The wiki changed since this fix was drafted. Ask for a new one." });
+    }
+
+    const outcome = await settleFinding({
+      finding,
+      actorUserId: req.user!.id,
+      actorName: req.user!.name,
+      note: `Approved the suggested fix: ${finding.proposal.summary}`,
+    });
+    res.json({ outcome });
+  },
+);
+
+/**
+ * Settles a finding the person's own way. What they type is the decision; the
+ * AI only turns it into wiki edits, which go in as soon as they're written.
+ */
+wikiRouter.post(
+  "/findings/:id/counter",
+  requirePermission("findings.resolve"),
+  requirePermission("wiki.edit"),
+  async (req, res) => {
+    const parsed = z.object({ text: z.string().trim().min(3).max(4000) }).safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: "Say how you want it settled." });
+    if (aiUnavailable(req, res)) return;
+
+    const finding = await loadFinding(req, res);
+    if (!finding) return;
+    if (finding.status !== "open") return res.status(409).json({ error: "That's already settled." });
+    if (finding.proposalState === "drafting") {
+      return res.status(409).json({ error: "The AI is still writing something up for this. Give it a moment." });
+    }
+
+    await db
+      .update(aiFindings)
+      .set({ proposalState: "drafting", proposalError: null })
+      .where(eq(aiFindings.id, finding.id));
+
+    const job = await createJob({
+      academyId: finding.academyId,
+      studioId: finding.studioId,
+      kind: "resolve_finding",
+      requestedBy: req.user!.id,
+      input: { findingId: finding.id, request: parsed.data.text },
+      message: `Writing up ${req.user!.name}'s decision on "${finding.title}"`,
+    });
+    startResolveFinding(job, finding.id, parsed.data.text, { id: req.user!.id, name: req.user!.name });
+
+    res.status(202).json({ jobId: job.id });
+  },
+);
+
+/** Takes a settled finding's fix back out of the wiki and reopens it. */
+wikiRouter.post(
+  "/findings/:id/undo",
+  requirePermission("findings.resolve"),
+  requirePermission("wiki.edit"),
+  async (req, res) => {
+    const finding = await loadFinding(req, res);
+    if (!finding) return;
+    if (finding.status !== "resolved") return res.status(409).json({ error: "That isn't settled." });
+
+    const revisions = await findingRevisions(finding.academyId, finding.id);
+    const moved = await changedSince(revisions);
+    if (moved.length > 0) {
+      return res.status(409).json({
+        error: `${moved.map((title) => `"${title}"`).join(", ")} changed again after this was settled. Undoing it now would throw that change away, so edit the rule by hand instead.`,
+      });
+    }
+
+    const { reverted } = await revertFinding({
+      academyId: finding.academyId,
+      findingId: finding.id,
+      actorUserId: req.user!.id,
+      reason: `${req.user!.name} undid the fix for "${finding.title}".`,
+    });
+
+    await db
+      .update(aiFindings)
+      .set({
+        status: "open",
+        resolutionNote: null,
+        resolvedBy: null,
+        resolvedAt: null,
+        proposalState: finding.proposal ? "ready" : "none",
+      })
+      .where(eq(aiFindings.id, finding.id));
+
+    await logActivity({
+      academyId: finding.academyId,
+      studioId: finding.studioId,
+      actorUserId: req.user!.id,
+      action: "finding.reopened",
+      entityType: "ai_finding",
+      entityId: finding.id,
+      summary: `${req.user!.name} undid the fix for "${finding.title}" (${reverted} change${reverted === 1 ? "" : "s"} put back).`,
+    });
+
+    res.json({ reverted });
+  },
+);
 
 wikiRouter.post("/findings/:id/resolve", requirePermission("findings.resolve"), async (req, res) => {
   const parsed = z

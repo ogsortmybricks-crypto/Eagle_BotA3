@@ -138,6 +138,38 @@ export const applyElectionResult = z.object({
 });
 
 export type ApplyElectionResult = z.infer<typeof applyElectionResult>;
+
+/* --------------------------- resolving findings ---------------------------- */
+
+export const resolutionSpec = z.object({
+  findingId: z.number().int().describe("The id of the finding this settles, exactly as given"),
+  summary: z
+    .string()
+    .describe(
+      "One or two plain sentences a learner can read: what this fix changes in the wiki, and why it's the best reading of the studio's own documents",
+    ),
+  operations: z
+    .array(wikiOperation)
+    .describe(
+      "The wiki edits that settle it. Empty if the fix is outside the wiki - for example, it needs a studio vote first",
+    ),
+});
+
+export const proposeResolutionsResult = z.object({
+  resolutions: z.array(resolutionSpec).describe("One entry per finding you were given, in the same order"),
+});
+
+export const resolveFindingResult = z.object({
+  summary: z.string().describe("One or two plain sentences on what the wiki now says, and why"),
+  operations: z.array(wikiOperation),
+  unclear: z
+    .string()
+    .describe(
+      "Empty string if you could act on the decision. Otherwise, the question you'd need answered - and return no operations",
+    ),
+});
+
+export type ResolutionSpec = z.infer<typeof resolutionSpec>;
 export type WikiOperation = z.infer<typeof wikiOperation>;
 export type FindingSpec = z.infer<typeof findingSpec>;
 export type PositionSpec = z.infer<typeof positionSpec>;

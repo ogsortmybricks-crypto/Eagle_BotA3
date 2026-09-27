@@ -723,6 +723,8 @@ const JOB_LABEL: Record<string, string> = {
   build_wiki: "Building the wiki",
   process_meeting: "Processing Town Hall notes",
   apply_election: "Recording an election result",
+  propose_resolutions: "Drafting fixes for flagged problems",
+  resolve_finding: "Writing up a decision on a flagged problem",
 };
 
 const JOB_TONE: Record<string, ChipTone> = {

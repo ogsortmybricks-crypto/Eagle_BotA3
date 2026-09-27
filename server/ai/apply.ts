@@ -286,6 +286,112 @@ export async function revertJob(opts: {
     .where(and(eq(wikiRevisions.academyId, opts.academyId), eq(wikiRevisions.jobId, opts.jobId)))
     .orderBy(desc(wikiRevisions.id));
 
+  const reverted = await revertRevisions(revisions, {
+    academyId: opts.academyId,
+    actorUserId: opts.actorUserId,
+    reason: opts.reason,
+    sourceRef: String(opts.jobId),
+  });
+
+  // Findings raised by the same job are no longer meaningful.
+  await db
+    .update(aiFindings)
+    .set({ status: "dismissed", resolutionNote: opts.reason, resolvedAt: new Date() })
+    .where(and(eq(aiFindings.academyId, opts.academyId), eq(aiFindings.jobId, opts.jobId)));
+
+  return { reverted };
+}
+
+/**
+ * The revisions the finding's current fix wrote, newest first.
+ *
+ * A finding can be settled, undone and settled again, so only what came after
+ * the last undo counts - the earlier round has already been put back.
+ */
+export async function findingRevisions(academyId: number, findingId: number) {
+  const all = await db
+    .select()
+    .from(wikiRevisions)
+    .where(
+      and(
+        eq(wikiRevisions.academyId, academyId),
+        eq(wikiRevisions.sourceType, "finding"),
+        eq(wikiRevisions.sourceRef, String(findingId)),
+      ),
+    )
+    .orderBy(desc(wikiRevisions.id));
+  const lastUndo = all.find((revision) => revision.changeType === "restored");
+  return all.filter(
+    (revision) => revision.changeType !== "restored" && (!lastUndo || revision.id > lastUndo.id),
+  );
+}
+
+/**
+ * Rules a finding's fix touched that have been changed again since.
+ *
+ * Undoing a fix restores the text from before it, so if a Town Hall has amended
+ * the same rule in the meantime, an undo would quietly throw that decision away.
+ * The undo route refuses when this comes back non-empty.
+ */
+export async function changedSince(
+  revisions: (typeof wikiRevisions.$inferSelect)[],
+): Promise<string[]> {
+  const ruleIds = [...new Set(revisions.map((revision) => revision.ruleId).filter((id): id is number => id !== null))];
+  if (ruleIds.length === 0) return [];
+
+  const later = await db
+    .select({ ruleId: wikiRevisions.ruleId, id: wikiRevisions.id, title: wikiRules.title })
+    .from(wikiRevisions)
+    .innerJoin(wikiRules, eq(wikiRules.id, wikiRevisions.ruleId))
+    .where(inArray(wikiRevisions.ruleId, ruleIds));
+
+  const newestOwn = new Map<number, number>();
+  for (const revision of revisions) {
+    if (revision.ruleId === null) continue;
+    newestOwn.set(revision.ruleId, Math.max(newestOwn.get(revision.ruleId) ?? 0, revision.id));
+  }
+  return [
+    ...new Set(
+      later
+        .filter((row) => row.ruleId !== null && row.id > (newestOwn.get(row.ruleId) ?? Infinity))
+        .map((row) => row.title),
+    ),
+  ];
+}
+
+/** Undoes what settling one finding did to the wiki. */
+export async function revertFinding(opts: {
+  academyId: number;
+  findingId: number;
+  actorUserId: number | null;
+  reason: string;
+}): Promise<{ reverted: number }> {
+  const revisions = await findingRevisions(opts.academyId, opts.findingId);
+  const reverted = await revertRevisions(revisions, {
+    academyId: opts.academyId,
+    actorUserId: opts.actorUserId,
+    reason: opts.reason,
+    sourceRef: String(opts.findingId),
+    sourceType: "finding",
+  });
+  return { reverted };
+}
+
+/**
+ * Walks revisions newest-first and restores what each one replaced. Recorded
+ * as `restored` revisions rather than deletions, so the history stays honest.
+ */
+async function revertRevisions(
+  revisions: (typeof wikiRevisions.$inferSelect)[],
+  opts: {
+    academyId: number;
+    actorUserId: number | null;
+    reason: string;
+    sourceRef: string;
+    /** "revert" for a whole AI run; a finding's undo keeps its own source. */
+    sourceType?: string;
+  },
+): Promise<number> {
   let reverted = 0;
 
   for (const revision of revisions) {
@@ -331,20 +437,14 @@ export async function revertJob(opts: {
       rationale: opts.reason,
       actorUserId: opts.actorUserId,
       actorType: "user",
-      sourceType: "revert",
-      sourceRef: String(opts.jobId),
+      sourceType: opts.sourceType ?? "revert",
+      sourceRef: opts.sourceRef,
       jobId: null,
     });
     reverted += 1;
   }
 
-  // Findings raised by the same job are no longer meaningful.
-  await db
-    .update(aiFindings)
-    .set({ status: "dismissed", resolutionNote: opts.reason, resolvedAt: new Date() })
-    .where(and(eq(aiFindings.academyId, opts.academyId), eq(aiFindings.jobId, opts.jobId)));
-
-  return { reverted };
+  return reverted;
 }
 
 export async function saveFindings(opts: {
@@ -356,8 +456,8 @@ export async function saveFindings(opts: {
   jobId: number | null;
   /** Maps rule keys emitted by the AI to real ids, for build-wiki runs. */
   ruleKeyMap?: Map<string, number>;
-}): Promise<number> {
-  if (opts.findings.length === 0) return 0;
+}): Promise<number[]> {
+  if (opts.findings.length === 0) return [];
 
   const rows = opts.findings.map((finding) => {
     const fromKeys = (finding.relatedRuleKeys ?? [])
@@ -379,8 +479,8 @@ export async function saveFindings(opts: {
     };
   });
 
-  await db.insert(aiFindings).values(rows);
-  return rows.length;
+  const inserted = await db.insert(aiFindings).values(rows).returning({ id: aiFindings.id });
+  return inserted.map((row) => row.id);
 }
 
 /** Inserts positions the AI detected, skipping ones that already exist by title. */

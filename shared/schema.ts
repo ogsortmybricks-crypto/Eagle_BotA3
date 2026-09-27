@@ -325,8 +325,31 @@ export const wikiRevisions = pgTable(
 );
 
 /**
+ * One wiki edit, as the AI writes them and `server/ai/apply.ts` executes them.
+ * Declared loosely here because the schema file can't depend on the AI's Zod
+ * definitions; `server/ai/schemas.ts` is the strict version.
+ */
+export type ProposedOperation =
+  | { op: "create_section"; key: string; title: string; summary: string; rationale: string }
+  | { op: "create_rule"; sectionKey: string; title: string; body: string; rationale: string }
+  | { op: "amend_rule"; ruleId: number; title: string; body: string; rationale: string }
+  | { op: "repeal_rule"; ruleId: number; rationale: string }
+  | { op: "move_rule"; ruleId: number; sectionKey: string; rationale: string };
+
+export type FindingProposal = {
+  /** A sentence or two, for a learner, on what the fix changes. */
+  summary: string;
+  operations: ProposedOperation[];
+  /** "ai" drafted it unprompted; "human" means it's someone's own decision, written up. */
+  author: "ai" | "human";
+  /** What the person typed, when they proposed something different. */
+  request: string | null;
+};
+
+/**
  * Gaps, contradictions and "this needs a vote" notes the AI raises.
- * Nothing here is auto-applied: a human decides, which is the point.
+ * Nothing here is auto-applied: a human decides, which is the point. The AI
+ * may draft a fix (`proposal`), but only an approval puts it in the wiki.
  */
 export const aiFindings = pgTable(
   "ai_findings",
@@ -342,6 +365,16 @@ export const aiFindings = pgTable(
     options: jsonb("options").$type<string[]>().default([]),
     relatedRuleIds: jsonb("related_rule_ids").$type<number[]>().default([]),
     status: text("status").notNull().default("open"),
+    /**
+     * A concrete fix waiting for a human: the wiki edits that would settle this,
+     * in the same operation vocabulary the AI uses everywhere else. Nothing in
+     * here touches the wiki until someone approves it.
+     */
+    proposal: jsonb("proposal").$type<FindingProposal>(),
+    /** none | drafting | ready | failed - where the proposal is up to. */
+    proposalState: text("proposal_state").notNull().default("none"),
+    /** Why drafting failed, in words worth showing. */
+    proposalError: text("proposal_error"),
     resolutionNote: text("resolution_note"),
     resolvedBy: integer("resolved_by").references(() => users.id, { onDelete: "set null" }),
     resolvedAt: timestamp("resolved_at"),

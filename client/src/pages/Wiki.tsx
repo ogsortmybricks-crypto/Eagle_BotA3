@@ -69,6 +69,25 @@ type Finding = {
   options: string[];
   relatedRuleIds: number[];
   status: string;
+  proposal: { summary: string; author: "ai" | "human"; request: string | null } | null;
+  proposalState: "none" | "drafting" | "ready" | "failed";
+  proposalError: string | null;
+  /** The fix, in words, checked against the wiki as it is now. */
+  preview: ChangePreview[];
+  resolutionNote: string | null;
+  resolvedAt: string | null;
+  /** How many wiki edits settling it made. */
+  changes: number;
+  canUndo: boolean;
+};
+
+type ChangePreview = {
+  kind: "section" | "add" | "change" | "repeal" | "move";
+  title: string;
+  where: string | null;
+  before: string | null;
+  after: string | null;
+  stale: boolean;
 };
 
 type Doc = {
@@ -123,7 +142,31 @@ export function Wiki() {
   const findings = useQuery<{ findings: Finding[] }>({
     queryKey: ["findings", studioId],
     queryFn: () => apiGet("/wiki/findings?status=open"),
+    // While the AI is writing fixes, keep checking so they appear as they land.
+    refetchInterval: (query) =>
+      query.state.data?.findings.some((finding) => finding.proposalState === "drafting")
+        ? 3000
+        : false,
   });
+
+  const settled = useQuery<{ findings: Finding[] }>({
+    queryKey: ["findings-settled", studioId],
+    queryFn: () => apiGet("/wiki/findings?status=settled"),
+  });
+
+  // A finding that stops drafting may have just been written into the wiki
+  // (someone's own decision is applied as soon as it's written up).
+  const drafting = useRef<Set<number>>(new Set());
+  const nowDrafting = new Set(
+    (findings.data?.findings ?? [])
+      .filter((finding) => finding.proposalState === "drafting")
+      .map((finding) => finding.id),
+  );
+  if ([...drafting.current].some((id) => !nowDrafting.has(id))) {
+    void queryClient.invalidateQueries({ queryKey: ["wiki"] });
+    void queryClient.invalidateQueries({ queryKey: ["findings-settled"] });
+  }
+  drafting.current = nowDrafting;
 
   const jobQuery = useJob(jobId);
   const job = jobQuery.data?.job ?? null;
@@ -236,6 +279,9 @@ export function Wiki() {
         {job && <JobProgress job={job} />}
 
         {openFindings.length > 0 && <FindingsPanel findings={openFindings} />}
+        {(settled.data?.findings.length ?? 0) > 0 && (
+          <SettledPanel findings={settled.data!.findings} />
+        )}
 
         {isEmpty ? (
           <EmptyState
@@ -603,7 +649,6 @@ function SectionSharing({ section, onClose }: { section: Section; onClose: () =>
 /* ------------------------------- findings --------------------------------- */
 
 function FindingsPanel({ findings }: { findings: Finding[] }) {
-  const { can } = useSession();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(true);
   const [resolving, setResolving] = useState<Finding | null>(null);
@@ -612,6 +657,7 @@ function FindingsPanel({ findings }: { findings: Finding[] }) {
   const sorted = [...findings].sort(
     (a, b) => (bySeverity[a.severity] ?? 3) - (bySeverity[b.severity] ?? 3),
   );
+  const drafting = findings.filter((finding) => finding.proposalState === "drafting").length;
 
   const resolve = useMutation({
     mutationFn: (input: { id: number; status: string; note: string }) =>
@@ -636,7 +682,9 @@ function FindingsPanel({ findings }: { findings: Finding[] }) {
               settle
             </div>
             <div className="text-xs text-amber-700">
-              Contradictions, gaps, and calls it won't make on its own.
+              {drafting > 0
+                ? `The AI is drafting a fix for ${drafting} of them. Approve it, or say what you want instead.`
+                : "Contradictions and gaps, each with a fix to approve or change."}
             </div>
           </div>
           <ChevronRight
@@ -647,35 +695,7 @@ function FindingsPanel({ findings }: { findings: Finding[] }) {
         {open && (
           <ul className="divide-y divide-amber-200/70 border-t border-amber-200">
             {sorted.map((finding) => (
-              <li key={finding.id} className="p-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Chip tone={finding.severity === "high" ? "red" : "amber"}>
-                    {FINDING_LABEL[finding.type] ?? finding.type}
-                  </Chip>
-                  <span className="text-sm font-semibold text-gray-900">{finding.title}</span>
-                </div>
-                <p className="mt-1.5 text-sm text-gray-700">{finding.description}</p>
-                {finding.options.length > 0 && (
-                  <div className="mt-2.5">
-                    <div className="text-xs font-medium uppercase tracking-wide text-gray-500">
-                      Ways to settle it
-                    </div>
-                    <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-gray-600">
-                      {finding.options.map((option, index) => (
-                        <li key={index}>{option}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {can("findings.resolve") && (
-                  <button
-                    onClick={() => setResolving(finding)}
-                    className="btn-secondary btn-sm mt-3"
-                  >
-                    Settle this
-                  </button>
-                )}
-              </li>
+              <FindingCard key={finding.id} finding={finding} onSettle={() => setResolving(finding)} />
             ))}
           </ul>
         )}
@@ -690,6 +710,309 @@ function FindingsPanel({ findings }: { findings: Finding[] }) {
         />
       )}
     </>
+  );
+}
+
+/** Refreshes everything a settled (or un-settled) finding can change. */
+function useFindingRefresh() {
+  const queryClient = useQueryClient();
+  return () => {
+    void queryClient.invalidateQueries({ queryKey: ["findings"] });
+    void queryClient.invalidateQueries({ queryKey: ["findings-settled"] });
+    void queryClient.invalidateQueries({ queryKey: ["wiki"] });
+  };
+}
+
+/**
+ * One flagged problem and what to do about it.
+ *
+ * The AI's fix is shown as the actual edits - the rule's text now, and what it
+ * would say after - because "approve" should never mean "trust me".
+ */
+function FindingCard({ finding, onSettle }: { finding: Finding; onSettle: () => void }) {
+  const { can } = useSession();
+  const refresh = useFindingRefresh();
+  const [countering, setCountering] = useState(false);
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  const canResolve = can("findings.resolve");
+  const canFix = canResolve && can("wiki.edit");
+
+  const approve = useMutation({
+    mutationFn: () => apiPost(`/wiki/findings/${finding.id}/approve`),
+    onSuccess: refresh,
+    onError: (approveError: Error) => {
+      setError(approveError.message);
+      refresh();
+    },
+  });
+
+  const counter = useMutation({
+    mutationFn: () => apiPost(`/wiki/findings/${finding.id}/counter`, { text }),
+    onSuccess: () => {
+      setCountering(false);
+      setText("");
+      setError(null);
+      refresh();
+    },
+    onError: (counterError: Error) => setError(counterError.message),
+  });
+
+  const propose = useMutation({
+    mutationFn: () => apiPost(`/wiki/findings/${finding.id}/propose`),
+    onSuccess: () => {
+      setError(null);
+      refresh();
+    },
+    onError: (proposeError: Error) => setError(proposeError.message),
+  });
+
+  const state = finding.proposalState;
+  const ready = state === "ready" && finding.proposal;
+  const noChange = ready && finding.preview.length === 0;
+
+  return (
+    <li className="p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Chip tone={finding.severity === "high" ? "red" : "amber"}>
+          {FINDING_LABEL[finding.type] ?? finding.type}
+        </Chip>
+        <span className="text-sm font-semibold text-gray-900">{finding.title}</span>
+      </div>
+      <p className="mt-1.5 text-sm text-gray-700">{finding.description}</p>
+
+      {error && (
+        <div className="mt-3">
+          <Banner tone="error">{error}</Banner>
+        </div>
+      )}
+
+      {state === "drafting" && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-white p-3 text-sm text-gray-600">
+          <Spinner /> The AI is writing this up as changes to the wiki…
+        </div>
+      )}
+
+      {state === "failed" && finding.proposalError && (
+        <div className="mt-3">
+          <Banner tone="warning">{finding.proposalError}</Banner>
+        </div>
+      )}
+
+      {ready && (
+        <div className="mt-3 rounded-lg border border-brand-200 bg-white p-3">
+          <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-brand-700">
+            <Sparkles className="h-3.5 w-3.5" /> Suggested fix
+          </div>
+          <div className="mt-1.5 text-sm text-gray-800">
+            <Markdown>{finding.proposal!.summary}</Markdown>
+          </div>
+          {noChange ? (
+            <p className="mt-2 text-xs text-gray-500">
+              This doesn't change the wiki. Approving just marks it settled.
+            </p>
+          ) : (
+            <ul className="mt-3 space-y-2.5">
+              {finding.preview.map((change, index) => (
+                <ChangeView key={index} change={change} />
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {state !== "ready" && finding.options.length > 0 && (
+        <div className="mt-2.5">
+          <div className="text-xs font-medium uppercase tracking-wide text-gray-500">
+            Ways to settle it
+          </div>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm text-gray-600">
+            {finding.options.map((option, index) => (
+              <li key={index}>{option}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {countering && (
+        <div className="mt-3 rounded-lg border border-gray-200 bg-white p-3">
+          <label className="label" htmlFor={`counter-${finding.id}`}>
+            How should it be settled?
+          </label>
+          <textarea
+            id={`counter-${finding.id}`}
+            className="input min-h-[90px]"
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder="e.g. Quorum is two-thirds, as Town Hall voted on the 12th. Strike the older rule that says half."
+            autoFocus
+          />
+          <p className="hint">
+            The AI writes exactly this into the wiki, then it's done. If it gets it wrong, undo it
+            under <em>Settled lately</em>.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <button
+              onClick={() => counter.mutate()}
+              disabled={counter.isPending || text.trim().length < 3}
+              className="btn-primary btn-sm"
+            >
+              {counter.isPending && <Spinner />} Change the wiki
+            </button>
+            <button onClick={() => setCountering(false)} className="btn-ghost btn-sm">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {canResolve && state !== "drafting" && !countering && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {ready && canFix && (
+            <button
+              onClick={() => approve.mutate()}
+              disabled={approve.isPending}
+              className="btn-primary btn-sm"
+            >
+              {approve.isPending && <Spinner />}
+              {noChange ? "Approve and mark settled" : "Approve fix"}
+            </button>
+          )}
+          {canFix && (
+            <button onClick={() => setCountering(true)} className="btn-secondary btn-sm">
+              <Pencil className="h-3.5 w-3.5" />
+              {ready ? "Propose something different" : "Say how to settle it"}
+            </button>
+          )}
+          {!ready && (
+            <button
+              onClick={() => propose.mutate()}
+              disabled={propose.isPending}
+              className="btn-secondary btn-sm"
+            >
+              {propose.isPending ? <Spinner /> : <Sparkles className="h-3.5 w-3.5" />}
+              {state === "failed" ? "Try drafting a fix again" : "Suggest a fix"}
+            </button>
+          )}
+          <button onClick={onSettle} className="btn-ghost btn-sm">
+            Settle without changing the wiki
+          </button>
+        </div>
+      )}
+    </li>
+  );
+}
+
+const CHANGE_LABEL: Record<ChangePreview["kind"], { label: string; tone: ChipTone }> = {
+  add: { label: "Adds", tone: "green" },
+  change: { label: "Changes", tone: "blue" },
+  repeal: { label: "Strikes out", tone: "red" },
+  section: { label: "New section", tone: "purple" },
+  move: { label: "Moves", tone: "neutral" },
+};
+
+function ChangeView({ change }: { change: ChangePreview }) {
+  const { label, tone } = CHANGE_LABEL[change.kind];
+  return (
+    <li className="text-sm">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Chip tone={tone}>{label}</Chip>
+        <span className="font-medium text-gray-900">{change.title}</span>
+        {change.where && (
+          <span className="text-xs text-gray-500">
+            {change.kind === "move" ? "to" : "in"} {change.where}
+          </span>
+        )}
+        {change.stale && <Chip tone="amber">no longer in the wiki</Chip>}
+      </div>
+      {change.before && (
+        <div className="mt-1.5 rounded border-l-2 border-red-300 bg-red-50/60 px-2.5 py-1.5 text-gray-600">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-red-700">Now</div>
+          <div className={change.kind === "repeal" ? "line-through decoration-red-300" : ""}>
+            <Markdown>{change.before}</Markdown>
+          </div>
+        </div>
+      )}
+      {change.after && (
+        <div className="mt-1.5 rounded border-l-2 border-green-400 bg-green-50/60 px-2.5 py-1.5 text-gray-800">
+          <div className="text-[11px] font-medium uppercase tracking-wide text-green-700">
+            {change.kind === "section" ? "About" : "After"}
+          </div>
+          <Markdown>{change.after}</Markdown>
+        </div>
+      )}
+    </li>
+  );
+}
+
+/** Findings settled in the last two weeks, with a way to take a fix back out. */
+function SettledPanel({ findings }: { findings: Finding[] }) {
+  const { can } = useSession();
+  const formatDate = useDateFormat();
+  const refresh = useFindingRefresh();
+  const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const undo = useMutation({
+    mutationFn: (id: number) => apiPost(`/wiki/findings/${id}/undo`),
+    onSuccess: () => {
+      setError(null);
+      refresh();
+    },
+    onError: (undoError: Error) => setError(undoError.message),
+  });
+
+  return (
+    <div className="card">
+      <button
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-3 p-4 text-left"
+      >
+        <History className="h-4 w-4 shrink-0 text-gray-500" />
+        <div className="min-w-0 flex-1 text-sm font-semibold text-gray-800">
+          Settled lately ({findings.length})
+        </div>
+        <ChevronRight className={`h-4 w-4 shrink-0 text-gray-400 transition ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && (
+        <div className="border-t border-gray-200">
+          {error && (
+            <div className="p-3">
+              <Banner tone="error">{error}</Banner>
+            </div>
+          )}
+          <ul className="divide-y divide-gray-100">
+            {findings.map((finding) => (
+              <li key={finding.id} className="flex flex-wrap items-start gap-3 p-4">
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-gray-900">{finding.title}</div>
+                  <p className="mt-0.5 text-xs text-gray-500">
+                    {finding.resolvedAt && formatDate(finding.resolvedAt)} ·{" "}
+                    {finding.changes === 0
+                      ? "no change to the wiki"
+                      : `${finding.changes} change${finding.changes === 1 ? "" : "s"} to the wiki`}
+                    {finding.proposal?.author === "human" ? " · settled their own way" : ""}
+                  </p>
+                  {finding.proposal?.summary && (
+                    <p className="mt-1 text-sm text-gray-600">{finding.proposal.summary}</p>
+                  )}
+                </div>
+                {finding.canUndo && can("findings.resolve") && can("wiki.edit") && (
+                  <button
+                    onClick={() => undo.mutate(finding.id)}
+                    disabled={undo.isPending}
+                    className="btn-secondary btn-sm"
+                  >
+                    Undo
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -746,8 +1069,8 @@ function ResolveFindingModal({
         autoFocus
       />
       <p className="hint">
-        Settling a finding doesn't change the wiki by itself. If a rule needs to change, edit it or
-        run it through a Town Hall.
+        This settles it without touching the wiki. To change a rule as you settle it, approve the
+        suggested fix or use <em>Say how to settle it</em> instead.
       </p>
     </Modal>
   );

@@ -140,6 +140,69 @@ current wiki. Produce the operations that make the wiki reflect the studio's dec
 - Either way, note anything that now looks inconsistent as a finding.
 `.trim();
 
+const RESOLVE_GROUNDING = `
+## Why the usual rules bend here - and how far
+
+Everywhere else you raise contradictions and gaps instead of settling them. This is
+the step where the studio settles them, so here you *do* write the fix - but only
+as a proposal. Nothing you write touches the wiki until a person in the studio
+approves it, and they can always throw it out and say what they want instead.
+That changes what a good answer looks like:
+
+- **Settle it the way the studio's own documents point.** Prefer the later, voted,
+  or more specific text. Say which one you followed in the rationale, so a learner
+  reading the history knows why.
+- **Keep fixes small.** Change the fewest rules that make the wiki consistent. A
+  contradiction usually means amending or repealing one side; a gap means adding
+  one short rule. Never rewrite a section to settle one finding.
+- **Use the studio's words.** A rule you add for a gap should read like the rules
+  around it, using wording from the documents wherever it exists.
+- **Stay in the wiki you were given.** Only use rule ids and section keys that
+  appear in it. Never touch an [academy-wide] section unless the finding is about
+  that section.
+- **Some things aren't yours to write.** If settling it really takes a vote (a new
+  consequence, a new position, anything a Town Hall hasn't discussed), return no
+  operations and say in the summary that the studio should vote on it.
+- **Rationales are read by learners months from now.** Write "Settles a
+  contradiction between the 2023 ROE and the Town Hall notes: ...", never "the AI
+  decided ...".
+`.trim();
+
+const PROPOSE_RESOLUTIONS_BASE = `
+You are the archivist for an Acton Academy studio. You just built the studio's wiki
+from its documents, and along the way you flagged gaps, contradictions and unclear
+rules. Now you are drafting a fix for each one, for the studio to approve or reject.
+
+${ACTON_GROUNDING}
+
+${RESOLVE_GROUNDING}
+
+## Your specific task
+
+You will be given the studio's current wiki (with database ids) and the list of
+findings. Return one resolution per finding: a short summary and the operations
+that would settle it. If two findings are about the same rule, make sure their fixes
+don't undo each other - each one may be approved on its own.
+`.trim();
+
+const RESOLVE_FINDING_BASE = `
+You are the archivist for an Acton Academy studio. A person in the studio has read
+one of the problems you flagged in the wiki and told you how they want it settled.
+Your job is to make the wiki say exactly that.
+
+${ACTON_GROUNDING}
+
+${RESOLVE_GROUNDING}
+
+## Your specific task
+
+Their decision is the instruction. Write the operations that carry it out - no more,
+no less. Do not soften it, add conditions they didn't ask for, or settle other
+findings while you're there. If what they wrote is a decision about the wiki, act on
+it even if you would have chosen differently. Only if you genuinely can't tell what
+they want the wiki to say, return no operations and put your question in \`unclear\`.
+`.trim();
+
 const REPEAL_ON = `
 ## Striking out what no longer holds
 
@@ -187,23 +250,33 @@ export type PromptOptions = {
  * Settings, not decoration: an academy that doesn't want the AI striking out
  * rules gets a prompt that tells it to raise findings instead.
  */
-export function buildSystemPrompt(
-  kind: "build_wiki" | "process_meeting" | "apply_election",
-  options: PromptOptions,
-): string {
+export type PromptKind =
+  | "build_wiki"
+  | "process_meeting"
+  | "apply_election"
+  | "propose_resolutions"
+  | "resolve_finding";
+
+export function buildSystemPrompt(kind: PromptKind, options: PromptOptions): string {
   const base = {
     build_wiki: BUILD_WIKI_BASE,
     process_meeting: PROCESS_MEETING_BASE,
     apply_election: APPLY_ELECTION_BASE,
+    propose_resolutions: PROPOSE_RESOLUTIONS_BASE,
+    resolve_finding: RESOLVE_FINDING_BASE,
   }[kind];
 
   const parts = [base, options.studioContext];
 
-  if (kind !== "build_wiki") {
+  // Settling a finding is repealing on purpose, with a human signing off, so the
+  // academy's "don't repeal on your own" switch doesn't apply to it.
+  if (kind === "process_meeting" || kind === "apply_election") {
     parts.push(options.autoRepealContradictions ? REPEAL_ON : REPEAL_OFF);
   }
   if (kind === "process_meeting" && !options.proposeElections) parts.push(NO_ELECTIONS);
-  if (kind !== "apply_election" && !options.detectPositions) parts.push(NO_POSITIONS);
+  if ((kind === "build_wiki" || kind === "process_meeting") && !options.detectPositions) {
+    parts.push(NO_POSITIONS);
+  }
 
   if (options.extraGuidance.trim()) {
     parts.push(
