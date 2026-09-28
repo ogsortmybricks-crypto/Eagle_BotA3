@@ -42,7 +42,7 @@ tacon hero-bucks {          # lowercase letters, numbers and hyphens
   when ...                   # things that happen by themselves
 
   provides entry, balance    # what other Tac-Ons may read
-  use eagle-bucks as bucks   # what you read from them
+  use hero-bucks as bucks    # what you read from them
 }
 ```
 
@@ -412,11 +412,11 @@ note "You have {my.balance} bucks, {me.name}."
 ## `provides` and `use`
 
 ```
-# in eagle-bucks
+# in hero-bucks
 provides ledger, balance
 
 # in your Tac-On
-use eagle-bucks as bucks
+use hero-bucks as bucks
 
 note "You have {bucks.balance} bucks."
 list bucks.ledger { columns hero, amount }

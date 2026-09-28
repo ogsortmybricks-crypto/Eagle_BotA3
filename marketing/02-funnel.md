@@ -14,18 +14,23 @@ with real numbers once we have ten pilots behind us.
 
 **What we do**
 
-- Post real stories in owner communities: *"Our Launchpad Contract had two
-  rules about phones that contradicted each other for a whole session. Nobody
-  noticed until we put it into Eagle Bot."* Offer the free scan at the end.
-- Bring a learner-run demo table to any Acton gathering we can get to.
+- Post real stories on LinkedIn and other social media: *"Our Launchpad
+  Contract had two rules about phones that contradicted each other for a whole
+  session. Nobody noticed until we put it into Eagle Bot."* Offer the free scan
+  at the end.
+- Message owners and Guides directly on LinkedIn, starting with people we
+  already know and academies in zones we have a connection to.
+- Link the 3-minute walkthrough video (see stage 3) from every post and
+  message.
 - Make Tac-Ons from Eagle learners visible in the market with author and
   academy name.
-- Ask every paying owner for one introduction (with the referral credit).
+- Ask every paying owner for one introduction (with the referral credit), and
+  to mention Eagle Bot in their zone and in the owner forums we can't reach.
 
 **What we hand them:** a link to the scan sign-up page.
 
-**Measure:** scan requests per month. **Target:** 25% of owners who hear the
-pitch in person ask for a scan.
+**Measure:** scan requests per month. **Target:** 25% of owners we reach
+directly ask for a scan.
 
 ---
 
@@ -51,8 +56,9 @@ send back:
   front.
 - Turnaround within one school day. Speed is part of the pitch.
 - Cost to us: roughly $2–3 of Claude API per scan (see
-  [03](03-pricing-and-costs.md#what-each-ai-job-costs)). Cap at 20 scans a month
-  until conversion is proven.
+  [03](03-pricing-and-costs.md#what-each-ai-job-costs)). Cap at 10 scans a month:
+  the limit is time, not API cost (see
+  [05](05-launch-playbook.md#running-it-solo)).
 
 **Measure:** % of scans that book a demo. **Target:** 50%.
 
@@ -60,10 +66,15 @@ send back:
 
 ## 3 · Convinced — the live demo
 
-**Goal:** the owner (and ideally a Guide) sees the whole loop, run by learners.
+**Goal:** the owner (and ideally a Guide) sees the whole loop that their
+learners would run.
 
-**Format:** 30 minutes on video, run by two Eagle learners with an adult on the
-call for questions about billing and privacy only.
+**Format: a live video call** (Zoom or Google Meet), 30 minutes, run by me. It's
+live so the demo can use *their* scanned Contract and I can answer questions as
+they come up. There is also a **3-minute recorded walkthrough video**. That
+isn't the demo. It's what gets an owner curious enough to book the call, and it
+goes in posts, LinkedIn messages and the first scan email. Record it once, on
+the demo academy, and reuse it.
 
 **Demo script**
 
@@ -73,8 +84,8 @@ call for questions about billing and privacy only.
    changes → learners approve them → wiki updates.
 3. *(5 min)* Elections and Positions: running an election, results applied,
    positions filled.
-4. *(5 min)* The Tac-On market: install the Eagle Bucks ledger in a studio.
-   Then show a Tac-On an Eagle learner wrote, and the source code.
+4. *(5 min)* The Tac-On market: install a Tac-On in a studio, then show one an
+   Eagle learner wrote, and its source code.
 5. *(5 min)* Questions, then the pilot offer.
 
 **What we hand them:** a pilot agreement (one page, no card).
@@ -93,7 +104,7 @@ call for questions about billing and privacy only.
 | --- | --- | --- |
 | Day 1 | Wiki built | Their Contract + ROE are uploaded and the findings are reviewed by learners |
 | Week 1 | First Town Hall processed | At least one Contract change goes from meeting notes to the wiki |
-| Week 2 | Election + Eagle Bucks | One election run through Eagle Bot; Eagle Bucks Tac-On installed |
+| Week 2 | First election | One election run through Eagle Bot, results applied and positions filled |
 | Week 3 | Learner dev | One learner has dev status and has published (or drafted) a Tac-On |
 | Day 28 | Owner call | We review the four moments and offer the Founding Academy plan |
 
@@ -102,9 +113,10 @@ call for questions about billing and privacy only.
 - One studio only. Middle Studio or Launchpad if they have one.
 - No credit card. No auto-conversion. At day 30 the pilot academy goes
   read-only until they choose a plan, so nothing is lost.
-- A named Eagle learner is their "buddy" and checks in weekly (see the
-  [learner sales team](05-launch-playbook.md#learner-sales-team)).
-- If a moment stalls for a week, an adult from our side calls the Guide.
+- I'm their one contact for questions, by email or a call. I check in once a
+  week (see [running it solo](05-launch-playbook.md#running-it-solo)).
+- At most 3 pilots run at once. Others wait for a slot.
+- If a moment stalls for a week, I call the Guide.
 
 **Measure:** moments hit per pilot, and % of pilots that pay. **Target:** 50%
 convert. Pilots that hit all four moments should convert at 80%+.
@@ -134,8 +146,11 @@ Tac-Ons other academies install.
 
 - At the end of each session, offer to add the next studio (each studio is
   another wiki, another Town Hall, another set of positions).
-- Run a **Tac-On Jam** each session: a week where learners from every customer
-  academy build Tac-Ons. The best ones get featured in the market.
+- Run a **Tac-On Jam** each session: an online week where learners from every
+  customer academy build Tac-Ons, share what they're working on, and help each
+  other. It's a community event, not a competition. Nobody is judged or
+  ranked, and there's no prize. Whatever a learner publishes goes into the
+  market the same way it would any other week.
 - Ask for the referral. Owners who have seen their learners' Tac-On installed
   at another academy are our best advocates.
 
@@ -154,7 +169,8 @@ Working backwards from a goal of **10 paying academies in the first year**:
 | Pilots | 50% convert | 20 |
 | Demos | 60% start a pilot | 34 |
 | Scans | 50% book a demo | 67 |
-| Owners who heard the pitch | 25% ask for a scan | ~270 |
+| Owners reached directly | 25% ask for a scan | ~270 |
 
-~270 owners is a real share of the Acton network, which is why the referral
-loop and learner-built Tac-Ons matter: they reach owners we'll never meet.
+~270 owners is a real share of the Acton network, and more than one person can
+message one by one. That's why the referral loop, zone introductions and
+learner-built Tac-Ons matter: they reach owners we'll never meet.

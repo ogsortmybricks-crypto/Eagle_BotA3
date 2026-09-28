@@ -2,12 +2,12 @@
 
 ## Positioning
 
-**For** Acton owners and Guides
-**who** are tired of being their studio's memory for what the Contract says,
-what Town Hall decided, and who holds which position,
+**For** Acton learners, and the owners who want them to own their studio,
+**who** write and vote on their own rules but lose track of them across a pile
+of Google Docs,
 **Eagle Bot is** the operating system for a self-governed studio
-**that** keeps the Contract, Town Halls, elections and Eagle Bucks in one place
-learners run themselves.
+**that** helps learners keep their own Contract, Town Hall decisions, elections
+and positions organized in one place they run themselves.
 **Unlike** Google Docs and spreadsheets, or generic school software,
 **Eagle Bot** is built around Acton's own rules: the AI never invents a rule,
 never rewrites what learners voted on, and never lets an adult's memo beat a
@@ -19,7 +19,7 @@ vote. And learners can extend it themselves.
 | --- | --- | --- |
 | Learners, Heroes, Eagles (their word) | Students, kids, users | Acton owners notice immediately |
 | Guide | Teacher, staff | Same |
-| "Runs by learners" | "Automates your studio" | The point is ownership, not automation |
+| "Run by learners" | "Automates your studio" | The point is ownership, not automation |
 | "Keeps the Contract" | "AI writes your rules" | The AI never writes rules. Saying it would lose the sale. |
 | "Flags contradictions for the studio to decide" | "Fixes your Contract" | It never picks a side |
 | Real World, Real Stakes | Gamified, engaging | Acton owners distrust gamification |
@@ -28,8 +28,8 @@ vote. And learners can extend it themselves.
 
 > **Your studio governs itself. Eagle Bot keeps up.**
 >
-> The Contract, every Town Hall decision, every election and every Eagle Buck,
-> in one place your learners run.
+> The Contract, every Town Hall decision, every election and every position,
+> organized by your learners, in one place they run.
 >
 > **[ Get a free Contract scan ]**
 
@@ -49,9 +49,9 @@ Run elections, apply the results, and see who holds every position in every
 studio.
 
 **Section: Built by learners, shared across academies**
-Tac-Ons are add-ons your learners write and publish. Install an Eagle Bucks
-ledger someone else's learner built. Watch yours get installed at an academy
-across the country.
+Tac-Ons are add-ons your learners write and publish, for whatever your studio
+runs that Eagle Bot doesn't. Install one another academy's learner built. Watch
+yours get installed at an academy across the country.
 
 **Section: What the AI will never do**
 - Invent a rule nobody voted on.
@@ -68,8 +68,10 @@ with every contradiction flagged, within one school day. Free.*
 | --- | --- |
 | "We don't use AI with our learners." | The AI never talks to learners. It reads documents the studio already wrote and proposes changes that learners approve. Nothing changes without a human. |
 | "What happens to our learners' data?" | Each academy's data is separate. We don't sell it or use it to train anything. The Claude API doesn't train on our data. Free-scan documents are deleted after 14 days. *(Only say this once the privacy policy exists and says the same.)* |
+| "We already use Journey Tracker." | Keep it. Journey Tracker follows each learner's goals, badges and points. Eagle Bot keeps the studio's own government: the Contract, Town Hall decisions, elections and positions. They don't overlap. |
+| "Does the network have to approve this?" | No. Like any tool an owner picks, it's your call for your academy. Nothing in it changes Acton's learning design. It helps learners keep the Contract they already own. |
 | "We already use Google Docs." | Keep them. Upload them. Eagle Bot reads them and tells you where they disagree with each other, which Docs never will. |
-| "Our learners won't use it." | That's what the pilot is for. The learners on the demo call are the users. If your learners aren't using it by week 2, you don't pay. |
+| "Our learners won't use it." | That's what the pilot is for. It's built for learners to organize their own rules, so they're the ones who set it up. If your learners aren't using it by week 2, you don't pay. |
 | "$149 a month is a lot." | It's under $1.50 per learner for a 100-learner academy. The Founding price is $99 and locked. Or start on one studio at $59. |
 | "What if you stop building it?" | Every Tac-On's source is readable, and we'll give every academy a full export of its data on request. |
 | "Can learners really write code for this?" | Yes, in TacScript, which was built for it. Show them a Tac-On an Eagle learner wrote. |
@@ -85,10 +87,13 @@ with every contradiction flagged, within one school day. Free.*
 > {one real example from their scan}.
 >
 > Eagle Bot never resolves these itself. It puts them in front of the studio.
-> Want to see how learners keep this up to date after every Town Hall? Two of
-> our learners run a 30-minute demo: {booking link}
+> Here's a 3-minute video of how learners keep it up to date after every Town
+> Hall: {video link}
 >
-> — The Eagle Bot team
+> If you'd like to see it on your own Contract, book a 30-minute call:
+> {booking link}
+>
+> — {Your name}, Eagle Bot
 
 **Email 2 — Day 3: "What happened at our last Town Hall"**
 > A short story: one real Town Hall at Eagle, the notes, the Contract changes

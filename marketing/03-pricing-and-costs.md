@@ -26,8 +26,8 @@ Two things to watch here:
   the credit covers, and Replit bills the rest. The cost model below budgets
   **~$10 per academy per month** of hosting overage to stay safe. Check the
   Replit usage page monthly and replace that guess with the real number.
-- If building speeds up and the team moves to a larger Claude plan (Max), fixed
-  costs go up by $80–180. That's still covered by 1–2 academies.
+- If building speeds up and a larger Claude plan (Max) is needed, fixed costs
+  go up by $80–180. That's still covered by 1–2 academies.
 
 ### 2. Variable: Claude API (grows with each academy)
 

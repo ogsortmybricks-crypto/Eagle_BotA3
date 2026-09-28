@@ -7,7 +7,7 @@
   <!-- Stage 1 -->
   <path d="M60 95 H600 L570 170 H90 Z" fill="#1F2A44"/>
   <text x="330" y="128" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">1 · AWARE</text>
-  <text x="330" y="152" text-anchor="middle" font-size="13" fill="#D5DAE6">Owner forums · conferences · learner-built Tac-Ons</text>
+  <text x="330" y="152" text-anchor="middle" font-size="13" fill="#D5DAE6">LinkedIn · social · zone channels · learner-built Tac-Ons</text>
 
   <!-- Stage 2 -->
   <path d="M90 180 H570 L540 255 H120 Z" fill="#2E4A7D"/>
@@ -17,7 +17,7 @@
   <!-- Stage 3 -->
   <path d="M120 265 H540 L510 340 H150 Z" fill="#3F6BB0"/>
   <text x="330" y="298" text-anchor="middle" font-size="20" font-weight="700" fill="#fff">3 · CONVINCED</text>
-  <text x="330" y="322" text-anchor="middle" font-size="13" fill="#E6ECF7">Live demo run by Eagle learners</text>
+  <text x="330" y="322" text-anchor="middle" font-size="13" fill="#E6ECF7">30-minute live demo call</text>
 
   <!-- Stage 4 -->
   <path d="M150 350 H510 L480 425 H180 Z" fill="#E08A2E"/>

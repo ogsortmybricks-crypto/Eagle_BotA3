@@ -1,23 +1,34 @@
 # 05 · Launch Playbook
 
-The first 90 days, the team that runs them, and the numbers to watch.
+The first 90 days, run by one person, and the numbers to watch.
 
-## Learner sales team
+## Running it solo
 
-Selling Eagle Bot to other academies is a natural Launchpad or Middle Studio
-Quest: real customers, real money, a real Exhibition at the end. Suggested
-roles (the studio should decide its own, and elect them):
+Eagle Bot is built, sold and supported by one person. There is no sales team
+and no learner squad behind the demo. That's fine at this size, but it means
+**time is the real limit, not money**. The plan is built around that:
 
-| Role | Does |
-| --- | --- |
-| **Demo lead** (×2) | Runs the 30-minute demo. Knows the product cold. |
-| **Scan runner** | Uploads a lead's Contract, runs the wiki build, writes the findings summary. |
-| **Pilot buddy** (one per pilot academy) | Weekly check-in with the pilot studio's learners. Reports stalled moments. |
-| **Tac-On lead** | Keeps Eagle's Tac-Ons polished in the market, runs the Tac-On Jam. |
-| **Numbers keeper** | Keeps the tracker below up to date; reports at Town Hall. |
+- **Nothing in person.** Every step happens online: posts, messages, video
+  calls, email. No travel to gatherings, Exhibitions or other academies' Town
+  Halls.
+- **Pilot questions come to me.** Each pilot academy gets one contact (email,
+  plus a call when something is stuck). No buddies, no second line.
+- **Cap the work in flight.** At most **3 pilots running at once** and **10
+  scans a month**. If more people want in, they go on a short waitlist. A
+  waitlist is a good sign, not a problem.
+- **Do things once.** Record the demo once and reuse it. Write each email once
+  and template it. Keep a pilot kit (meeting-notes template, setup checklist) so
+  every pilot starts the same way.
 
-**An adult always handles:** contracts, payments, privacy questions, and any
-contact with another academy's learners that isn't in a supervised group call.
+### A week, roughly
+
+| Block | Time | What |
+| --- | --- | --- |
+| Outreach | ~1 hr | Posts, LinkedIn messages, replies |
+| Scans | ~30 min each | Run the wiki build, write the findings email |
+| Demos | 30 min each | Live calls |
+| Pilot support | ~1 hr | Answer questions, check the tracker, one check-in per pilot |
+| Building | the rest | Fixes pilots asked for come first |
 
 ## The 90 days
 
@@ -28,28 +39,33 @@ contact with another academy's learners that isn't in a supervised group call.
 - [ ] Set up a demo academy on production with a realistic fake studio.
 - [ ] Build the scan sign-up page (the landing page copy is in
       [04](04-messaging.md#landing-page-copy)).
-- [ ] Run the scan on Eagle's own Contract and every studio's; write up the
-      best finding as the first story.
-- [ ] Learners rehearse the demo three times, once with an owner from outside
-      the team.
-- [ ] Write the one-page parent explainer.
+- [ ] Run the scan on Eagle's own Contract; write up the best finding as the
+      first story.
+- [ ] Record the 3-minute walkthrough video (see
+      [02](02-funnel.md#3--convinced--the-live-demo)).
+- [ ] Rehearse the live demo twice, once with someone who has never seen
+      Eagle Bot.
+- [ ] Write the one-page parent explainer and the pilot kit.
 - [ ] Set a spend limit on the production Anthropic API key.
+- [ ] Clean up the LinkedIn profile so it says what Eagle Bot is and links to
+      the scan page.
 
 ### Days 31–60: First pilots
 
-- [ ] Personally ask 10 owners we already know to try the free scan.
-- [ ] Post the first story in the owner community.
-- [ ] Run every demo that gets booked. Record (with permission) the best one.
-- [ ] Start 3–5 pilots. Assign a pilot buddy to each.
-- [ ] Weekly: review the pilot tracker, call any stalled Guide.
+- [ ] Personally message 10 owners or Guides already known (LinkedIn, email,
+      zone contacts) and offer the free scan.
+- [ ] Post the first story on LinkedIn and in any owner/Guide groups there's
+      access to.
+- [ ] Run every demo that gets booked.
+- [ ] Start up to 3 pilots.
+- [ ] Weekly: review the pilot tracker, check in on any stalled moment.
 
 ### Days 61–90: First revenue
 
 - [ ] Day-28 owner calls for the first pilots; offer Founding Academy.
 - [ ] Ask every converted owner for one referral.
-- [ ] Run the first Tac-On Jam with learners from every pilot academy.
-- [ ] Learners present the Quest (numbers, what worked, what didn't) at
-      Exhibition.
+- [ ] Run the first online Tac-On Jam for learners at pilot academies (see
+      [02](02-funnel.md#6--advocate--every-studio-and-learners-publishing)).
 - [ ] Update the conversion targets in [02](02-funnel.md) with real numbers.
 - [ ] Update the API estimate in [03](03-pricing-and-costs.md) with real
       `ai_jobs` numbers.
@@ -59,13 +75,13 @@ contact with another academy's learners that isn't in a supervised group call.
 Keep one row per pilot academy (a spreadsheet, or a Tac-On once one exists for
 it).
 
-| Academy | Studio | Buddy | Start | Wiki built | Town Hall | Election + Bucks | Learner dev | Day-28 call | Outcome |
+| Academy | Studio | Contact | Start | Wiki built | Town Hall | Election | Learner dev | Day-28 call | Outcome |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | *example* | *Launchpad* | *Name* | *Oct 6* | ✅ Oct 6 | ✅ Oct 10 | ⏳ | — | Nov 3 | — |
 
 ## The numbers to watch
 
-Report these at every Town Hall where the sales team presents.
+Check these once a month.
 
 | Number | Where it comes from | Healthy |
 | --- | --- | --- |
@@ -74,6 +90,7 @@ Report these at every Town Hall where the sales team presents.
 | Demo → pilot | Pilot agreements | ≥ 60% |
 | Pilot → paying | Billing | ≥ 50% |
 | Moments hit per pilot | Pilot tracker | 4 of 4 |
+| Hours per week on support | Your own log | Falling per pilot as the kit improves |
 | API cost per academy | `ai_jobs` table × prices | ≤ $25 |
 | Fixed costs | Claude + Replit invoices | ~$45 |
 | Studios per paying academy | Admin | Rising |
@@ -85,6 +102,8 @@ Report these at every Town Hall where the sales team presents.
   report shorter and lead with the single worst contradiction.
 - **Pilots stall at "First Town Hall":** the studio doesn't take notes in a form
   we can paste. Add a meeting-notes template to the pilot kit.
+- **Support eats the week:** the same questions keep coming up. Turn each one
+  into a help page or an in-app hint before taking another pilot.
 - **API cost per academy is well above $25:** apply the cost levers in
   [03](03-pricing-and-costs.md#ways-to-cut-api-cost-if-we-need-to), starting
   with effort on Town Halls.

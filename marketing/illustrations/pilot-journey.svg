@@ -25,9 +25,9 @@
     <circle cx="540" cy="200" r="22" fill="#E08A2E"/>
     <text x="540" y="206" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">3</text>
     <text x="540" y="140" text-anchor="middle" font-size="13" font-weight="700" fill="#1F2A44">Week 2</text>
-    <text x="540" y="250" text-anchor="middle" font-size="14" font-weight="700" fill="#1F2A44">Election + Eagle Bucks</text>
-    <text x="540" y="270" text-anchor="middle" font-size="12" fill="#5B6478">positions filled, ledger</text>
-    <text x="540" y="286" text-anchor="middle" font-size="12" fill="#5B6478">Tac-On installed</text>
+    <text x="540" y="250" text-anchor="middle" font-size="14" font-weight="700" fill="#1F2A44">First election</text>
+    <text x="540" y="270" text-anchor="middle" font-size="12" fill="#5B6478">results applied,</text>
+    <text x="540" y="286" text-anchor="middle" font-size="12" fill="#5B6478">positions filled</text>
 
     <circle cx="740" cy="200" r="22" fill="#2F8F6B"/>
     <text x="740" y="206" text-anchor="middle" font-size="16" font-weight="700" fill="#fff">4</text>
@@ -41,5 +41,5 @@
   <text x="880" y="142" text-anchor="middle" font-size="13" font-weight="700" fill="#fff">Day 28</text>
   <text x="880" y="160" text-anchor="middle" font-size="12" fill="#FFF1E0">Owner call</text>
 
-  <text x="480" y="350" text-anchor="middle" font-size="13" fill="#5B6478">Track each moment in the pilot tracker (05-launch-playbook.md). A stalled step = a call from us that week.</text>
+  <text x="480" y="350" text-anchor="middle" font-size="13" fill="#5B6478">Track each moment in the pilot tracker (05-launch-playbook.md). A stalled step = a check-in that week.</text>
 </svg>

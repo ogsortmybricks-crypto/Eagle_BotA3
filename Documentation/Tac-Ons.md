@@ -39,7 +39,7 @@ Press **Install**. You will be asked one question that matters:
 > **Install for:** a studio, or the whole academy.
 
 A studio install shows up only in that studio — its pages, its sidebar entry,
-its records. An academy-wide install shows up everywhere. An Eagle Bucks ledger
+its records. An academy-wide install shows up everywhere. A points ledger
 almost always belongs to one studio; a notice board might belong to all of them.
 You can install the same Tac-On separately in two studios, and they keep
 completely separate records.
@@ -77,7 +77,8 @@ of whichever page they attach to, each labelled with the Tac-On it came from.
 
 ### Positions a Tac-On adds
 
-Some Tac-Ons add a position. Eagle Bucks, for example, adds a **Shopkeeper**.
+Some Tac-Ons add a position. A points-economy Tac-On, for example, might add a
+**Shopkeeper**.
 The details page lists these under *What it adds*. Installing puts the position
 on the **Positions** page, in the studio you installed into, with a purple tag
 naming the Tac-On. From then on it is an ordinary position: the studio elects or
@@ -90,8 +91,8 @@ The difference is that the Tac-On decides what the holder sees:
   waiting to be exchanged, the requests on the table, and a form to post to the
   ledger. Nobody else sees it, including admins who don't hold the seat.
 - **What they can open and do.** A Tac-On can open a page, panel, form or button
-  to a position's holder. On the Eagle Bucks page, the ledger form works for the
-  Shopkeeper, the Admin and the Secretary, and is read-only for everyone else.
+  to a position's holder. A ledger form can work for the Shopkeeper, the Admin
+  and the Secretary, and be read-only for everyone else.
 
 When the term ends, all of that passes to whoever holds the position next.
 
@@ -110,7 +111,7 @@ changed underneath it mid-meeting.
 You can also **Turn off** an install — it disappears from the sidebar and keeps
 its records — or **Remove** it.
 
-> **Removing a Tac-On deletes everything it recorded.** A term of Eagle Bucks
+> **Removing a Tac-On deletes everything it recorded.** A term of ledger
 > entries goes with it. The confirmation says so, and the activity log records
 > how many rows were deleted. Turn it off instead if you are not sure.
 
@@ -213,7 +214,7 @@ reached anybody yet.
 A Tac-On can list what another one publishes:
 
 ```
-use eagle-bucks as bucks
+use hero-bucks as bucks
 ...
 note "You have {bucks.balance} bucks."
 list bucks.ledger { columns hero, amount }
@@ -267,28 +268,18 @@ would own the market.
 
 ## What ships with Eagle Bot
 
-One official Tac-On is published when the server starts. It is an ordinary
-Tac-On: installable, removable, and readable as a worked example.
-
-| Tac-On | What it does |
-| --- | --- |
-| **Eagle Bucks** | The whole economy: points logged against Core Skills, Quest and community work; a **Shopkeeper** position with its own desk; a ledger and price list only the Shopkeeper, Admin and Secretary can post to; and requests between learners, with a panel on Town Hall for the ones waiting on a debate. |
-
-Version 1.1.0 added the Shopkeeper position and dropped the old free-text
-*Shopkeeper* setting. A server that already published 1.0.0 publishes 1.1.0 on
-its next start. Academies running 1.0.0 keep it until an admin presses
-**Update**, which is when the Shopkeeper appears on their Positions page.
-
-Eagle Bucks publishes `points`, `ledger` and `balance` under `provides`, so it is
-also the thing to read from if you are writing a raffle, a shop of your own or an
-end-of-term summary.
+No official Tac-Ons ship right now. `STARTERS` in
+[`server/tacons/starters.ts`](../server/tacons/starters.ts) is where one would
+go; the server publishes whatever is listed there when it starts.
 
 ### Tac-Ons that used to ship
 
-Hero Bucks, Quest Board, Gratitude Wall and Buck Shop were published by earlier
-versions and are not published any more. A server that seeded them deletes them
-on the next start, along with their installs and everything those installs
-recorded, and logs how much went. `RETIRED_STARTER_SLUGS` in
+Hero Bucks, Quest Board, Gratitude Wall, Buck Shop and Eagle Bucks were
+published by earlier versions and are not published any more. A server that
+seeded the first four deletes them on the next start, along with their installs and everything those installs
+recorded, and logs how much went. Eagle Bucks is not on that list: a server
+that already published it keeps the listing, its installs and their records,
+and simply stops publishing new versions. `RETIRED_STARTER_SLUGS` in
 [`server/tacons/starters.ts`](../server/tacons/starters.ts) is the list, and
 anything added to it is removed the same way.
 
