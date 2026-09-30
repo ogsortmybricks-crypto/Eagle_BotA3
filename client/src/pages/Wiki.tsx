@@ -15,7 +15,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "@/lib/api";
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiUpload } from "@/lib/api";
 import { useDateFormat, useSession } from "@/lib/session";
 import {
   Banner,
@@ -1116,12 +1116,26 @@ function DocumentsModal({ open, onClose }: { open: boolean; onClose: () => void 
       setFailures(result.failed ?? []);
       await queryClient.invalidateQueries({ queryKey: ["documents"] });
     } catch (uploadError) {
-      setFailures([
-        {
-          filename: "Upload",
-          reason: uploadError instanceof Error ? uploadError.message : "Failed.",
-        },
-      ]);
+      const rejected = uploadError instanceof ApiError ? uploadError.payload?.failed : undefined;
+      if (
+        Array.isArray(rejected) &&
+        rejected.every(
+          (item) =>
+            item !== null &&
+            typeof item === "object" &&
+            typeof item.filename === "string" &&
+            typeof item.reason === "string",
+        )
+      ) {
+        setFailures(rejected as { filename: string; reason: string }[]);
+      } else {
+        setFailures([
+          {
+            filename: "Upload",
+            reason: uploadError instanceof Error ? uploadError.message : "Failed.",
+          },
+        ]);
+      }
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
@@ -1175,12 +1189,14 @@ function DocumentsModal({ open, onClose }: { open: boolean; onClose: () => void 
                 : "Drop files here or click to choose"}
           </span>
           <span className="mt-1 text-xs text-gray-500">
-            .docx, .md, .txt, .html, .rtf and friends. From Google Docs use File → Download.
+            .docx, .md, .txt, .html, .rtf and other text files (up to 15 MB each; 20 files at once).
+            For PDFs or Google Docs, export as .docx or .txt first.
           </span>
           <input
             ref={inputRef}
             type="file"
             multiple
+            accept=".docx,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.html,.htm,.xml,.rtf,.log"
             className="hidden"
             disabled={uploading || targetStudio === undefined}
             onChange={(event) => upload(event.target.files)}
