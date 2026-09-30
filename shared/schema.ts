@@ -6,11 +6,27 @@ import {
   integer,
   boolean,
   timestamp,
+  json,
   jsonb,
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+
+/**
+ * express-session's connect-pg-simple store creates this table at runtime.
+ * Declare it here too, so publishing does not mistake live sessions for an
+ * obsolete table and drop them during schema synchronization.
+ */
+export const userSessions = pgTable(
+  "user_sessions",
+  {
+    sid: varchar("sid").primaryKey(),
+    sess: json("sess").notNull(),
+    expire: timestamp("expire", { precision: 6 }).notNull(),
+  },
+  (t) => ({ expireIdx: index("IDX_session_expire").on(t.expire) }),
+);
 
 /* -------------------------------------------------------------------------- */
 /*  Enum-ish string unions. Kept as text columns so a studio can add its own   */

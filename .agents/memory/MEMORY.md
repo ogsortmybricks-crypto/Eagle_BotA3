@@ -1,1 +1,2 @@
 - [Replit Vite preview hosts](replit-vite-preview-hosts.md) — allow generated proxied preview hostnames in Vite dev server configuration.
+- [Drizzle push prompts](drizzle-push-prompts.md) — a non-interactive strict push may exit successfully without applying changes; verify the schema afterward.
