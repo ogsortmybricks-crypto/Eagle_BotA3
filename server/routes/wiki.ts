@@ -497,7 +497,12 @@ wikiRouter.post(
       try {
         const content = await extractText(file.originalname, file.buffer);
         if (!content.trim()) {
-          failed.push({ filename: file.originalname, reason: "The file had no readable text in it." });
+          failed.push({
+            filename: file.originalname,
+            reason: file.originalname.toLowerCase().endsWith(".pdf")
+              ? "This PDF has no selectable text. If it is a scanned document, run OCR or export it as a text-based PDF or .docx first."
+              : "The file had no readable text in it.",
+          });
           continue;
         }
         await db.insert(documents).values({

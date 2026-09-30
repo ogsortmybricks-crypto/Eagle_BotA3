@@ -1,4 +1,5 @@
 import mammoth from "mammoth";
+import { PDFParse } from "pdf-parse";
 
 const PLAIN_TEXT_EXTENSIONS = new Set([
   "txt",
@@ -16,7 +17,7 @@ const PLAIN_TEXT_EXTENSIONS = new Set([
   "log",
 ]);
 
-export const ACCEPTED_EXTENSIONS = [...PLAIN_TEXT_EXTENSIONS, "docx"].sort();
+export const ACCEPTED_EXTENSIONS = [...PLAIN_TEXT_EXTENSIONS, "docx", "pdf"].sort();
 
 function stripHtml(html: string): string {
   return html
@@ -59,6 +60,17 @@ export class UnsupportedFileError extends Error {
 
 export async function extractText(filename: string, buffer: Buffer): Promise<string> {
   const extension = (filename.split(".").pop() ?? "").toLowerCase();
+
+  if (extension === "pdf") {
+    const parser = new PDFParse({ data: buffer });
+    try {
+      const { pages } = await parser.getText();
+      // pdf-parse's combined text includes page-count markers even for image-only PDFs.
+      return pages.map((page) => page.text.trim()).filter(Boolean).join("\n\n");
+    } finally {
+      await parser.destroy();
+    }
+  }
 
   if (extension === "docx") {
     const { value } = await mammoth.extractRawText({ buffer });

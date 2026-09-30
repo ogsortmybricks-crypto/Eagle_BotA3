@@ -1189,14 +1189,14 @@ function DocumentsModal({ open, onClose }: { open: boolean; onClose: () => void 
                 : "Drop files here or click to choose"}
           </span>
           <span className="mt-1 text-xs text-gray-500">
-            .docx, .md, .txt, .html, .rtf and other text files (up to 15 MB each; 20 files at once).
-            For PDFs or Google Docs, export as .docx or .txt first.
+            Text-based .pdf, .docx, .md, .txt, .html, .rtf and other text files (up to 15 MB each; 20 files at once).
+            Scanned PDFs need OCR first.
           </span>
           <input
             ref={inputRef}
             type="file"
             multiple
-            accept=".docx,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.html,.htm,.xml,.rtf,.log"
+            accept=".pdf,.docx,.txt,.md,.markdown,.csv,.tsv,.json,.yaml,.yml,.html,.htm,.xml,.rtf,.log"
             className="hidden"
             disabled={uploading || targetStudio === undefined}
             onChange={(event) => upload(event.target.files)}
