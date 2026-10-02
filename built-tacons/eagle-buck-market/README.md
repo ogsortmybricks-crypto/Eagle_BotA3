@@ -6,12 +6,15 @@ An installable Tac-On for the extended Eagle Bot TacScript engine. Source:
 ## Rules
 
 - **100 points = 1 Eagle Buck.** Balances keep every point, including amounts below one Buck.
-- **Maximum balance: 1,000 points / 10 Eagle Bucks.** An earning entry that would exceed the limit is rejected in full; points are not silently discarded.
+- **Upper wallet balance: 1,000 points / 10 Eagle Bucks.** This is not a per-entry cap. Positive earnings first repay any negative balance; the wallet cannot end up above 1,000 points.
+- **Overdraft is enabled for this market.** Purchases may take a wallet below zero. Markets that omit `overdraft true` keep the default behavior: a purchase with insufficient funds is rejected.
 - Learners record their own earned points with a required source/reason. This is a **self-reporting ledger**, not an approval queue.
 - An admin or the current Shopkeeper can record earnings for a learner in the install's scope.
 - Admins and the current Shopkeeper can add, edit, archive, or reactivate catalog items. Prices are positive whole points. Archived items cannot be purchased; their purchase history remains intact.
-- A learner holding the Shopkeeper position can choose **Record for myself** to add their own points with a source/reason. The same 1,000-point wallet cap applies.
-- Only learners can purchase. The server chooses the buyer, current catalog price, and product name, and checks the available balance. Learners cannot choose somebody else's wallet or change a price.
+- A learner holding the Shopkeeper position has **My wallet** and **Manage market** tabs. Market management is also shown by default on the Shopkeeper position desk. Their personal self-earning always records to their own wallet and requires a source/reason.
+- Admins also have a personal wallet: they can self-earn with a required source/reason and buy items, as well as manage the market. Other learners each have one personal wallet.
+- Admins and the current Shopkeeper manage catalog items. Removing an item uses **Remove from catalog**; it removes the item from the active catalog, not its purchase or ledger history.
+- The server chooses the buyer, current catalog price, and product name. A learner cannot choose somebody else's wallet or change a price.
 - Each purchase immediately deducts its cost and records a pending purchase. The admin/current Shopkeeper marks it fulfilled when delivered, without a second deduction.
 - The current Shopkeeper gets the full recent points ledger (including sources) and purchase log on their position desk and on the marketplace. Admins also have oversight. Other learners see only their own history.
 - Every earning and purchase has an audit entry identifying the learner, actor, reason or item, and time. Financial history cannot be deleted through ordinary Tac-On forms/lists.
@@ -27,6 +30,10 @@ An installable Tac-On for the extended Eagle Bot TacScript engine. Source:
 6. As an admin or current Shopkeeper, add your real catalog items and prices on **Eagle Buck Market** or the Shopkeeper's position desk.
 
 The folder is not automatically published or installed. No example products or learner balances are seeded.
+
+## Updating existing installations
+
+This package is version **1.1.0**. To deliver it to academies already using the market, publish the new package version, then have an academy admin update the existing installation through the Tac-Ons listing or installed row. The update flow moves that installation to the published version; it is not automatically applied to a live installation. Do **not** uninstall and reinstall to update: removing the Tac-On deletes its records.
 
 ## Scope and persistence
 
@@ -58,7 +65,8 @@ NODE_ENV=development RUN_TACON_MARKET_DB_TESTS=true npx tsx --test server/tacons
 ```
 
 The database test creates an isolated temporary academy and removes it in
-`finally`. It checks concurrent cap/overdraw attempts, duplicate submissions,
-authoritative prices and identities, Shopkeeper term changes, private learner
+`finally`. It checks concurrent negative-balance purchases and upper-cap
+reservation, duplicate submissions/retries, authoritative prices and identities,
+Shopkeeper term changes, private learner histories, admin personal-wallet
 histories, archived catalog items, and balances beyond 2,000 ledger entries.
 Never run it against a production database.

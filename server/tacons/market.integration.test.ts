@@ -74,7 +74,7 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
     }).returning();
 
     const def: MarketDef = {
-      name: "wallet", title: "Wallet", rate: 100, cap: 1000, keeper: "shopkeeper", scope: "academy",
+      name: "wallet", title: "Wallet", rate: 100, cap: 1000, keeper: "shopkeeper", scope: "academy", overdraft: true,
     };
     const source = readFileSync(new URL("../../tacons/eagle-buck-market/eagle-buck-market.tacon", import.meta.url), "utf8");
     const compiled = compile(source);
@@ -84,7 +84,7 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
       slug: `transient-market-${key}`, name: "Transient Market", academyId, authorUserId: admin.id,
     }).returning();
     const [version] = await db.insert(taconVersions).values({
-      taconId: tacon.id, version: "1.0.0", source, manifest: manifest as unknown as Record<string, unknown>,
+      taconId: tacon.id, version: manifest.version, source, manifest: manifest as unknown as Record<string, unknown>,
     }).returning();
     const [install] = await db.insert(taconInstalls).values({
       academyId, studioId: null, taconId: tacon.id, versionId: version.id, installedBy: admin.id,
@@ -144,8 +144,8 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
         learnerId: learnerB.id, actorId: learnerB.id, productId: product.id, requestId,
       }),
     ));
-    assert.equal(purchaseRace.filter((result) => result.status === "fulfilled").length, 1);
-    assert.equal(purchaseRace.filter((result) => result.status === "rejected").length, 1);
+    assert.equal(purchaseRace.filter((result) => result.status === "fulfilled").length, 2, "Concurrent purchases may enter debt.");
+    assert.equal(purchaseRace.filter((result) => result.status === "rejected").length, 0);
     const success = purchaseRace.find((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof purchaseProduct>>> =>
       result.status === "fulfilled",
     )!;
@@ -155,7 +155,10 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
     });
     assert.equal(replay.replayed, true);
     assert.equal(replay.purchaseId, success.value.purchaseId);
-    assert.equal(replay.balancePoints, 300);
+    assert.equal(replay.balancePoints, -400, "Replaying one purchase must not deduct its cost again.");
+    await assert.rejects(() => purchaseProduct(learnerBRuntime, { ...def, overdraft: false }, {
+      learnerId: learnerB.id, actorId: learnerB.id, productId: product.id, requestId: randomUUID(),
+    }), /enough points/, "Non-overdraft markets still enforce sufficient funds.");
     await assert.rejects(() => purchaseProduct(learnerBRuntime, def, {
       learnerId: learnerB.id, actorId: learnerB.id, productId: product.id + 1, requestId: replayId,
     }), /request ID was already used/);
@@ -183,14 +186,16 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
     const adminView = await renderMarket(adminRuntime, { kind: "market", market: def.name }, 0);
     assert.ok(adminView);
     assert.equal(adminView.canViewLogs, true);
-    assert.equal(adminView.canLogPoints, false, "Staff must select a learner rather than use a nonexistent staff wallet.");
+    assert.equal(adminView.canLogPoints, true, "Every admin also has their own wallet.");
+    assert.equal(adminView.canPurchase, true);
+    assert.equal(adminView.overdraft, true);
     assert.equal(adminView.canAwardPoints, true);
     assert.equal(adminView.products.find((entry) => entry.id === product.id)?.active, false);
     const ownView = await renderMarket(learnerBRuntime, { kind: "market", market: def.name }, 0);
     assert.ok(ownView);
     assert.equal(ownView.canViewLogs, false);
     assert.ok(ownView.entries.every((entry) => entry.learnerId === learnerB.id));
-    assert.equal(ownView.balancePoints, 300);
+    assert.equal(ownView.balancePoints, -400);
 
     // Crossing the generic store's 2,000-row window must not change the balance.
     const historicalRows = Array.from({ length: 2002 }, (_, index) => ({
@@ -208,7 +213,8 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
       await db.insert(taconRecords).values(historicalRows.slice(offset, offset + 500));
     }
     const longLedgerView = await renderMarket(learnerBRuntime, { kind: "market", market: def.name }, 1);
-    assert.equal(longLedgerView?.balancePoints, 300);
+    assert.equal(longLedgerView?.balancePoints, -400);
+    assert.equal(longLedgerView?.ownEntries.length, 200);
     assert.equal(longLedgerView?.entries.length, 200);
 
     const genericWrite = await addRecord(adminRuntime, marketStore(def.name, "ledger"), {}, { type: "user", userId: admin.id });
@@ -244,7 +250,10 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
     const address = httpServer.address();
     assert.ok(address && typeof address !== "string");
     const base = `http://127.0.0.1:${address.port}/tacons/view/${install.id}/markets/wallet`;
-    const location = { page: "market", index: 1 };
+    const location = {
+      page: "market",
+      index: manifest.pages.find((page) => page.name === "market")!.widgets.findIndex((widget) => widget.kind === "market"),
+    };
     const request = async (path: string, body: Record<string, unknown>, method = "POST") => {
       const response = await fetch(`${base}${path}`, {
         method, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...location, ...body }),
@@ -261,7 +270,10 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
     })).status, 403);
     assert.equal((await request("/purchase", { productId: product.id, requestId: randomUUID() })).status, 400, "Archived items cannot be bought.");
     asUser = learnerA;
-    const deskLocation = { page: undefined, position: "shopkeeper", index: 1 };
+    const deskLocation = {
+      page: undefined, position: "shopkeeper",
+      index: manifest.positions.find((position) => position.name === "shopkeeper")!.widgets.findIndex((widget) => widget.kind === "market"),
+    };
     const keeperProduct = await request("/products", { ...catalogInput, ...deskLocation });
     assert.equal(keeperProduct.status, 201, "The current Shopkeeper may add products from their desk.");
     const keeperProductId = keeperProduct.body.product.id;
@@ -290,8 +302,30 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
     asUser = admin;
     const createdProduct = await request("/products", catalogInput);
     assert.equal(createdProduct.status, 201);
-    assert.equal((await request("/purchase", { productId: createdProduct.body.product.id, requestId: randomUUID() })).status, 403);
-    assert.equal((await request("/points", { points: 1, reason: "Staff wallet", requestId: randomUUID() })).status, 400);
+    const adminAward = await request("/points", { points: 500, reason: "Admin's own assignment", requestId: randomUUID() });
+    assert.equal(adminAward.status, 201);
+    assert.equal(adminAward.body.balancePoints, 500, "No recipient means the authenticated admin's own wallet.");
+    const adminPurchase = await request("/purchase", { productId: createdProduct.body.product.id, requestId: randomUUID() });
+    assert.equal(adminPurchase.status, 201);
+    assert.equal(adminPurchase.body.balancePoints, 450);
+    assert.equal((await request("/points", {
+      points: 551, reason: "Over admin cap", requestId: randomUUID(),
+    })).status, 400, "Admins have the same upper cap.");
+    const personalAdminView = await renderMarket(adminRuntime, { kind: "market", market: def.name }, 1);
+    assert.equal(personalAdminView?.ownEntries.length, 2);
+    assert.ok(personalAdminView?.ownEntries.every((entry) => entry.learnerId === admin.id));
+    assert.ok(personalAdminView?.ownPurchases.every((purchase) => purchase.learnerId === admin.id));
+    assert.equal(personalAdminView?.ownEntries.find((entry) => entry.id === adminAward.body.id)?.reason, "Admin's own assignment");
+    // Other users filling the management window must not hide personal history.
+    await db.insert(taconRecords).values(Array.from({ length: 202 }, (_, index) => ({
+      academyId: academyId!, installId: install.id, store: marketStore(def.name, "ledger"),
+      createdByType: "user" as const, createdBy: learnerB.id,
+      data: { learnerId: learnerB.id, points: index % 2 === 0 ? 1 : -1, kind: "earn", reason: "Personal history window fixture", actorId: learnerB.id },
+    })));
+    const windowedAdmin = await renderMarket(adminRuntime, { kind: "market", market: def.name }, 1);
+    assert.equal(windowedAdmin?.entries.some((entry) => entry.learnerId === admin.id), false);
+    assert.equal(windowedAdmin?.ownEntries.length, 2);
+    assert.equal(windowedAdmin?.ownPurchases.length, 1);
     assert.equal((await request("/products", { ...catalogInput, position: "shopkeeper" })).status, 400);
     assert.equal((await request("/products", { ...catalogInput, index: 0 })).status, 404);
     asUser = learnerB;
@@ -300,7 +334,10 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
       pricePoints: 1, learnerId: learnerA.id,
     });
     assert.equal(forgedPrice.status, 201);
-    assert.equal(forgedPrice.body.balancePoints, 275, "Server uses the real price and authenticated wallet.");
+    assert.equal(forgedPrice.body.balancePoints, -425, "Server uses the real price and authenticated wallet, including debt.");
+    const repaid = await request("/points", { points: 500, reason: "Assignment repays debt", requestId: randomUUID() });
+    assert.equal(repaid.status, 201);
+    assert.equal(repaid.body.balancePoints, 75);
     assert.equal((await renderMarket(learnerRuntime, { kind: "market", market: def.name }, 1))?.balancePoints, 1000);
     assert.equal((await request(`/purchases/${forgedPrice.body.purchaseId}/fulfill`, {})).status, 403);
     asUser = learnerA;
@@ -313,6 +350,20 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
       learnerId: learnerB.id, points: 1, reason: "Former holder", requestId: randomUUID(),
     })).status, 403);
     asUser = admin;
+    const extremeProduct = await request("/products", { ...catalogInput, pricePoints: Number.MAX_SAFE_INTEGER });
+    assert.equal(extremeProduct.status, 201);
+    const extremeBuy = await request("/purchase", { productId: extremeProduct.body.product.id, requestId: randomUUID() });
+    assert.equal(extremeBuy.status, 201);
+    assert.equal(extremeBuy.body.balancePoints, 450 - Number.MAX_SAFE_INTEGER);
+    assert.equal((await request("/purchase", {
+      productId: extremeProduct.body.product.id, requestId: randomUUID(),
+    })).status, 400, "Debt cannot overflow the exact integer range.");
+    const fullRepayment = await request("/points", {
+      points: Number.MAX_SAFE_INTEGER, reason: "Repay debt without a per-entry cap", requestId: randomUUID(),
+    });
+    assert.equal(fullRepayment.status, 201);
+    assert.equal(fullRepayment.body.balancePoints, 450);
+    assert.equal((await renderMarket(adminRuntime, { kind: "market", market: def.name }, 1))?.balancePoints, 450);
     const immutableResponse = await fetch(
       `http://127.0.0.1:${address.port}/tacons/view/${install.id}/records/${purchasedId}`,
       { method: "DELETE" },

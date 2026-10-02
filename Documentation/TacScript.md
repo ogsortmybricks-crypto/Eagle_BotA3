@@ -231,9 +231,10 @@ Declare a built-in market at the top level, then show it on a page or position d
 market wallet {
   title "Eagle Buck Market"
   rate 100                 # points per Buck
-  cap 1000                 # maximum points a learner may hold
+  cap 1000                 # upper wallet balance in points, not a per-entry limit
   keeper shopkeeper        # must be a position declared by this Tac-On
   scope academy            # requires an academy-wide install and one shared wallet
+  overdraft true           # optional; defaults to false
 }
 
 page market {
@@ -253,26 +254,38 @@ position shopkeeper {
 requires an academy-wide install, so a learner does not get separate wallets by
 switching studios. Markets in different Tac-Ons or academies remain separate.
 
+`overdraft true` allows purchases to make a wallet balance negative. When it is
+omitted or false, a purchase with insufficient funds is rejected. The `cap` is
+the maximum resulting wallet balance, not the maximum size of an earning entry:
+positive earnings first repay a negative balance, and a wallet cannot exceed the
+cap.
+
 The widget includes the role-appropriate operations:
 
 - **Learners:** report their own earned points with a required source/reason, buy
   active catalog items, and see their own balance, ledger, and purchases.
-- **Admins:** add/edit/archive/reactivate catalog items, award points to learners,
-  see learner balances and the recent ledger/purchases, and fulfill purchases.
-- **Current keeper:** award points to learners, inspect the recent ledger and
-  purchase log, and mark purchases fulfilled. Keeper access follows the actual
-  position holder and ends with the term.
+- **Admins:** use their personal wallet to self-earn (with a required
+  source/reason) and buy items, as well as manage the market. They can
+  add/edit/archive/reactivate catalog items, award points to learners, see learner
+  balances and the recent ledger/purchases, and fulfill purchases.
+- **Current keeper:** has **My wallet** and **Manage market** tabs, with market
+  management shown by default on their position desk. Their own self-earn always
+  goes to their personal wallet and requires a source/reason. They can also award
+  points to learners, inspect the recent ledger and purchase log, and mark
+  purchases fulfilled. Keeper access follows the actual position holder and ends
+  with the term. Other learners each have one personal wallet.
 
 This is a self-reporting points ledger, not an earning-approval system. Catalog
-prices and earnings use positive **whole points**. Purchases can only be made by
-learners and use the server's current price; only admins manage products.
+prices and earnings use positive **whole points**. Purchases use the server's
+current price; admins and the current keeper manage products. Removing an item
+from the catalog does not delete purchase or ledger history.
 
-The server rejects earnings that would exceed the cap and purchases with
-insufficient funds. Purchases atomically save the debit and an item/price
-snapshot. Repeat submissions are idempotent, concurrent operations are
-serialized, and archived items cannot be purchased. Fulfillment does not charge
-again. Market financial stores are private to the built-in engine; ordinary
-forms, actions, or delete-list permissions cannot alter them.
+The server prevents the resulting wallet balance from exceeding the cap.
+Purchases atomically save the debit and an item/price snapshot. Repeat submissions
+are idempotent, concurrent operations are serialized, and archived items cannot
+be purchased. Fulfillment does not charge again. Market financial stores are
+private to the built-in engine; ordinary forms, actions, or delete-list
+permissions cannot alter them.
 
 Balances use the entire ledger, not the generic store read window. The widget
 shows the latest 200 history records; older history remains stored and included

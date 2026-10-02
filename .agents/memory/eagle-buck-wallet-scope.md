@@ -25,3 +25,18 @@ limited to reviewing purchase logs.
 **How to apply:** Expose catalog management on the market and Shopkeeper desk
 only to admins/current holders. Retain self-reporting with a source/reason and
 the shared 1,000-point wallet cap. Expired holders lose catalog privileges.
+
+Eagle Buck balances may go below zero through purchases. The 1,000-point limit
+is an upper balance limit, not a minimum balance or per-entry earning limit.
+Shopkeepers are learners and need both personal assignment-point submission and
+market-management views. Any admin opening the market needs both views too,
+including their own wallet.
+
+**Why:** The user explicitly requested negative balances and the same dual
+personal/management behavior for Shopkeepers and admins.
+
+**How to apply:** Keep negative balances opt-in for this Tac-On so unrelated
+markets do not unexpectedly permit debt. Positive assignment earnings repay debt.
+Personal submissions must target the signed-in user's own wallet, independently
+of any recipient chosen in management mode. Item removal means taking it off
+the catalog while preserving ledger and purchase history.

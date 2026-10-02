@@ -5,16 +5,50 @@ import { compile } from "../../shared/tacons/compile";
 
 const source = readFileSync(new URL("./eagle-buck-market.tacon", import.meta.url), "utf8");
 
-test("Eagle Buck Market compiles with fixed conversion, cap, shared scope and Shopkeeper desk", () => {
+test("Eagle Buck Market compiles with fixed conversion, cap, overdraft, shared scope and Shopkeeper desk", () => {
   const result = compile(source);
   assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
   if (!result.ok) return;
   assert.deepEqual(result.manifest.markets, [{
-    name: "wallet", title: "Eagle Buck Market", rate: 100, cap: 1000, keeper: "shopkeeper", scope: "academy",
+    name: "wallet", title: "Eagle Buck Market", rate: 100, cap: 1000, keeper: "shopkeeper", scope: "academy", overdraft: true,
   }]);
   assert.ok(result.manifest.pages[0].widgets.some((w) => w.kind === "market" && w.market === "wallet"));
   assert.ok(result.manifest.positions[0].widgets.some((w) => w.kind === "market"));
   assert.equal(result.manifest.positions[0].seats, 1);
+});
+
+test("markets default overdraft to false, including legacy-style market declarations", () => {
+  const result = compile(`tacon old-market {
+  name "Old Market"
+  version 1.0.0
+  market wallet {
+    keeper shopkeeper
+  }
+  position shopkeeper {
+    title "Shopkeeper"
+  }
+  page market {
+    market wallet
+  }
+}`);
+  assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
+  if (!result.ok) return;
+  assert.equal(result.manifest.markets?.[0]?.overdraft, false);
+});
+
+test("markets accept explicit overdraft false", () => {
+  const result = compile(source.replace("overdraft true", "overdraft false"));
+  assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
+  if (!result.ok) return;
+  assert.equal(result.manifest.markets?.[0]?.overdraft, false);
+});
+
+test("market overdraft accepts exactly one true/false literal and no child lines", () => {
+  for (const invalid of ["overdraft yes", "overdraft true false", 'overdraft "true"', "overdraft true {\n      title nope\n    }"]) {
+    const result = compile(source.replace("overdraft true", invalid));
+    assert.equal(result.ok, false, invalid);
+    assert.ok(result.diagnostics.some((diagnostic) => diagnostic.message.includes("overdraft")), invalid);
+  }
 });
 
 test("market widgets cannot reference missing markets", () => {

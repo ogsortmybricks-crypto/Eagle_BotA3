@@ -203,6 +203,8 @@ export type MarketDef = {
   keeper: string;
   /** Academy scope requires a single shared, academy-wide install. */
   scope?: "academy" | "install";
+  /** Whether spending may take the wallet below zero. */
+  overdraft?: boolean;
 };
 
 export type MarketWidget = { kind: "market"; market: string };

@@ -48,7 +48,7 @@ test("portal validates uploaded source using the server compiler without publish
     assert.equal(valid.status, 200);
     assert.equal(valid.body.ok, true);
     assert.deepEqual(valid.body.manifest, {
-      slug: "eagle-buck-market", name: "Eagle Buck Market", version: "1.0.0", academyWide: true,
+      slug: "eagle-buck-market", name: "Eagle Buck Market", version: "1.1.0", academyWide: true,
     });
     const invalid = await post({ source: source.replace("keeper shopkeeper", "keeper missing") });
     assert.equal(invalid.status, 200);

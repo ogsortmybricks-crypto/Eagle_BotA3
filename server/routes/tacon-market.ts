@@ -120,8 +120,8 @@ taconMarketRouter.post("/view/:installId/markets/:name/points", requirePermissio
     }
     const learnerId = manager && parsed.data.learnerId !== undefined
       ? parsed.data.learnerId
-      : user.role === "learner" ? user.id : undefined;
-    if (!learnerId) return res.status(400).json({ error: "Choose an eligible learner." });
+      : user.role === "learner" || user.role === "admin" ? user.id : undefined;
+    if (!learnerId) return res.status(400).json({ error: "Choose an eligible wallet owner." });
     const result = await recordPoints(access.runtime, access.def, {
       learnerId, points: parsed.data.points, reason: parsed.data.reason,
       requestId: parsed.data.requestId, actorId: user.id,
@@ -171,7 +171,9 @@ taconMarketRouter.post("/view/:installId/markets/:name/purchase", requirePermiss
   try {
     const access = await authorizedMarket(req, parsed.data, parsed.data.index, req.params.name);
     if (!access.ok) return res.status(access.status).json({ error: access.error });
-    if (req.user!.role !== "learner") return res.status(403).json({ error: "Only learners may purchase products." });
+    if (req.user!.role !== "learner" && req.user!.role !== "admin") {
+      return res.status(403).json({ error: "Only learners or admins may purchase products." });
+    }
     const result = await purchaseProduct(access.runtime, access.def, {
       learnerId: req.user!.id, actorId: req.user!.id,
       productId: parsed.data.productId, requestId: parsed.data.requestId,

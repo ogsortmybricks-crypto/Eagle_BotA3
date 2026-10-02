@@ -2,7 +2,7 @@
 # 100 points = 1 Eagle Buck; each learner may hold at most 1,000 points.
 tacon eagle-buck-market {
   name "Eagle Buck Market"
-  version 1.0.0
+  version 1.1.0
   about "Track where points came from, spend Eagle Bucks, and give the Shopkeeper an accountable purchase log."
   icon coins
   category tracking
@@ -13,14 +13,16 @@ tacon eagle-buck-market {
     cap 1000
     keeper shopkeeper
     scope academy
+    overdraft true
   }
 
   page market {
     title "Eagle Buck Market"
     icon coins
     nav true
-    subtitle "Earn points, record their source, and shop with Eagle Bucks."
+    subtitle "Earn points, record their source, and shop with Eagle Bucks. Spending can go below zero; future earnings repay the balance."
     note "100 points make 1 Eagle Buck. You may hold up to 10 Eagle Bucks (1,000 points)." info
+    note "With overdraft enabled, spending can take your balance below zero; future earnings repay it. The 10 Eagle Buck upper cap is unchanged." info
     market wallet
   }
 

@@ -349,7 +349,15 @@ function compileMarket(ctx: Ctx, node: Node): MarketDef | null {
     error(ctx, node, `There's already a market called "${name}".`);
     return null;
   }
-  const market: MarketDef = { name, title: titleCase(name), rate: 100, cap: 1000, keeper: "", scope: "install" };
+  const market: MarketDef = {
+    name,
+    title: titleCase(name),
+    rate: 100,
+    cap: 1000,
+    keeper: "",
+    scope: "install",
+    overdraft: false,
+  };
   const seen = new Set<string>();
   for (const child of node.children) {
     const keyword = child.keyword.toLowerCase();
@@ -363,13 +371,24 @@ function compileMarket(ctx: Ctx, node: Node): MarketDef | null {
         error(ctx, child, "Market scope must be academy (one shared wallet) or install (separate wallets).");
       } else market.scope = scope;
     }
+    else if (keyword === "overdraft") {
+      if (child.children.length > 0) {
+        error(ctx, child, "Market overdraft takes one value and cannot have child lines.");
+      }
+      const value = child.args.length === 1 && child.args[0].kind === "word"
+        ? child.args[0].value.toLowerCase()
+        : "";
+      if (value !== "true" && value !== "false") {
+        error(ctx, child, "Market overdraft must be exactly true or false.");
+      } else market.overdraft = value === "true";
+    }
     else if (keyword === "rate" || keyword === "cap") {
       const number = Number(joined(child.args));
       if (!Number.isSafeInteger(number) || number < 1 || number > 1_000_000_000) {
         error(ctx, child, `Market ${keyword} must be a positive whole number, up to 1,000,000,000.`);
       } else market[keyword] = number;
     } else {
-      error(ctx, child, `"${child.keyword}" doesn't belong in a market. Use title, rate, cap, keeper or scope.`);
+      error(ctx, child, `"${child.keyword}" doesn't belong in a market. Use title, rate, cap, keeper, scope or overdraft.`);
     }
   }
   if (!market.keeper) error(ctx, node, "A market needs `keeper <position>` for its purchase log.");

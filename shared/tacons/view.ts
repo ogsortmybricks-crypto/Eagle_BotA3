@@ -98,6 +98,7 @@ export type ViewMarket = {
   rate: number;
   cap: number;
   balancePoints: number;
+  overdraft: boolean;
   canPurchase: boolean;
   canLogPoints: boolean;
   canAwardPoints: boolean;
@@ -106,6 +107,9 @@ export type ViewMarket = {
   products: MarketProduct[];
   entries: MarketEntry[];
   purchases: MarketPurchase[];
+  /** Personal history is windowed independently from the management logs. */
+  ownEntries: MarketEntry[];
+  ownPurchases: MarketPurchase[];
   learners: { id: number; name: string; balancePoints: number }[];
 };
 

@@ -1,5 +1,5 @@
 /** Transaction-backed storage and rendering for TacScript's built-in market. */
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db";
 import { taconRecords, users } from "@shared/schema";
 import { marketStore } from "@shared/tacons/market";
@@ -30,7 +30,8 @@ type Product = { id: number; name: string; description: string; pricePoints: num
 
 export function validMarketDefinition(def: MarketDef): boolean {
   return Number.isSafeInteger(def.rate) && def.rate >= 1 && def.rate <= 1_000_000_000 &&
-    Number.isSafeInteger(def.cap) && def.cap >= def.rate && def.cap <= 1_000_000_000;
+    Number.isSafeInteger(def.cap) && def.cap >= def.rate && def.cap <= 1_000_000_000 &&
+    (def.overdraft === undefined || typeof def.overdraft === "boolean");
 }
 
 export function marketRequiresAcademyInstall(def: MarketDef): boolean {
@@ -66,7 +67,7 @@ function userName(runtime: Runtime, id: unknown): string {
 async function eligibleLearners(runtime: Runtime) {
   const all = await db.select({ id: users.id, name: users.name, studioId: users.studioId })
     .from(users)
-    .where(and(eq(users.academyId, runtime.academyId), eq(users.active, true), eq(users.role, "learner")));
+    .where(and(eq(users.academyId, runtime.academyId), eq(users.active, true), inArray(users.role, ["learner", "admin"])));
   const scope = runtime.scope;
   // An install in a grouped studio is the whole group's market.
   const installCircle = await studioCircle(runtime.install.install.studioId);
@@ -89,14 +90,26 @@ async function marketRows(runtime: Runtime, def: MarketDef, kind: MarketKind): P
   )).orderBy(desc(taconRecords.createdAt));
 }
 
+function safeBalance(points: bigint): number {
+  const balance = Number(points);
+  if (!Number.isSafeInteger(balance)) throw new MarketError("This wallet exceeds the supported balance range.");
+  return balance;
+}
+
+function walletBalance(ledger: MarketRow[], ownerId: number): number {
+  return safeBalance(ledger
+    .filter((row) => integer(data(row).learnerId) === ownerId)
+    .reduce((total, row) => total + BigInt(integer(data(row).points)), 0n));
+}
+
 function balances(ledger: MarketRow[]): Map<number, number> {
-  const result = new Map<number, number>();
+  const result = new Map<number, bigint>();
   for (const record of ledger) {
     const row = data(record);
     const learnerId = integer(row.learnerId);
-    result.set(learnerId, (result.get(learnerId) ?? 0) + integer(row.points));
+    result.set(learnerId, (result.get(learnerId) ?? 0n) + BigInt(integer(row.points)));
   }
-  return result;
+  return new Map([...result].map(([id, points]) => [id, safeBalance(points)]));
 }
 
 export async function renderMarket(runtime: Runtime, widget: { kind: "market"; market: string }, index: number): Promise<ViewMarket | null> {
@@ -106,7 +119,7 @@ export async function renderMarket(runtime: Runtime, widget: { kind: "market"; m
   const user = runtime.user;
   const isAdmin = user?.role === "admin";
   const isKeeper = runtime.held.has(def.keeper);
-  const learner = user?.role === "learner";
+  const learner = user?.role === "learner" || isAdmin;
   const canManage = Boolean(isAdmin || isKeeper);
   const canViewLogs = Boolean(isAdmin || isKeeper);
   const [catalog, ledger, purchases, eligible] = await Promise.all([
@@ -128,7 +141,7 @@ export async function renderMarket(runtime: Runtime, widget: { kind: "market"; m
   const visibleLedger = canViewLogs
     ? ledger.slice(0, RECENT_LIMIT)
     : learner ? ledger.filter((row) => integer(data(row).learnerId) === user.id).slice(0, RECENT_LIMIT) : [];
-  const entries: MarketEntry[] = visibleLedger.map((row) => {
+  const entryView = (row: MarketRow): MarketEntry => {
     const values = data(row);
     const points = integer(values.points);
     return {
@@ -141,11 +154,14 @@ export async function renderMarket(runtime: Runtime, widget: { kind: "market"; m
       createdAt: row.createdAt.toISOString(),
       actorName: userName(runtime, values.actorId),
     };
-  });
+  };
+  const entries = visibleLedger.map(entryView);
+  const ownEntries = learner ? ledger
+    .filter((row) => integer(data(row).learnerId) === user!.id).slice(0, RECENT_LIMIT).map(entryView) : [];
   const visiblePurchases = canViewLogs
     ? purchases.slice(0, RECENT_LIMIT)
     : learner ? purchases.filter((row) => integer(data(row).learnerId) === user.id).slice(0, RECENT_LIMIT) : [];
-  const purchaseViews: MarketPurchase[] = visiblePurchases.map((row) => {
+  const purchaseView = (row: MarketRow): MarketPurchase => {
     const values = data(row);
     return {
       id: row.id,
@@ -157,7 +173,10 @@ export async function renderMarket(runtime: Runtime, widget: { kind: "market"; m
       createdAt: row.createdAt.toISOString(),
       fulfilledAt: typeof values.fulfilledAt === "string" ? values.fulfilledAt : null,
     };
-  });
+  };
+  const purchaseViews = visiblePurchases.map(purchaseView);
+  const ownPurchases = learner ? purchases
+    .filter((row) => integer(data(row).learnerId) === user!.id).slice(0, RECENT_LIMIT).map(purchaseView) : [];
   const canAwardPoints = Boolean(isAdmin || isKeeper);
   const canLogPoints = Boolean(learner);
   const ownBalance = user ? balanceMap.get(user.id) ?? 0 : 0;
@@ -169,6 +188,7 @@ export async function renderMarket(runtime: Runtime, widget: { kind: "market"; m
     rate: def.rate,
     cap: def.cap,
     balancePoints: ownBalance,
+    overdraft: def.overdraft === true,
     canPurchase: Boolean(learner),
     canLogPoints,
     canAwardPoints,
@@ -177,6 +197,8 @@ export async function renderMarket(runtime: Runtime, widget: { kind: "market"; m
     products,
     entries,
     purchases: purchaseViews,
+    ownEntries,
+    ownPurchases,
     learners: canAwardPoints
       ? eligible.map((person) => ({ id: person.id, name: person.name, balancePoints: balanceMap.get(person.id) ?? 0 }))
       : [],
@@ -219,7 +241,7 @@ export async function recordPoints(runtime: Runtime, def: MarketDef, options: {
   assertWritableMarket(runtime, def);
   if (!positivePoints(options.points)) throw new MarketError("Points must be a positive whole number.");
   if (!options.reason.trim() || options.reason.length > 500) throw new MarketError("Add a reason of 1–500 characters.");
-  if (!(await validateLearner(runtime, options.learnerId))) throw new MarketError("That learner isn't eligible for this market.");
+  if (!(await validateLearner(runtime, options.learnerId))) throw new MarketError("That wallet owner isn't eligible for this market.");
   return db.transaction(async (tx) => {
     await lockMarket(tx, runtime.install.install.id, def.name);
     const ledger = await tx.select().from(taconRecords).where(and(
@@ -230,13 +252,11 @@ export async function recordPoints(runtime: Runtime, def: MarketDef, options: {
     const expected = { learnerId: options.learnerId, points: options.points, reason: options.reason.trim(), kind: "earn" };
     if (prior) {
       if (!requestMatches(prior, expected)) throw new MarketError("That request ID was already used for a different points entry.");
-      const total = ledger.filter((row) => integer(data(row).learnerId) === options.learnerId)
-        .reduce((sum, row) => sum + integer(data(row).points), 0);
+      const total = walletBalance(ledger, options.learnerId);
       return { id: prior.id, balancePoints: total, replayed: true };
     }
-    const currentBalance = ledger.filter((row) => integer(data(row).learnerId) === options.learnerId)
-      .reduce((sum, row) => sum + integer(data(row).points), 0);
-    if (currentBalance + options.points > def.cap) {
+    const currentBalance = walletBalance(ledger, options.learnerId);
+    if (!Number.isSafeInteger(currentBalance + options.points) || currentBalance + options.points > def.cap) {
       throw new MarketError(`That award would exceed this market's wallet limit of ${def.cap} points.`);
     }
     const [record] = await tx.insert(taconRecords).values({
@@ -290,7 +310,7 @@ export async function purchaseProduct(runtime: Runtime, def: MarketDef, options:
   productId: number; learnerId: number; actorId: number; requestId: string;
 }): Promise<{ purchaseId: number; balancePoints: number; replayed: boolean }> {
   assertWritableMarket(runtime, def);
-  if (!(await validateLearner(runtime, options.learnerId))) throw new MarketError("That learner isn't eligible for this market.");
+  if (!(await validateLearner(runtime, options.learnerId))) throw new MarketError("That wallet owner isn't eligible for this market.");
   return db.transaction(async (tx) => {
     await lockMarket(tx, runtime.install.install.id, def.name);
     const catalog = await tx.select().from(taconRecords).where(and(
@@ -310,8 +330,7 @@ export async function purchaseProduct(runtime: Runtime, def: MarketDef, options:
       if (!requestMatches(prior, { learnerId: options.learnerId, productId: options.productId })) {
         throw new MarketError("That request ID was already used for a different purchase.");
       }
-      const total = ledger.filter((row) => integer(data(row).learnerId) === options.learnerId)
-        .reduce((sum, row) => sum + integer(data(row).points), 0);
+      const total = walletBalance(ledger, options.learnerId);
       return { purchaseId: prior.id, balancePoints: total, replayed: true };
     }
     const productRecord = catalog.find((row) => row.id === options.productId);
@@ -319,9 +338,13 @@ export async function purchaseProduct(runtime: Runtime, def: MarketDef, options:
     const productData = data(productRecord);
     const pricePoints = integer(productData.pricePoints);
     if (!positivePoints(pricePoints)) throw new MarketError("That product has an invalid price.");
-    const balance = ledger.filter((row) => integer(data(row).learnerId) === options.learnerId)
-      .reduce((sum, row) => sum + integer(data(row).points), 0);
-    if (balance < pricePoints) throw new MarketError("You don't have enough points for that purchase.");
+    const balance = walletBalance(ledger, options.learnerId);
+    if (def.overdraft !== true && balance < pricePoints) {
+      throw new MarketError("You don't have enough points for that purchase.");
+    }
+    if (!Number.isSafeInteger(balance - pricePoints)) {
+      throw new MarketError("That purchase would exceed the supported balance range.");
+    }
     const timestamp = currentTime();
     const [purchase] = await tx.insert(taconRecords).values({
       academyId: runtime.academyId, installId: runtime.install.install.id, store: store(def, "purchases"),
