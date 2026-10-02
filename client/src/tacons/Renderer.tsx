@@ -14,6 +14,7 @@ import { Trash2 } from "lucide-react";
 import { apiDelete, apiPost } from "@/lib/api";
 import { useDateFormat } from "@/lib/session";
 import { Banner, Spinner } from "@/components/ui";
+import { MarketView } from "./MarketView";
 import type {
   TaconView,
   ViewForm,
@@ -96,6 +97,9 @@ function WidgetView({
 
     case "button":
       return <ButtonView label={widget.label} confirm={widget.confirm} index={widget.index} allowed={widget.allowed} target={target} />;
+
+    case "market":
+      return <MarketView market={widget} target={target} />;
   }
 }
 

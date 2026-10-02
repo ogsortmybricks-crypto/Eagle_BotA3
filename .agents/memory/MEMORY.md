@@ -1,2 +1,3 @@
 - [Replit Vite preview hosts](replit-vite-preview-hosts.md) — allow generated proxied preview hostnames in Vite dev server configuration.
 - [Drizzle push prompts](drizzle-push-prompts.md) — a non-interactive strict push may exit successfully without applying changes; verify the schema afterward.
+- [Eagle Buck wallet scope](eagle-buck-wallet-scope.md) — use one academy-wide wallet so studio switching cannot bypass the learner's 10-Buck limit.

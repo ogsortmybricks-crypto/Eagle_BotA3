@@ -54,8 +54,14 @@ import {
   runActions,
 } from "../tacons/runtime";
 import { heldNames, heldPositions, setPositionsArchived, syncPositions } from "../tacons/positions";
+import {
+  isReservedMarketStore,
+  marketRequiresAcademyInstall,
+} from "../tacons/market";
+import { taconMarketRouter } from "./tacon-market";
 
 export const taconsRouter = Router();
+taconsRouter.use(taconMarketRouter);
 
 /* -------------------------------------------------------------------------- */
 /*  What this academy is running                                               */
@@ -326,6 +332,9 @@ taconsRouter.delete(
       )
       .limit(1);
     if (!record) return res.status(404).json({ error: "That row is already gone." });
+    if (isReservedMarketStore(record.store)) {
+      return res.status(403).json({ error: "Market records are immutable and cannot be removed here." });
+    }
 
     // Removal is only ever offered by a list that said who may remove, so the
     // permission question is "does any such list exist, for this person?".
@@ -469,6 +478,13 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
     return res.status(404).json({ error: "No Tac-On by that name." });
   }
 
+  const [version] = await db
+    .select()
+    .from(taconVersions)
+    .where(eq(taconVersions.id, tacon.latestVersionId))
+    .limit(1);
+  const manifest = version ? readManifest(version) : null;
+
   const scope = requireScope(req);
   let studioId: number | null;
   try {
@@ -482,33 +498,44 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
     }
     throw error;
   }
-
-  const [existing] = await db
-    .select()
-    .from(taconInstalls)
-    .where(
-      and(
-        eq(taconInstalls.academyId, academyId),
-        eq(taconInstalls.taconId, tacon.id),
-        studioId === null ? sql`${taconInstalls.studioId} is null` : eq(taconInstalls.studioId, studioId),
-      ),
-    )
-    .limit(1);
-  if (existing) {
-    return res.status(409).json({ error: `${tacon.name} is already installed here.` });
+  const hasAcademyWallet = Boolean(manifest?.markets?.some(marketRequiresAcademyInstall));
+  if (hasAcademyWallet && studioId !== null) {
+    return res.status(409).json({ error: "This Tac-On's market requires one academy-wide install." });
   }
 
-  const [install] = await db
-    .insert(taconInstalls)
-    .values({
-      academyId,
-      studioId,
-      taconId: tacon.id,
-      versionId: tacon.latestVersionId,
-      settings: parsed.data.settings as Record<string, unknown>,
-      installedBy: req.user!.id,
-    })
-    .returning();
+  const result = await db.transaction(async (tx) => {
+    if (hasAcademyWallet) {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`tacon-market-install:${academyId}:${tacon.id}`}, 0))`);
+    }
+    const [existing] = await tx
+      .select()
+      .from(taconInstalls)
+      .where(
+        and(
+          eq(taconInstalls.academyId, academyId),
+          eq(taconInstalls.taconId, tacon.id),
+          studioId === null ? sql`${taconInstalls.studioId} is null` : eq(taconInstalls.studioId, studioId),
+        ),
+      )
+      .limit(1);
+    if (existing) return { existing, install: null };
+    const [install] = await tx
+      .insert(taconInstalls)
+      .values({
+        academyId,
+        studioId,
+        taconId: tacon.id,
+        versionId: tacon.latestVersionId!,
+        settings: parsed.data.settings as Record<string, unknown>,
+        installedBy: req.user!.id,
+      })
+      .returning();
+    return { existing: null, install };
+  });
+  if (result.existing) {
+    return res.status(409).json({ error: `${tacon.name} is already installed here.` });
+  }
+  const install = result.install!;
 
   await db
     .update(tacons)
@@ -520,12 +547,6 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
 
   // Positions the Tac-On declares go onto the Positions page now, in the studio
   // it was installed into.
-  const [version] = await db
-    .select()
-    .from(taconVersions)
-    .where(eq(taconVersions.id, install.versionId))
-    .limit(1);
-  const manifest = version ? readManifest(version) : null;
   if (manifest) {
     await syncPositions({ install, taconName: tacon.name, manifest, actorUserId: req.user!.id });
   }
@@ -588,6 +609,13 @@ taconsRouter.post("/installs/:id/update", requirePermission("tacons.install"), a
     .where(eq(taconVersions.id, entry.tacon.latestVersionId))
     .limit(1);
   if (!version) return res.status(409).json({ error: "There's no newer version to move to." });
+  const nextManifest = readManifest(version);
+  if (
+    entry.install.studioId !== null &&
+    nextManifest?.markets?.some(marketRequiresAcademyInstall)
+  ) {
+    return res.status(409).json({ error: "This version's market requires an academy-wide install." });
+  }
 
   const [updated] = await db
     .update(taconInstalls)
@@ -595,7 +623,7 @@ taconsRouter.post("/installs/:id/update", requirePermission("tacons.install"), a
     .where(eq(taconInstalls.id, entry.install.id))
     .returning();
 
-  const manifest = readManifest(version);
+  const manifest = nextManifest;
   if (manifest) {
     await syncPositions({
       install: updated,

@@ -67,6 +67,7 @@ import { scoped, studioFilter, type StudioScope } from "../studio";
 import type { LoadedInstall } from "./registry";
 import { resolveUses } from "./registry";
 import { heldNames, positionFacts, type PositionFacts } from "./positions";
+import { renderMarket } from "./market";
 
 /**
  * How many rows one store contributes to a `sum` or a filtered list.
@@ -758,6 +759,9 @@ async function renderWidget(runtime: Runtime, widget: Widget, index: number): Pr
         confirm: widget.confirm,
         allowed: audienceAllows(widget.allow, runtime.user, runtime.held),
       };
+
+    case "market":
+      return renderMarket(runtime, widget, index);
   }
 }
 
@@ -893,6 +897,9 @@ export async function addRecord(
   values: Record<string, unknown>,
   actor: { type: "user" | "tacon"; userId: number | null },
 ): Promise<WriteResult> {
+  if (storeName.startsWith("__market_")) {
+    return { ok: false, error: "Market records can only be changed through the built-in market." };
+  }
   const store = storeDef(runtime.install.manifest, storeName);
   if (!store) return { ok: false, error: `This Tac-On has no store called "${storeName}".` };
 

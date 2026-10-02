@@ -75,6 +75,12 @@ An installed Tac-On's pages appear in the sidebar under a **Tac-Ons** heading,
 kept separate from Eagle Bot's own pages on purpose. Panels appear at the bottom
 of whichever page they attach to, each labelled with the Tac-On it came from.
 
+Transaction-backed points markets are supported by the built-in TacScript
+`market` declaration. See [`tacons/eagle-buck-market`](../tacons/eagle-buck-market/)
+for a source package using 100 points per Eagle Buck and a maximum balance of
+10 Eagle Bucks, with learner purchases and a Shopkeeper log. The package is not
+automatically published or installed.
+
 ### Positions a Tac-On adds
 
 Some Tac-Ons add a position. A points-economy Tac-On, for example, might add a

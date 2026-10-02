@@ -39,6 +39,7 @@ tacon hero-bucks {          # lowercase letters, numbers and hyphens
   page ...                   # pages in the sidebar
   panel ...                  # cards on Eagle Bot's own pages
   position ...               # positions on the Positions page, and their holder's desk
+  market ...                 # built-in points ledger, catalog and safe purchases
   when ...                   # things that happen by themselves
 
   provides entry, balance    # what other Tac-Ons may read
@@ -218,6 +219,67 @@ button "Close the week" {
   notify "Week closed."
 }
 ```
+
+---
+
+## `market` — a points economy with enforced balances
+
+Declare a built-in market at the top level, then show it on a page or position desk:
+
+```
+market wallet {
+  title "Eagle Buck Market"
+  rate 100                 # points per Buck
+  cap 1000                 # maximum points a learner may hold
+  keeper shopkeeper        # must be a position declared by this Tac-On
+  scope academy            # requires an academy-wide install and one shared wallet
+}
+
+page market {
+  title "Eagle Buck Market"
+  market wallet
+}
+
+position shopkeeper {
+  title "Shopkeeper"
+  seats 1
+  elected true
+  market wallet
+}
+```
+
+`scope install` (the default) gives separate wallets per install. `scope academy`
+requires an academy-wide install, so a learner does not get separate wallets by
+switching studios. Markets in different Tac-Ons or academies remain separate.
+
+The widget includes the role-appropriate operations:
+
+- **Learners:** report their own earned points with a required source/reason, buy
+  active catalog items, and see their own balance, ledger, and purchases.
+- **Admins:** add/edit/archive/reactivate catalog items, award points to learners,
+  see learner balances and the recent ledger/purchases, and fulfill purchases.
+- **Current keeper:** award points to learners, inspect the recent ledger and
+  purchase log, and mark purchases fulfilled. Keeper access follows the actual
+  position holder and ends with the term.
+
+This is a self-reporting points ledger, not an earning-approval system. Catalog
+prices and earnings use positive **whole points**. Purchases can only be made by
+learners and use the server's current price; only admins manage products.
+
+The server rejects earnings that would exceed the cap and purchases with
+insufficient funds. Purchases atomically save the debit and an item/price
+snapshot. Repeat submissions are idempotent, concurrent operations are
+serialized, and archived items cannot be purchased. Fulfillment does not charge
+again. Market financial stores are private to the built-in engine; ordinary
+forms, actions, or delete-list permissions cannot alter them.
+
+Balances use the entire ledger, not the generic store read window. The widget
+shows the latest 200 history records; older history remains stored and included
+in balances. As with all Tac-Ons, removing an install deletes its records;
+turning it off preserves them.
+
+This syntax needs the updated Eagle Bot market engine. It cannot compile on
+older versions.
 
 ---
 

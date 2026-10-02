@@ -36,6 +36,7 @@ import {
   type HookDef,
   type HookEvent,
   type Manifest,
+  type MarketDef,
   type PageDef,
   type PanelDef,
   type PanelHost,
@@ -61,6 +62,7 @@ type Ctx = {
   needs: Set<string>;
   /** Position names, collected up front so any `allow` can name one. */
   positions: Set<string>;
+  markets: Map<string, MarketDef>;
 };
 
 function error(ctx: Ctx, node: { line: number; column: number }, message: string) {
@@ -335,6 +337,45 @@ function compileActions(ctx: Ctx, nodes: Node[]): Action[] {
 /*  Widgets                                                                    */
 /* -------------------------------------------------------------------------- */
 
+function compileMarket(ctx: Ctx, node: Node): MarketDef | null {
+  const name = text(node.args[0]);
+  if (!IDENTIFIER.test(name) || name.length > 48) {
+    error(ctx, node, "A market needs a one-word name, like `market wallet { ... }` (up to 48 characters).");
+    return null;
+  }
+  if (ctx.markets.has(name)) {
+    error(ctx, node, `There's already a market called "${name}".`);
+    return null;
+  }
+  const market: MarketDef = { name, title: titleCase(name), rate: 100, cap: 1000, keeper: "", scope: "install" };
+  const seen = new Set<string>();
+  for (const child of node.children) {
+    const keyword = child.keyword.toLowerCase();
+    if (seen.has(keyword)) error(ctx, child, `"${keyword}" is already set for this market.`);
+    seen.add(keyword);
+    if (keyword === "title") market.title = joined(child.args) || market.title;
+    else if (keyword === "keeper") market.keeper = text(child.args[0]);
+    else if (keyword === "scope") {
+      const scope = joined(child.args).toLowerCase();
+      if (scope !== "academy" && scope !== "install") {
+        error(ctx, child, "Market scope must be academy (one shared wallet) or install (separate wallets).");
+      } else market.scope = scope;
+    }
+    else if (keyword === "rate" || keyword === "cap") {
+      const number = Number(joined(child.args));
+      if (!Number.isSafeInteger(number) || number < 1 || number > 1_000_000_000) {
+        error(ctx, child, `Market ${keyword} must be a positive whole number, up to 1,000,000,000.`);
+      } else market[keyword] = number;
+    } else {
+      error(ctx, child, `"${child.keyword}" doesn't belong in a market. Use title, rate, cap, keeper or scope.`);
+    }
+  }
+  if (!market.keeper) error(ctx, node, "A market needs `keeper <position>` for its purchase log.");
+  if (market.cap < market.rate) error(ctx, node, "A market cap must allow at least one Buck (cap must be at least rate).");
+  ctx.markets.set(name, market);
+  return market;
+}
+
 function compileWidget(ctx: Ctx, node: Node): Widget | null {
   const keyword = node.keyword.toLowerCase();
 
@@ -399,11 +440,23 @@ function compileWidget(ctx: Ctx, node: Node): Widget | null {
     case "button":
       return compileButton(ctx, node);
 
+    case "market": {
+      const market = text(node.args[0]);
+      if (!ctx.markets.has(market)) {
+        error(ctx, node, `There's no market called "${market}". Declare it at the top level first.`);
+        return null;
+      }
+      if (node.children.length > 0 || node.args.length !== 1) {
+        error(ctx, node, "Show a market with `market <name>`; configure it in the top-level market block.");
+      }
+      return { kind: "market", market };
+    }
+
     default:
       error(
         ctx,
         node,
-        `"${node.keyword}" isn't something a page can show. Use note, heading, stat, list, form, button or divider.`,
+        `"${node.keyword}" isn't something a page can show. Use note, heading, stat, list, form, button, market or divider.`,
       );
       return null;
   }
@@ -848,6 +901,7 @@ export function compile(source: string): CompileResult {
     uses: new Map(),
     needs: new Set(),
     positions: new Set(),
+    markets: new Map(),
   };
 
   const roots = parsed.nodes.filter((node) => node.keyword.toLowerCase() === "tacon");
@@ -897,6 +951,7 @@ export function compile(source: string): CompileResult {
     positions: [],
     hooks: [],
     computes: [],
+    markets: [],
   };
 
   // Two passes: stores and `use` first, so a page written above the store it
@@ -934,6 +989,15 @@ export function compile(source: string): CompileResult {
       } else {
         ctx.positions.add(name);
       }
+    } else if (keyword === "market") {
+      const market = compileMarket(ctx, node);
+      if (market) manifest.markets!.push(market);
+    }
+  }
+
+  for (const market of manifest.markets ?? []) {
+    if (!ctx.positions.has(market.keeper)) {
+      error(ctx, root, `Market "${market.name}" needs a declared position called "${market.keeper}".`);
     }
   }
 
@@ -945,6 +1009,7 @@ export function compile(source: string): CompileResult {
       case "store":
       case "use":
       case "setting":
+      case "market":
         break;
 
       case "name":
@@ -1036,7 +1101,7 @@ export function compile(source: string): CompileResult {
         error(
           ctx,
           node,
-          `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, page, panel, position, when, ask, needs, provides or use.`,
+          `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, market, page, panel, position, when, ask, needs, provides or use.`,
         );
     }
   }
