@@ -9,7 +9,8 @@ An installable Tac-On for the extended Eagle Bot TacScript engine. Source:
 - **Maximum balance: 1,000 points / 10 Eagle Bucks.** An earning entry that would exceed the limit is rejected in full; points are not silently discarded.
 - Learners record their own earned points with a required source/reason. This is a **self-reporting ledger**, not an approval queue.
 - An admin or the current Shopkeeper can record earnings for a learner in the install's scope.
-- Only admins can add, edit, archive, or reactivate catalog items. Prices are positive whole points. Archived items cannot be purchased; their purchase history remains intact.
+- Admins and the current Shopkeeper can add, edit, archive, or reactivate catalog items. Prices are positive whole points. Archived items cannot be purchased; their purchase history remains intact.
+- A learner holding the Shopkeeper position can choose **Record for myself** to add their own points with a source/reason. The same 1,000-point wallet cap applies.
 - Only learners can purchase. The server chooses the buyer, current catalog price, and product name, and checks the available balance. Learners cannot choose somebody else's wallet or change a price.
 - Each purchase immediately deducts its cost and records a pending purchase. The admin/current Shopkeeper marks it fulfilled when delivered, without a second deduction.
 - The current Shopkeeper gets the full recent points ledger (including sources) and purchase log on their position desk and on the marketplace. Admins also have oversight. Other learners see only their own history.
@@ -23,7 +24,7 @@ An installable Tac-On for the extended Eagle Bot TacScript engine. Source:
 3. Select the `eagle-buck-market` folder on your computer. The portal imports its `.tacon` file and validates it against the server; the README and tests are ignored. Check the preview, optionally add a blurb/details, then click **Publish**. The academy **Dev menu → New Tac-On** source editor remains another publishing route.
 4. As an academy admin, open **Tac-Ons → Market**, find **Eagle Buck Market**, and install it **academy-wide**. Studio-only installs are rejected so learners cannot hold multiple separate wallets.
 5. Open **Positions** and elect/appoint a Shopkeeper using the normal position workflow.
-6. As an admin, add your real catalog items and prices on **Eagle Buck Market**.
+6. As an admin or current Shopkeeper, add your real catalog items and prices on **Eagle Buck Market** or the Shopkeeper's position desk.
 
 The folder is not automatically published or installed. No example products or learner balances are seeded.
 

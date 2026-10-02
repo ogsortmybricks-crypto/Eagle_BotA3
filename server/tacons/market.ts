@@ -107,7 +107,7 @@ export async function renderMarket(runtime: Runtime, widget: { kind: "market"; m
   const isAdmin = user?.role === "admin";
   const isKeeper = runtime.held.has(def.keeper);
   const learner = user?.role === "learner";
-  const canManage = Boolean(isAdmin);
+  const canManage = Boolean(isAdmin || isKeeper);
   const canViewLogs = Boolean(isAdmin || isKeeper);
   const [catalog, ledger, purchases, eligible] = await Promise.all([
     marketRows(runtime, def, "catalog"),

@@ -138,7 +138,9 @@ taconMarketRouter.post("/view/:installId/markets/:name/products", requirePermiss
   try {
     const access = await authorizedMarket(req, parsed.data, parsed.data.index, req.params.name);
     if (!access.ok) return res.status(access.status).json({ error: access.error });
-    if (req.user!.role !== "admin") return res.status(403).json({ error: "Only an admin may manage products." });
+    if (req.user!.role !== "admin" && !access.runtime.held.has(access.def.keeper)) {
+      return res.status(403).json({ error: "Only an admin or current Shopkeeper may manage products." });
+    }
     const product = await saveProduct(access.runtime, access.def, parsed.data);
     return res.status(201).json({ product });
   } catch (error) {
@@ -153,7 +155,9 @@ taconMarketRouter.patch("/view/:installId/markets/:name/products/:id", requirePe
   try {
     const access = await authorizedMarket(req, parsed.data, parsed.data.index, req.params.name);
     if (!access.ok) return res.status(access.status).json({ error: access.error });
-    if (req.user!.role !== "admin") return res.status(403).json({ error: "Only an admin may manage products." });
+    if (req.user!.role !== "admin" && !access.runtime.held.has(access.def.keeper)) {
+      return res.status(403).json({ error: "Only an admin or current Shopkeeper may manage products." });
+    }
     const product = await saveProduct(access.runtime, access.def, parsed.data, id);
     return res.json({ product });
   } catch (error) {

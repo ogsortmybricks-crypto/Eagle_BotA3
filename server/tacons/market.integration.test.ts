@@ -177,7 +177,9 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
     assert.equal(keeperView.purchases.find((purchase) => purchase.id === purchasedId)?.productName, "Workshop");
     assert.equal(keeperView.purchases.find((purchase) => purchase.id === purchasedId)?.pricePoints, 700);
     assert.equal(keeperView.purchases.find((purchase) => purchase.id === purchasedId)?.status, "fulfilled");
-    assert.equal(keeperView.products.some((entry) => entry.id === product.id), false);
+    assert.equal(keeperView.canManage, true);
+    assert.equal(keeperView.canLogPoints, true, "A learner Shopkeeper keeps their own wallet.");
+    assert.equal(keeperView.products.find((entry) => entry.id === product.id)?.active, false);
     const adminView = await renderMarket(adminRuntime, { kind: "market", market: def.name }, 0);
     assert.ok(adminView);
     assert.equal(adminView.canViewLogs, true);
@@ -259,7 +261,29 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
     })).status, 403);
     assert.equal((await request("/purchase", { productId: product.id, requestId: randomUUID() })).status, 400, "Archived items cannot be bought.");
     asUser = learnerA;
-    assert.equal((await request("/products", catalogInput)).status, 403, "Shopkeepers cannot manage the admin catalog.");
+    const deskLocation = { page: undefined, position: "shopkeeper", index: 1 };
+    const keeperProduct = await request("/products", { ...catalogInput, ...deskLocation });
+    assert.equal(keeperProduct.status, 201, "The current Shopkeeper may add products from their desk.");
+    const keeperProductId = keeperProduct.body.product.id;
+    assert.equal((await request(`/products/${keeperProductId}`, {
+      ...catalogInput, pricePoints: 100, active: false,
+    }, "PATCH")).status, 200, "The current Shopkeeper may edit and archive products.");
+    assert.equal((await request(`/products/${keeperProductId}`, {
+      ...catalogInput, pricePoints: 100, ...deskLocation,
+    }, "PATCH")).status, 200, "The current Shopkeeper may reactivate products from their desk.");
+    assert.equal((await request("/purchase", { productId: keeperProductId, requestId: randomUUID() })).status, 201);
+    const selfAward = await request("/points", {
+      ...deskLocation, points: 100, reason: "Shopkeeper's own earnings", requestId: randomUUID(),
+    });
+    assert.equal(selfAward.status, 201, "Omitting a recipient credits the learner Shopkeeper's own wallet.");
+    assert.equal(selfAward.body.balancePoints, 1000);
+    const selfEntry = (await renderMarket(learnerRuntime, { kind: "market", market: def.name }, 1))?.entries
+      .find((entry) => entry.id === selfAward.body.id);
+    assert.equal(selfEntry?.learnerId, learnerA.id);
+    assert.equal(selfEntry?.reason, "Shopkeeper's own earnings");
+    assert.equal((await request("/points", {
+      ...deskLocation, points: 1, reason: "Over cap", requestId: randomUUID(),
+    })).status, 400, "Shopkeeper self-awards cannot bypass the 1,000-point cap.");
     assert.equal((await request("/points", {
       learnerId: learnerB.id, points: 25, reason: "Keeper-awarded points", requestId: randomUUID(),
     })).status, 201, "A learner holding the Shopkeeper position may award another learner.");
@@ -280,9 +304,10 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
     assert.equal((await renderMarket(learnerRuntime, { kind: "market", market: def.name }, 1))?.balancePoints, 1000);
     assert.equal((await request(`/purchases/${forgedPrice.body.purchaseId}/fulfill`, {})).status, 403);
     asUser = learnerA;
-    const deskLocation = { page: undefined, position: "shopkeeper", index: 1 };
     assert.equal((await request(`/purchases/${forgedPrice.body.purchaseId}/fulfill`, deskLocation)).status, 200);
     await db.update(positionHolders).set({ endedAt: new Date() }).where(eq(positionHolders.positionId, keeperPosition.id));
+    assert.equal((await request("/products", catalogInput)).status, 403, "Former Shopkeepers cannot add products.");
+    assert.equal((await request(`/products/${keeperProductId}`, catalogInput, "PATCH")).status, 403);
     assert.equal((await request(`/purchases/${forgedPrice.body.purchaseId}/fulfill`, deskLocation)).status, 403);
     assert.equal((await request("/points", {
       learnerId: learnerB.id, points: 1, reason: "Former holder", requestId: randomUUID(),

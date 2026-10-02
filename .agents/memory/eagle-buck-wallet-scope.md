@@ -15,3 +15,13 @@ academy isolation rather than joining financial records across unrelated install
 pages or position desks. Do not introduce a second wallet just to support another
 studio view. Earnings are self-reported with a source/reason; the user did not
 request an approval workflow.
+
+The current Shopkeeper should be able to add items to the market and add points
+to their own learner wallet.
+
+**Why:** The user explicitly requested both capabilities; the Shopkeeper is not
+limited to reviewing purchase logs.
+
+**How to apply:** Expose catalog management on the market and Shopkeeper desk
+only to admins/current holders. Retain self-reporting with a source/reason and
+the shared 1,000-point wallet cap. Expired holders lose catalog privileges.
