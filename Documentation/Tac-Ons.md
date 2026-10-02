@@ -279,6 +279,23 @@ In production this requires `DEV_PORTAL_SETUP_KEY` to be set in the server's
 environment and typed into the form — otherwise the first person to find Ctrl+D
 would own the market.
 
+### Publishing a folder
+
+In **Tac-Ons → Publish official**, click **Choose folder** and select the Tac-On's
+folder on your computer. It must contain exactly one `.tacon` source file.
+For example, select the `eagle-buck-market` package folder. A single `.tacon` file
+can also be selected if your browser doesn't support folders.
+
+The portal loads the source, shows its file name and package metadata, and
+checks it with both the browser and server compiler. Only the `.tacon` source is
+published; README files, tests, and other folder files are ignored. Source editing
+remains available as an advanced option.
+
+Fix any file/line diagnostics before publishing. This does not bypass the
+compiler or install a Tac-On automatically. If the live app reports that
+`market` is unknown, publish the latest Eagle Bot engine first, then reload the
+portal. Changing the import method cannot add language features to an older server.
+
 ---
 
 ## What ships with Eagle Bot

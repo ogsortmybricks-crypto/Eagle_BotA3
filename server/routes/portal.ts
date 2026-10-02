@@ -403,6 +403,25 @@ const officialSchema = z.object({
   visibility: z.enum(TACON_VISIBILITIES).default("public"),
 });
 
+/** Check the selected package against the server's compiler without publishing. */
+portalRouter.post("/tacons/validate", requirePortal, (req, res) => {
+  const parsed = officialSchema.pick({ source: true }).safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Choose a .tacon file." });
+  }
+  const result = compile(parsed.data.source);
+  return res.json({
+    ok: result.ok,
+    diagnostics: result.diagnostics,
+    manifest: result.ok ? {
+      slug: result.manifest.slug,
+      name: result.manifest.name,
+      version: result.manifest.version,
+      academyWide: Boolean(result.manifest.markets?.some((market) => market.scope === "academy")),
+    } : null,
+  });
+});
+
 /** Publishes an official Tac-On. Same compiler, same rules, different badge. */
 portalRouter.post("/tacons/publish", requirePortal, async (req, res) => {
   const parsed = officialSchema.safeParse(req.body);

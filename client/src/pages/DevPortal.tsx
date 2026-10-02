@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { Banner, Chip, LoadingPage, Spinner } from "@/components/ui";
-import { compile, type Diagnostic } from "@shared/tacons";
+import PublishOfficial from "@/tacons/PublishOfficial";
 
 type PortalStatus = {
   needsSetup: boolean;
@@ -438,98 +438,6 @@ function PortalTacons({
         />
       )}
     </>
-  );
-}
-
-function PublishOfficial({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [source, setSource] = useState("");
-  const [tagline, setTagline] = useState("");
-  const [description, setDescription] = useState("");
-  const [error, setError] = useState<string | null>(null);
-
-  const checked = compile(source || "tacon placeholder { }");
-  const diagnostics: Diagnostic[] = source ? checked.diagnostics : [];
-
-  const publish = useMutation({
-    mutationFn: () => apiPost("/portal/tacons/publish", { source, tagline, description }),
-    onSuccess: onDone,
-    onError: (publishError: Error) => setError(publishError.message),
-  });
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 pt-[6vh]">
-      <div className="card w-full max-w-3xl">
-        <div className="border-b border-gray-200 p-5">
-          <h2 className="text-lg font-bold text-gray-900">Publish an official Tac-On</h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Same compiler, same rules as any academy's. It just carries the badge.
-          </p>
-        </div>
-        <div className="max-h-[65vh] space-y-4 overflow-y-auto p-5">
-          {error && <Banner tone="error">{error}</Banner>}
-          {source && !checked.ok && (
-            <Banner tone="warning" title="Doesn't compile yet">
-              <ul className="mt-1 space-y-0.5 text-xs">
-                {diagnostics
-                  .filter((entry) => entry.severity === "error")
-                  .map((entry, index) => (
-                    <li key={index}>
-                      Line {entry.line}: {entry.message}
-                    </li>
-                  ))}
-              </ul>
-            </Banner>
-          )}
-          <div>
-            <label className="label" htmlFor="official-source">
-              Source
-            </label>
-            <textarea
-              id="official-source"
-              className="input min-h-[300px] font-mono text-[13px]"
-              spellCheck={false}
-              value={source}
-              onChange={(event) => setSource(event.target.value)}
-              placeholder={"tacon my-tacon {\n  name \"My Tac-On\"\n  version 1.0.0\n}"}
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor="official-tagline">
-              Blurb
-            </label>
-            <input
-              id="official-tagline"
-              className="input"
-              value={tagline}
-              onChange={(event) => setTagline(event.target.value)}
-            />
-          </div>
-          <div>
-            <label className="label" htmlFor="official-description">
-              Details (markdown)
-            </label>
-            <textarea
-              id="official-description"
-              className="input min-h-[100px]"
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-            />
-          </div>
-        </div>
-        <div className="flex justify-end gap-2 border-t border-gray-200 bg-gray-50 p-4">
-          <button onClick={onClose} className="btn-secondary">
-            Cancel
-          </button>
-          <button
-            onClick={() => publish.mutate()}
-            disabled={publish.isPending || !source || !checked.ok}
-            className="btn-primary"
-          >
-            {publish.isPending && <Spinner />} Publish
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }
 

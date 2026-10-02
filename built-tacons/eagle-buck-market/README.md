@@ -19,8 +19,8 @@ An installable Tac-On for the extended Eagle Bot TacScript engine. Source:
 ## Publish and install
 
 1. Run the updated Eagle Bot engine that includes the built-in `market` declaration/widget. Old versions of TacScript cannot compile this file.
-2. Open **Dev menu → New Tac-On**, or the **Dev portal** to publish it as an official Tac-On.
-3. Copy the entire `.tacon` file into the editor. Confirm it compiles, then publish with the visibility you want.
+2. In the **Dev portal**, select **Tac-Ons → Publish official → Choose folder**.
+3. Select the `eagle-buck-market` folder on your computer. The portal imports its `.tacon` file and validates it against the server; the README and tests are ignored. Check the preview, optionally add a blurb/details, then click **Publish**. The academy **Dev menu → New Tac-On** source editor remains another publishing route.
 4. As an academy admin, open **Tac-Ons → Market**, find **Eagle Buck Market**, and install it **academy-wide**. Studio-only installs are rejected so learners cannot hold multiple separate wallets.
 5. Open **Positions** and elect/appoint a Shopkeeper using the normal position workflow.
 6. As an admin, add your real catalog items and prices on **Eagle Buck Market**.
