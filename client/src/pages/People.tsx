@@ -167,6 +167,7 @@ type ProfileResponse = {
     /** Dev status is granted per person, not per role - see the Tac-Ons docs. */
     devStatus: boolean;
     devHandle: string | null;
+    learnerAdmin: boolean;
   };
   studio: { id: number; name: string; color: string } | null;
   positions: {
@@ -207,7 +208,9 @@ export function Profile({ id }: { id: number }) {
           <div className="min-w-0 flex-1">
             <h1 className="text-2xl font-bold tracking-tight text-gray-900">{person.name}</h1>
             <div className="mt-1.5 flex flex-wrap gap-1.5">
-              <Chip tone={person.role === "guide" ? "neutral" : "brand"}>{person.role}</Chip>
+              <Chip tone={person.role === "guide" ? "neutral" : "brand"}>
+                {person.learnerAdmin ? "learner admin" : person.role}
+              </Chip>
               {studio ? (
                 <StudioTag name={studio.name} color={studio.color} />
               ) : (

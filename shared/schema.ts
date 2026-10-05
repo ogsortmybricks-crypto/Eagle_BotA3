@@ -213,6 +213,13 @@ export const users = pgTable(
     /** The handle their public dev profile lives at. Set when dev is granted. */
     devHandle: text("dev_handle"),
     devSince: timestamp("dev_since"),
+    /**
+     * An admin who is a learner: the one the studio gave the job of running
+     * Eagle Bot. Same powers as any admin, but they are still a learner
+     * everywhere being a learner matters - an AP, for one. Only meaningful
+     * while `role` is admin; changing the role away clears it.
+     */
+    learnerAdmin: boolean("learner_admin").notNull().default(false),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     lastLoginAt: timestamp("last_login_at"),

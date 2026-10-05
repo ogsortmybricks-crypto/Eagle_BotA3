@@ -64,6 +64,8 @@ export type SessionUser = {
   /** Granted by an admin. Opens the dev menu and the public dev profile. */
   devStatus: boolean;
   devHandle: string | null;
+  /** An admin who is a learner. Only ever true while `role` is admin. */
+  learnerAdmin: boolean;
   active: boolean;
 };
 

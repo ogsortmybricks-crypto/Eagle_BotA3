@@ -121,11 +121,26 @@ adminRouter.patch("/users/:id", requirePermission("users.manage"), async (req, r
       studioId: z.number().int().nullable().optional(),
       active: z.boolean().optional(),
       name: z.string().min(2).max(120).optional(),
+      learnerAdmin: z.boolean().optional(),
     })
     .safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Couldn't save that." });
 
   const targetId = Number(req.params.id);
+
+  // Learner admin is a kind of admin, so it can't outlive the role.
+  const patch = { ...parsed.data };
+  if (patch.role !== undefined && patch.role !== "admin") patch.learnerAdmin = false;
+  if (patch.learnerAdmin === true && patch.role === undefined) {
+    const [target] = await db
+      .select({ role: users.role })
+      .from(users)
+      .where(and(eq(users.id, targetId), eq(users.academyId, req.user!.academyId)))
+      .limit(1);
+    if (target && target.role !== "admin") {
+      return res.status(400).json({ error: "Only an admin can be a learner admin. Make them an admin first." });
+    }
+  }
 
   // Don't let the last admin demote or deactivate themselves into a locked-out
   // academy - somebody has to be able to let people back in.
@@ -166,7 +181,7 @@ adminRouter.patch("/users/:id", requirePermission("users.manage"), async (req, r
 
   const [user] = await db
     .update(users)
-    .set(parsed.data)
+    .set(patch)
     .where(and(eq(users.id, targetId), eq(users.academyId, req.user!.academyId)))
     .returning();
 
@@ -185,9 +200,13 @@ adminRouter.patch("/users/:id", requirePermission("users.manage"), async (req, r
     entityType: "user",
     entityId: user.id,
     summary: `${req.user!.name} updated ${user.name}${parsed.data.role ? ` (now ${parsed.data.role})` : ""}${
-      moved ? ` — studio: ${studio?.name ?? "none"}` : ""
-    }.`,
-    metadata: parsed.data,
+      parsed.data.learnerAdmin !== undefined
+        ? parsed.data.learnerAdmin
+          ? " (now a learner admin)"
+          : " (no longer a learner admin)"
+        : ""
+    }${moved ? ` — studio: ${studio?.name ?? "none"}` : ""}.`,
+    metadata: patch,
   });
 
   res.json({ user: publicUser(user) });

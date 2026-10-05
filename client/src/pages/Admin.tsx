@@ -262,6 +262,8 @@ type AdminUser = {
   name: string;
   email: string;
   role: string;
+  /** An admin who is a learner - see the Learner admins docs. */
+  learnerAdmin: boolean;
   studioId: number | null;
   studioName: string | null;
   active: boolean;
@@ -415,6 +417,25 @@ function PeopleAdmin() {
                       </option>
                     ))}
                   </select>
+                  {person.role === "admin" && (
+                    <label
+                      className="mt-1.5 flex items-center gap-1.5 whitespace-nowrap text-xs text-gray-600"
+                      title="A learner given the job of running Eagle Bot. Same powers as any admin, but still a learner where that matters, like being an AP."
+                    >
+                      <input
+                        type="checkbox"
+                        checked={person.learnerAdmin}
+                        onChange={(event) =>
+                          update.mutate({
+                            id: person.id,
+                            patch: { learnerAdmin: event.target.checked },
+                          })
+                        }
+                        className="h-3.5 w-3.5 rounded border-gray-300 text-brand-600"
+                      />
+                      Learner admin
+                    </label>
+                  )}
                 </td>
                 <td className="p-3">
                   <div className="flex flex-wrap gap-1">

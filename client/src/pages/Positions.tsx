@@ -445,9 +445,15 @@ function AppointModal({ position, onClose }: { position: Position; onClose: () =
   });
 
   // A Middle Studio seat held by someone in Launchpad is nearly always a
-  // mistake, so the picker only offers people who can actually hold it. The
-  // server enforces the same rule; this just stops the mistake being offered.
-  const eligibleStudios = [position.studioId, ...(position.sharedStudioIds ?? [])];
+  // mistake - unless the two are grouped and govern together - so the picker
+  // only offers people who can actually hold it. The server enforces the same
+  // rule; this just stops the mistake being offered.
+  const owner = studios.find((entry) => entry.id === position.studioId);
+  const groupMates =
+    owner?.groupId != null
+      ? studios.filter((entry) => entry.groupId === owner.groupId).map((entry) => entry.id)
+      : [];
+  const eligibleStudios = [position.studioId, ...groupMates, ...(position.sharedStudioIds ?? [])];
   const restricted = settings.governance.restrictCandidatesToStudio && position.studioId !== null;
   const candidates = (people.data?.people ?? []).filter(
     (person) => !restricted || eligibleStudios.includes(person.studioId),
