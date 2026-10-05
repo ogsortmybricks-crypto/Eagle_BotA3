@@ -16,6 +16,7 @@ import {
 } from "@shared/schema";
 import { publicUser, requirePermission } from "../auth";
 import { logActivity } from "../activity";
+import { clearVerifyCode } from "../personal";
 import { inviteEmail, sendMail } from "../mailer";
 import { aiConfigured, emailConfigured, env } from "../env";
 import { getStatusSnapshot } from "../ai/jobs";
@@ -210,6 +211,27 @@ adminRouter.patch("/users/:id", requirePermission("users.manage"), async (req, r
   });
 
   res.json({ user: publicUser(user) });
+});
+
+/** A forgotten six-digit code can't be recovered, only cleared so they can pick a new one. */
+adminRouter.delete("/users/:id/verify-code", requirePermission("users.manage"), async (req, res) => {
+  const [person] = await db
+    .select()
+    .from(users)
+    .where(and(eq(users.id, Number(req.params.id)), eq(users.academyId, req.user!.academyId)))
+    .limit(1);
+  if (!person) return res.status(404).json({ error: "That person isn't in this academy." });
+  await clearVerifyCode(person.id);
+  await logActivity({
+    academyId: req.user!.academyId,
+    studioId: person.studioId,
+    actorUserId: req.user!.id,
+    action: "user.verify_code_cleared",
+    entityType: "user",
+    entityId: person.id,
+    summary: `${req.user!.name} cleared ${person.name}'s six-digit code.`,
+  });
+  res.json({ ok: true });
 });
 
 /* --------------------------------- invites --------------------------------- */

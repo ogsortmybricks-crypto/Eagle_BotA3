@@ -110,6 +110,13 @@ test("accountability partners: pairings, goals, check-ins and screenshot privacy
     await assert.rejects(() => savePairings(runtimeFor(admin), def, [[a.id, b.id, c.id, d.id]], admin.id), /at most three/);
     const learnerStaff = await savePairings(runtimeFor(admin), def, [[secretary.id, learnerAdmin.id]], admin.id);
     assert.deepEqual(learnerStaff, { kept: 0, started: 1, ended: 0 });
+    // Each gets their own dashboard with the other as their partner ("You" + "Sal" / "You" + "Lou").
+    const salView = await renderPartners(runtimeFor(secretary), widget, 0);
+    assert.deepEqual(salView?.group?.members.map((m) => m.id).sort(), [secretary.id, learnerAdmin.id].sort());
+    assert.equal(salView?.me?.id, secretary.id);
+    const louView = await renderPartners(runtimeFor(learnerAdmin), widget, 0);
+    assert.equal(louView?.group?.id, salView?.group?.id);
+    assert.equal(louView?.me?.id, learnerAdmin.id);
 
     let result = await savePairings(runtimeFor(admin), def, [[a.id, b.id], [c.id, d.id]], admin.id);
     assert.deepEqual(result, { kept: 0, started: 2, ended: 1 });

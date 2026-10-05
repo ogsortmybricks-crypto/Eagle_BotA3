@@ -13,6 +13,8 @@ import { adminRouter } from "./admin";
 import { profilesRouter } from "./profiles";
 import { taconsRouter } from "./tacons";
 import { portalRouter } from "./portal";
+import { meRouter } from "./me";
+import { verifyRouter } from "./verify";
 
 export const apiRouter = Router();
 
@@ -29,7 +31,12 @@ apiRouter.use("/auth", authRouter);
 // academy's requireAuth. It guards itself.
 apiRouter.use("/portal", portalRouter);
 
+// Verification links get pasted into Journey Tracker and opened by whoever
+// reviews the submission, signed in or not. The token is the only key.
+apiRouter.use("/verify", verifyRouter);
+
 // Everything else needs a session.
+apiRouter.use("/me", requireAuth, meRouter);
 apiRouter.use("/studios", requireAuth, studiosRouter);
 apiRouter.use("/settings", requireAuth, settingsRouter);
 apiRouter.use("/wiki", requireAuth, wikiRouter);

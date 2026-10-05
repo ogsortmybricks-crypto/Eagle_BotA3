@@ -24,9 +24,10 @@ import type {
 } from "@shared/tacons/view";
 import { studioCircle } from "../studio";
 import { audienceAllows, type Runtime } from "./runtime";
+import { renderWork } from "./partners-work";
 
 /** How far back a dashboard looks: this week, plus five before it. */
-const HISTORY_DAYS = 42;
+export const HISTORY_DAYS = 70;
 
 export class PartnersError extends Error {
   constructor(message: string) {
@@ -35,22 +36,22 @@ export class PartnersError extends Error {
   }
 }
 
-type Row = typeof taconRecords.$inferSelect;
+export type Row = typeof taconRecords.$inferSelect;
 
-function data(row: Row): Record<string, unknown> {
+export function data(row: Row): Record<string, unknown> {
   return row.data ?? {};
 }
 
-function integer(value: unknown): number {
+export function integer(value: unknown): number {
   const result = Number(value);
   return Number.isSafeInteger(result) ? result : 0;
 }
 
-function ids(value: unknown): number[] {
+export function ids(value: unknown): number[] {
   return Array.isArray(value) ? value.map(integer).filter((id) => id > 0) : [];
 }
 
-function string(value: unknown, max: number): string {
+export function string(value: unknown, max: number): string {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
@@ -62,14 +63,14 @@ export function canManagePartners(runtime: Runtime, def: PartnersDef): boolean {
   return audienceAllows(def.managers, runtime.user, runtime.held);
 }
 
-function rowsQuery(runtime: Runtime, def: PartnersDef, kind: PartnersStoreKind) {
+export function rowsQuery(runtime: Runtime, def: PartnersDef, kind: PartnersStoreKind) {
   return and(
     eq(taconRecords.installId, runtime.install.install.id),
     eq(taconRecords.store, partnersStore(def.name, kind)),
   );
 }
 
-async function rows(runtime: Runtime, def: PartnersDef, kind: PartnersStoreKind, since?: Date): Promise<Row[]> {
+export async function rows(runtime: Runtime, def: PartnersDef, kind: PartnersStoreKind, since?: Date): Promise<Row[]> {
   const where = since
     ? and(rowsQuery(runtime, def, kind), gte(taconRecords.updatedAt, since))
     : rowsQuery(runtime, def, kind);
@@ -77,7 +78,7 @@ async function rows(runtime: Runtime, def: PartnersDef, kind: PartnersStoreKind,
 }
 
 /** All writes to one partners block serialize on the same transaction lock. */
-async function lock(tx: any, runtime: Runtime, def: PartnersDef) {
+export async function lock(tx: any, runtime: Runtime, def: PartnersDef) {
   const key = `tacon-partners:${runtime.install.install.id}:${def.name}`;
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
 }
@@ -126,7 +127,7 @@ async function candidates(runtime: Runtime): Promise<PartnerCandidate[]> {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function groupView(runtime: Runtime, row: Row): PartnerGroup {
+export function groupView(runtime: Runtime, row: Row): PartnerGroup {
   const values = data(row);
   return {
     id: row.id,
@@ -137,7 +138,7 @@ function groupView(runtime: Runtime, row: Row): PartnerGroup {
   };
 }
 
-function checkinView(runtime: Runtime, row: Row): PartnerCheckin {
+export function checkinView(runtime: Runtime, row: Row): PartnerCheckin {
   const values = data(row);
   const onTrack = ON_TRACK.includes(values.onTrack as OnTrack) ? (values.onTrack as OnTrack) : "on-track";
   return {
@@ -193,6 +194,7 @@ export async function renderPartners(
     }));
 
   const recentCutoff = since.toISOString();
+  const work = await renderWork(runtime, def, { manager, mates, groups, since });
   return {
     kind: "partners",
     index,
@@ -207,6 +209,7 @@ export async function renderPartners(
     group: mine,
     checkins,
     goals,
+    ...work,
     manage: manager
       ? {
           candidates: await candidates(runtime),
@@ -229,12 +232,8 @@ function key(members: number[]): string {
  * keeps its id (and its history); any other active group is ended, not
  * deleted, so last month's check-ins still say who they were partnered with.
  */
-export async function savePairings(
-  runtime: Runtime,
-  def: PartnersDef,
-  groups: number[][],
-  actorId: number,
-): Promise<{ kept: number; started: number; ended: number }> {
+/** Group sizes, nobody twice, everyone eligible. Throws a PartnersError otherwise. */
+async function checkGroups(runtime: Runtime, def: PartnersDef, groups: number[][]): Promise<void> {
   const seen = new Set<number>();
   for (const members of groups) {
     if (members.length < 2) throw new PartnersError("Every group needs at least two people.");
@@ -257,6 +256,15 @@ export async function savePairings(
       );
     }
   }
+}
+
+export async function savePairings(
+  runtime: Runtime,
+  def: PartnersDef,
+  groups: number[][],
+  actorId: number,
+): Promise<{ kept: number; started: number; ended: number }> {
+  await checkGroups(runtime, def, groups);
 
   return db.transaction(async (tx) => {
     await lock(tx, runtime, def);
@@ -293,7 +301,59 @@ export async function savePairings(
   });
 }
 
-async function activeGroupOf(runtime: Runtime, def: PartnersDef, personId: number): Promise<Row | null> {
+/**
+ * Starts new groups without touching any other. The pairing screen uses this
+ * rather than `savePairings`: a stale screen replacing the whole list was how
+ * making a second pair quietly ended the first.
+ */
+export async function addPairs(
+  runtime: Runtime,
+  def: PartnersDef,
+  groups: number[][],
+  actorId: number,
+): Promise<{ started: number }> {
+  await checkGroups(runtime, def, groups);
+  return db.transaction(async (tx) => {
+    await lock(tx, runtime, def);
+    const current = await tx.select().from(taconRecords).where(rowsQuery(runtime, def, "groups"));
+    const taken = new Set(current.filter((row) => data(row).active === true).flatMap((row) => ids(data(row).members)));
+    for (const id of groups.flat()) {
+      if (taken.has(id)) {
+        throw new PartnersError(`${runtime.people.get(id) ?? "Someone"} already has a partner. End that pair first.`);
+      }
+    }
+    for (const members of groups) {
+      await tx.insert(taconRecords).values({
+        academyId: runtime.academyId,
+        installId: runtime.install.install.id,
+        store: partnersStore(def.name, "groups"),
+        createdByType: "user",
+        createdBy: actorId,
+        data: { members, active: true, endedAt: null },
+      });
+    }
+    return { started: groups.length };
+  });
+}
+
+/** Ends one group. Its check-ins stay, still saying who was partnered with who. */
+export async function endPair(runtime: Runtime, def: PartnersDef, groupId: number, actorId: number): Promise<void> {
+  await db.transaction(async (tx) => {
+    await lock(tx, runtime, def);
+    const [row] = await tx
+      .select()
+      .from(taconRecords)
+      .where(and(rowsQuery(runtime, def, "groups"), eq(taconRecords.id, groupId)));
+    if (!row || data(row).active !== true) throw new PartnersError("That pair has already ended.");
+    const now = new Date();
+    await tx.update(taconRecords).set({
+      data: { ...data(row), active: false, endedAt: now.toISOString(), endedBy: actorId },
+      updatedAt: now,
+    }).where(eq(taconRecords.id, row.id));
+  });
+}
+
+export async function activeGroupOf(runtime: Runtime, def: PartnersDef, personId: number): Promise<Row | null> {
   const groups = await rows(runtime, def, "groups");
   return groups.find((row) => data(row).active === true && ids(data(row).members).includes(personId)) ?? null;
 }
@@ -381,6 +441,16 @@ export async function readShot(
   if (!shot) return null;
   const values = data(shot);
   let allowed = integer(values.uploaderId) === user.id || canManagePartners(runtime, def);
+  if (!allowed && values.completionId) {
+    // Work handed in for certification: the person's group at the time can see it.
+    const [completion] = await db.select().from(taconRecords)
+      .where(and(rowsQuery(runtime, def, "completions"), eq(taconRecords.id, integer(values.completionId)))).limit(1);
+    if (completion) {
+      const [group] = await db.select().from(taconRecords)
+        .where(and(rowsQuery(runtime, def, "groups"), eq(taconRecords.id, integer(data(completion).groupId)))).limit(1);
+      allowed = Boolean(group && ids(data(group).members).includes(user.id));
+    }
+  }
   if (!allowed && values.checkinId) {
     const [checkin] = await db.select().from(taconRecords)
       .where(and(rowsQuery(runtime, def, "checkins"), eq(taconRecords.id, integer(values.checkinId)))).limit(1);

@@ -777,138 +777,124 @@ function CheckinCard({ view, target, checkin }: Props & { checkin: PartnerChecki
 
 /* --------------------------------- pairings -------------------------------- */
 
-type Draft = number[][]; // each row: up to three ids, 0 for "nobody yet"
-
-function draftFrom(groups: PartnerGroup[], trios: boolean): Draft {
-  const rows = groups.filter((group) => group.active).map((group) => {
-    const ids = group.members.map((member) => member.id);
-    return trios ? [ids[0] ?? 0, ids[1] ?? 0, ids[2] ?? 0] : [ids[0] ?? 0, ids[1] ?? 0];
-  });
-  return rows.length > 0 ? rows : [trios ? [0, 0, 0] : [0, 0]];
-}
-
+/**
+ * Pairs are made and ended one at a time. This used to be one table saved all
+ * at once, and a screen that was a moment out of date would end every pair it
+ * didn't show - so making a second pair could quietly end the first.
+ */
 function Pairings({ view, target }: Props) {
   const manage = view.manage!;
   const api = usePartnersApi(view, target);
   const width = view.trios ? 3 : 2;
-  const savedDraft = useMemo(() => draftFrom(manage.groups, view.trios), [manage.groups, view.trios]);
-  const [rows, setRows] = useState<Draft>(savedDraft);
+  const [draft, setDraft] = useState<number[]>(Array(width).fill(0));
   const [notice, setNotice] = useState<Notice>(null);
-  // Keyed on content, so a background refetch doesn't wipe an edit in progress.
-  const savedKey = JSON.stringify(savedDraft);
-  useEffect(() => setRows(savedDraft), [savedKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const names = new Map(manage.candidates.map((person) => [person.id, person]));
-  for (const group of manage.groups) for (const member of group.members) {
-    if (!names.has(member.id)) names.set(member.id, { ...member, role: "" });
-  }
-  const used = new Set(rows.flat().filter(Boolean));
+  const active = manage.groups.filter((group) => group.active);
+  const used = new Set(active.flatMap((group) => group.members.map((member) => member.id)));
   const unpaired = manage.candidates.filter((person) => !used.has(person.id));
-  const dirty = JSON.stringify(rows) !== savedKey;
+  const chosen = draft.filter(Boolean);
 
-  const set = (row: number, column: number, id: number) =>
-    setRows(rows.map((entry, index) => (index === row ? entry.map((value, col) => (col === column ? id : value)) : entry)));
-
-  const pairTheRest = () => {
-    const pool = [...unpaired.filter((person) => person.role === "learner")].sort(() => Math.random() - 0.5).map((p) => p.id);
-    const next = rows.filter((row) => row.some(Boolean));
-    while (pool.length >= 2) {
-      const pair = pool.splice(0, view.trios && pool.length === 3 ? 3 : 2);
-      next.push(Array.from({ length: width }, (_, index) => pair[index] ?? 0));
-    }
-    if (pool.length === 1) next.push(Array.from({ length: width }, (_, index) => (index === 0 ? pool[0] : 0)));
-    setRows(next.length > 0 ? next : rows);
-  };
-
-  const save = useMutation({
-    mutationFn: () => {
-      const groups = rows.map((row) => row.filter(Boolean)).filter((row) => row.length > 0);
-      const lonely = groups.find((row) => row.length < 2);
-      if (lonely) throw new Error(`${names.get(lonely[0])?.name ?? "Someone"} needs a partner, or remove that row.`);
-      return apiPost<{ kept: number; started: number; ended: number }>(`${api.base}/pairings`, api.body({ groups }));
-    },
+  const create = useMutation({
+    mutationFn: (groups: number[][]) =>
+      apiPost<{ started: number }>(`${api.base}/pairs`, api.body({ groups })),
     onSuccess: (result) => {
-      setNotice({ tone: "success", text: `Pairings saved: ${result.started} new, ${result.kept} unchanged, ${result.ended} ended. Past check-ins are kept.` });
+      setDraft(Array(width).fill(0));
+      setNotice({ tone: "success", text: result.started === 1 ? "Pair created." : `${result.started} pairs created.` });
       api.refresh();
     },
     onError: (error: Error) => setNotice({ tone: "error", text: error.message }),
   });
 
+  const end = useMutation({
+    mutationFn: (groupId: number) => apiPost(`${api.base}/pairs/end`, api.body({ groupId })),
+    onSuccess: () => {
+      setNotice({ tone: "success", text: "Pair ended. Their past check-ins are kept." });
+      api.refresh();
+    },
+    onError: (error: Error) => setNotice({ tone: "error", text: error.message }),
+  });
+
+  const pairTheRest = () => {
+    const pool = [...unpaired].sort(() => Math.random() - 0.5).map((person) => person.id);
+    const groups: number[][] = [];
+    while (pool.length >= 2) groups.push(pool.splice(0, view.trios && pool.length === 3 ? 3 : 2));
+    const names = groups.map((group) => group.map((id) => manage.candidates.find((p) => p.id === id)?.name).join(" & "));
+    const left = pool.length === 1 ? `\n\n${manage.candidates.find((p) => p.id === pool[0])?.name} is left over.` : "";
+    if (groups.length > 0 && window.confirm(`Create these pairs?\n\n${names.join("\n")}${left}`)) {
+      setNotice(null);
+      create.mutate(groups);
+    }
+  };
+
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="font-semibold text-gray-900">Who holds who accountable</h3>
-          <p className="mt-1 text-sm text-gray-500">
-            Pick partners for each row{view.trios && "; fill AP 3 for a group of three"}. You can change these at any time —
-            ending a pairing keeps its check-in history.
-          </p>
-          <p className="mt-1 text-xs text-gray-400">
-            Learners, secretaries and learner admins can be APs. Guides and other admins can't.
-          </p>
-        </div>
+      <div>
+        <h3 className="font-semibold text-gray-900">Who holds who accountable</h3>
+        <p className="mt-1 text-sm text-gray-500">
+          Make pairs one at a time{view.trios && ", or groups of three"}. Ending a pair keeps its check-in history.
+        </p>
+        <p className="mt-1 text-xs text-gray-400">
+          Learners, secretaries and learner admins can be APs. Guides and other admins can't.
+        </p>
       </div>
 
       {notice && <Banner tone={notice.tone}>{notice.text}</Banner>}
 
-      <div className="scroll-x">
-        <table className="w-full min-w-[480px] text-sm">
-          <thead>
-            <tr className="text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
-              <th className="w-8 pb-2" />
-              <th className="pb-2 pr-2">AP 1</th>
-              <th className="pb-2 pr-2">AP 2</th>
-              {view.trios && <th className="pb-2 pr-2">AP 3 <span className="font-normal normal-case text-gray-400">(optional)</span></th>}
-              <th className="w-10 pb-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr key={rowIndex} className="align-top">
-                <td className="py-1.5 pr-2 pt-3.5 text-xs tabular-nums text-gray-400">{rowIndex + 1}</td>
-                {row.map((value, column) => (
-                  <td key={column} className="py-1.5 pr-2">
-                    <select className="input" value={value} aria-label={`Row ${rowIndex + 1}, AP ${column + 1}`}
-                      onChange={(event) => set(rowIndex, column, Number(event.target.value))}>
-                      <option value={0}>{column === 2 ? "— none —" : "Choose…"}</option>
-                      {value !== 0 && !manage.candidates.some((person) => person.id === value) && (
-                        <option value={value}>{names.get(value)?.name ?? "Someone"} (not eligible)</option>
-                      )}
-                      {manage.candidates
-                        .filter((person) => person.id === value || !used.has(person.id))
-                        .map((person) => (
-                          <option key={person.id} value={person.id}>
-                            {person.name}{person.role !== "learner" ? ` (${person.role})` : ""}
-                          </option>
-                        ))}
-                    </select>
-                  </td>
-                ))}
-                <td className="py-1.5">
-                  <button type="button" className="btn-ghost p-2" aria-label={`Remove row ${rowIndex + 1}`}
-                    onClick={() => setRows(rows.length === 1 ? [Array(width).fill(0)] : rows.filter((_, index) => index !== rowIndex))}>
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn-secondary" onClick={() => setRows([...rows, Array(width).fill(0)])}>
-          <Plus className="h-4 w-4" /> Add a row
-        </button>
-        {unpaired.some((person) => person.role === "learner") && (
-          <button type="button" className="btn-secondary" onClick={pairTheRest}>
-            <Shuffle className="h-4 w-4" /> Pair the rest randomly
+      <div className="rounded-xl border border-gray-200 p-4">
+        <h4 className="text-sm font-semibold text-gray-900">New pair</h4>
+        <div className="mt-3 flex flex-wrap items-end gap-2">
+          {draft.map((value, column) => (
+            <label key={column} className="min-w-[10rem] flex-1">
+              <span className="text-xs font-medium text-gray-500">
+                AP {column + 1}{column === 2 && <span className="font-normal text-gray-400"> (optional)</span>}
+              </span>
+              <select className="input mt-1" value={value}
+                onChange={(event) => setDraft(draft.map((entry, col) => (col === column ? Number(event.target.value) : entry)))}>
+                <option value={0}>{column === 2 ? "— none —" : "Choose…"}</option>
+                {unpaired
+                  .filter((person) => person.id === value || !draft.includes(person.id))
+                  .map((person) => (
+                    <option key={person.id} value={person.id}>
+                      {person.name}{person.role !== "learner" ? ` (${person.role})` : ""}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          ))}
+          <button type="button" className="btn-primary" disabled={chosen.length < 2 || create.isPending}
+            onClick={() => { setNotice(null); create.mutate([chosen]); }}>
+            {create.isPending && <Spinner />} <Plus className="h-4 w-4" /> Create pair
+          </button>
+        </div>
+        {unpaired.length >= 2 && (
+          <button type="button" className="btn-ghost btn-sm mt-3" onClick={pairTheRest} disabled={create.isPending}>
+            <Shuffle className="h-4 w-4" /> Pair everyone left randomly
           </button>
         )}
-        <button type="button" className="btn-primary" disabled={!dirty || save.isPending} onClick={() => { setNotice(null); save.mutate(); }}>
-          {save.isPending && <Spinner />} Save pairings
-        </button>
-        {dirty && <button type="button" className="btn-ghost" onClick={() => setRows(savedDraft)}>Undo changes</button>}
+      </div>
+
+      <div>
+        <h4 className="text-sm font-semibold text-gray-900">Current pairs ({active.length})</h4>
+        {active.length === 0 ? (
+          <p className="mt-2 text-sm text-gray-500">No pairs yet.</p>
+        ) : (
+          <ul className="mt-2 divide-y divide-gray-100 rounded-xl border border-gray-200">
+            {active.map((group) => (
+              <li key={group.id} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
+                <span className="font-medium text-gray-800">{group.members.map((member) => member.name).join(" & ")}</span>
+                <button type="button" className="btn-ghost btn-sm text-red-600" disabled={end.isPending}
+                  onClick={() => {
+                    if (window.confirm(`End the pair ${group.members.map((m) => m.name).join(" & ")}? Their check-ins are kept.`)) {
+                      setNotice(null);
+                      end.mutate(group.id);
+                    }
+                  }}>
+                  <Trash2 className="h-4 w-4" /> End
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="rounded-lg bg-gray-50 p-3 text-sm">

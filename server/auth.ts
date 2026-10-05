@@ -97,7 +97,9 @@ export function requireRole(...roles: Role[]) {
 
 /** Public shape of a user - never leaks the password hash. */
 export function publicUser(user: User) {
-  const { passwordHash, ...rest } = user;
+  const { passwordHash, verifyCodeHash, verifyCodeFailures, verifyCodeLockedUntil, ...rest } = user;
   void passwordHash;
-  return rest;
+  void verifyCodeFailures;
+  void verifyCodeLockedUntil;
+  return { ...rest, hasVerifyCode: verifyCodeHash !== null };
 }

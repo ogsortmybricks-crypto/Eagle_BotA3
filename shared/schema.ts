@@ -220,6 +220,17 @@ export const users = pgTable(
      * while `role` is admin; changing the role away clears it.
      */
     learnerAdmin: boolean("learner_admin").notNull().default(false),
+    /**
+     * A six-digit code the person picks, hashed like a password. Typing it is
+     * how they sign for something - an AP certifying a partner's work - so a
+     * signed-in laptop left open isn't enough to vouch in their name. Any
+     * Tac-On can ask core to check it; none can read it.
+     */
+    verifyCodeHash: text("verify_code_hash"),
+    verifyCodeFailures: integer("verify_code_failures").notNull().default(0),
+    verifyCodeLockedUntil: timestamp("verify_code_locked_until"),
+    /** Weekdays this person is normally in (0 = Sunday). Absences are on top. */
+    attendanceDays: jsonb("attendance_days").$type<number[]>().notNull().default([1, 2, 3, 4, 5]),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     lastLoginAt: timestamp("last_login_at"),
@@ -229,6 +240,28 @@ export const users = pgTable(
     academyIdx: index("users_academy_idx").on(t.academyId),
     studioIdx: index("users_studio_idx").on(t.studioId),
     handleIdx: uniqueIndex("users_dev_handle_idx").on(t.devHandle),
+  }),
+);
+
+/**
+ * Days someone missed - out sick, mostly. One row per person per day. Tac-Ons
+ * read these (an AP isn't on the hook for checking in on a partner who's home
+ * with the flu); the person themselves records them in Settings.
+ */
+export const absences = pgTable(
+  "absences",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    /** YYYY-MM-DD on the person's own calendar. */
+    day: varchar("day", { length: 10 }).notNull(),
+    kind: text("kind").$type<"sick" | "other">().notNull().default("sick"),
+    note: text("note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    personDayIdx: uniqueIndex("absences_user_day_idx").on(t.userId, t.day),
   }),
 );
 
