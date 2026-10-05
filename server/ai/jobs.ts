@@ -22,6 +22,7 @@ import { logActivity } from "../activity";
 import { askClaude, describeAiError } from "./client";
 import {
   loadStudio,
+  loadStudioGroup,
   renderPositionsContext,
   renderStudioContext,
   renderWikiContext,
@@ -42,7 +43,7 @@ import {
   slugify,
   type ApplyOutcome,
 } from "./apply";
-import { effectiveForStudio, studioFilter, type StudioScope } from "../studio";
+import { effectiveForStudio, studioCircle, studioFilter, type StudioScope } from "../studio";
 import { resolveSettings, type AcademySettings } from "@shared/settings";
 import { meetingProcessedEmail, sendMail } from "../mailer";
 import { env } from "../env";
@@ -168,7 +169,11 @@ async function runContext(job: AiJob): Promise<{
     accent: academy?.palette.accent ?? "#0284c7",
     studioName: studio?.name ?? null,
     promptOptions: {
-      studioContext: renderStudioContext(studio, academy?.learnerNoun ?? "Hero"),
+      studioContext: renderStudioContext(
+        studio,
+        academy?.learnerNoun ?? "Hero",
+        await loadStudioGroup(studio),
+      ),
       extraGuidance: effective.aiGuidance,
       autoRepealContradictions: settings.ai.autoRepealContradictions,
       proposeElections: settings.ai.proposeElections,
@@ -187,11 +192,12 @@ export function startBuildWiki(job: AiJob) {
   runDetached(job, async () => {
     const context = await runContext(job);
 
-    // This studio's documents, plus anything filed against the whole academy.
+    // This studio's documents (its group's, if it has one), plus anything
+    // filed against the whole academy.
     const studioCondition =
       job.studioId === null
         ? undefined
-        : or(eq(documents.studioId, job.studioId), isNull(documents.studioId));
+        : or(inArray(documents.studioId, await studioCircle(job.studioId)), isNull(documents.studioId));
     const docs = await db
       .select()
       .from(documents)
@@ -868,12 +874,13 @@ async function notifyMeetingProcessed(
   changes: string,
   context: Awaited<ReturnType<typeof runContext>>,
 ) {
+  const circle = await studioCircle(job.studioId);
   const recipients = (
     await db
       .select({ email: users.email, studioId: users.studioId })
       .from(users)
       .where(and(eq(users.academyId, job.academyId), eq(users.active, true)))
-  ).filter((person) => job.studioId === null || person.studioId === job.studioId);
+  ).filter((person) => job.studioId === null || circle.includes(person.studioId ?? -1));
 
   const mail = meetingProcessedEmail({
     academyName: context.academyName,

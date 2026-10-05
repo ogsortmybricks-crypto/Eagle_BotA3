@@ -101,6 +101,7 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
       user,
       scope: {
         studioId, studio: studioId === null ? null : studio, allowed: [studio], allowedIds: [studio.id],
+        circleIds: studioId === null ? [] : [studio.id], readableIds: [studio.id],
         canSeeAll: studioId === null, canWriteShared: user.role === "admin", effective: {} as never,
       },
       settings: {} as never,

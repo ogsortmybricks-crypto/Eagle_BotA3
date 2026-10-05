@@ -1,19 +1,22 @@
 import { Router } from "express";
 import { z } from "zod";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
   elections,
   meetings,
   positions,
+  studioGroups,
   studios,
+  taconInstalls,
+  tacons,
   users,
   wikiRules,
   wikiSections,
 } from "@shared/schema";
 import { requireAuth, requirePermission } from "../auth";
 import { logActivity } from "../activity";
-import { listStudios, requireScope, uniqueStudioSlug } from "../studio";
+import { listStudios, requireScope, uniqueStudioSlug, type StudioScope } from "../studio";
 import { resolveOverrides, studioOverridesSchema } from "@shared/settings";
 
 export const studiosRouter = Router();
@@ -81,7 +84,280 @@ studiosRouter.get("/", requireAuth, async (req, res) => {
     },
     selectedStudioId: scope.studioId,
     canSeeAll: scope.canSeeAll,
+    groups: await groupsFor(academyId, scope),
   });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  Studio groups                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The academy's groups, minus any the caller couldn't manage anyway. A group
+ * is listed only if every studio in it is one the caller can open, so a guide
+ * who can't see Spark never sees, or edits, a group Spark is in.
+ */
+async function groupsFor(academyId: number, scope: StudioScope) {
+  const groups = await db
+    .select()
+    .from(studioGroups)
+    .where(eq(studioGroups.academyId, academyId))
+    .orderBy(studioGroups.id);
+  const members = await listStudios(academyId, true);
+
+  return groups
+    .map((group) => ({
+      ...group,
+      studioIds: members
+        .filter((studio) => studio.groupId === group.id && !studio.archived)
+        .map((studio) => studio.id),
+    }))
+    .filter((group) => group.studioIds.every((id) => scope.allowedIds.includes(id)));
+}
+
+/**
+ * Things worth saying before two studios start sharing everything: the
+ * positions and Tac-Ons that will now appear twice side by side.
+ */
+async function groupWarnings(academyId: number, studioIds: number[]): Promise<string[]> {
+  if (studioIds.length < 2) return [];
+  const warnings: string[] = [];
+
+  const titles = await db
+    .select({ title: positions.title, studioId: positions.studioId })
+    .from(positions)
+    .where(
+      and(
+        eq(positions.academyId, academyId),
+        eq(positions.archived, false),
+        inArray(positions.studioId, studioIds),
+      ),
+    );
+  const byTitle = new Map<string, Set<number>>();
+  for (const row of titles) {
+    const key = row.title.trim().toLowerCase();
+    if (!byTitle.has(key)) byTitle.set(key, new Set());
+    byTitle.get(key)!.add(row.studioId!);
+  }
+  const doubled = titles
+    .filter((row) => (byTitle.get(row.title.trim().toLowerCase())?.size ?? 0) > 1)
+    .map((row) => row.title);
+  const doubledTitles = [...new Set(doubled)];
+  if (doubledTitles.length > 0) {
+    warnings.push(
+      `More than one studio has ${listWords(doubledTitles.map((title) => `"${title}"`))}. Both will now show on the Positions page - archive the one you don't need.`,
+    );
+  }
+
+  const installs = await db
+    .select({ name: tacons.name, taconId: taconInstalls.taconId, studioId: taconInstalls.studioId })
+    .from(taconInstalls)
+    .innerJoin(tacons, eq(tacons.id, taconInstalls.taconId))
+    .where(and(eq(taconInstalls.academyId, academyId), inArray(taconInstalls.studioId, studioIds)));
+  const byTacon = new Map<number, { name: string; studios: Set<number> }>();
+  for (const row of installs) {
+    if (!byTacon.has(row.taconId)) byTacon.set(row.taconId, { name: row.name, studios: new Set() });
+    byTacon.get(row.taconId)!.studios.add(row.studioId!);
+  }
+  const twice = [...byTacon.values()].filter((entry) => entry.studios.size > 1).map((entry) => entry.name);
+  if (twice.length > 0) {
+    warnings.push(
+      `${listWords(twice)} ${twice.length === 1 ? "is" : "are"} installed in more than one of these studios, with separate records. Each install will now show for the whole group - remove the extra one if you want a single set.`,
+    );
+  }
+
+  return warnings;
+}
+
+function listWords(items: string[]): string {
+  if (items.length <= 1) return items[0] ?? "";
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+const groupSchema = z.object({
+  name: z.string().trim().min(2, "Give the group a name.").max(60),
+  description: z.string().max(600).nullable().optional(),
+  studioIds: z.array(z.number().int()).min(2, "A group needs at least two studios."),
+});
+
+/**
+ * Checks a proposed member list. Every studio must be one the caller can open,
+ * and none may already sit in a different group - a studio governs with one
+ * group at a time, and quietly moving it out of another one would change what
+ * a whole other set of learners sees.
+ */
+async function checkMembers(
+  academyId: number,
+  scope: StudioScope,
+  studioIds: number[],
+  groupId: number | null,
+): Promise<string | null> {
+  const unique = [...new Set(studioIds)];
+  if (unique.length < 2) return "A group needs at least two studios.";
+  const all = await listStudios(academyId, true);
+  for (const id of unique) {
+    const studio = all.find((entry) => entry.id === id);
+    if (!studio || studio.archived) return "One of those studios doesn't exist.";
+    if (!scope.allowedIds.includes(id)) return `You can't group ${studio.name} - it isn't a studio you can open.`;
+    if (studio.groupId !== null && studio.groupId !== groupId) {
+      const [other] = await db.select().from(studioGroups).where(eq(studioGroups.id, studio.groupId)).limit(1);
+      return `${studio.name} is already in "${other?.name ?? "another group"}". Take it out of that group first.`;
+    }
+  }
+  return null;
+}
+
+async function studioNames(ids: number[]): Promise<string> {
+  if (ids.length === 0) return "";
+  const rows = await db.select({ name: studios.name }).from(studios).where(inArray(studios.id, ids));
+  return listWords(rows.map((row) => row.name));
+}
+
+studiosRouter.post("/groups", requirePermission("studios.group"), async (req, res) => {
+  const parsed = groupSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the form." });
+  }
+  const academyId = req.user!.academyId;
+  const studioIds = [...new Set(parsed.data.studioIds)];
+  const problem = await checkMembers(academyId, requireScope(req), studioIds, null);
+  if (problem) return res.status(400).json({ error: problem });
+
+  const group = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(studioGroups)
+      .values({
+        academyId,
+        name: parsed.data.name,
+        description: parsed.data.description?.trim() || null,
+      })
+      .returning();
+    await tx
+      .update(studios)
+      .set({ groupId: created.id, updatedAt: new Date() })
+      .where(and(eq(studios.academyId, academyId), inArray(studios.id, studioIds)));
+    return created;
+  });
+
+  await logActivity({
+    academyId,
+    actorUserId: req.user!.id,
+    action: "studio.group.created",
+    entityType: "studio_group",
+    entityId: group.id,
+    summary: `${req.user!.name} grouped ${await studioNames(studioIds)} as "${group.name}". They now share a wiki, positions, Town Halls, elections and Tac-Ons.`,
+    metadata: { studioIds },
+  });
+
+  res.status(201).json({ group: { ...group, studioIds }, warnings: await groupWarnings(academyId, studioIds) });
+});
+
+/** Loads a group the caller is allowed to manage, or null. */
+async function manageableGroup(academyId: number, scope: StudioScope, id: number) {
+  const [group] = await db
+    .select()
+    .from(studioGroups)
+    .where(and(eq(studioGroups.id, id), eq(studioGroups.academyId, academyId)))
+    .limit(1);
+  if (!group) return null;
+  const members = (await listStudios(academyId, true)).filter((studio) => studio.groupId === id);
+  const visible = members.filter((studio) => !studio.archived).every((studio) => scope.allowedIds.includes(studio.id));
+  return visible ? { group, members } : null;
+}
+
+studiosRouter.patch("/groups/:id", requirePermission("studios.group"), async (req, res) => {
+  const parsed = groupSchema.partial().safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the form." });
+  }
+  const academyId = req.user!.academyId;
+  const scope = requireScope(req);
+  const id = Number(req.params.id);
+  const found = await manageableGroup(academyId, scope, id);
+  if (!found) return res.status(404).json({ error: "That group doesn't exist." });
+
+  const before = found.members.filter((studio) => !studio.archived).map((studio) => studio.id);
+  const after = parsed.data.studioIds ? [...new Set(parsed.data.studioIds)] : before;
+  if (parsed.data.studioIds) {
+    const problem = await checkMembers(academyId, scope, after, id);
+    if (problem) return res.status(400).json({ error: problem });
+  }
+  const added = after.filter((studioId) => !before.includes(studioId));
+  const removed = before.filter((studioId) => !after.includes(studioId));
+
+  const group = await db.transaction(async (tx) => {
+    const patch: Record<string, unknown> = { updatedAt: new Date() };
+    if (parsed.data.name !== undefined) patch.name = parsed.data.name;
+    if (parsed.data.description !== undefined) patch.description = parsed.data.description?.trim() || null;
+    const [updated] = await tx.update(studioGroups).set(patch).where(eq(studioGroups.id, id)).returning();
+    if (removed.length > 0) {
+      await tx
+        .update(studios)
+        .set({ groupId: null, updatedAt: new Date() })
+        .where(and(eq(studios.groupId, id), inArray(studios.id, removed)));
+    }
+    if (added.length > 0) {
+      await tx
+        .update(studios)
+        .set({ groupId: id, updatedAt: new Date() })
+        .where(and(eq(studios.academyId, academyId), inArray(studios.id, added), isNull(studios.groupId)));
+    }
+    return updated;
+  });
+
+  const label = `the "${group.name}" group`;
+  const addedNames = await studioNames(added);
+  const removedNames = await studioNames(removed);
+  let summary = `${req.user!.name} updated ${label}.`;
+  if (added.length > 0 && removed.length > 0) {
+    summary = `${req.user!.name} added ${addedNames} to ${label} and took ${removedNames} out of it.`;
+  } else if (added.length > 0) {
+    summary = `${req.user!.name} added ${addedNames} to ${label}.`;
+  } else if (removed.length > 0) {
+    summary = `${req.user!.name} took ${removedNames} out of ${label}.`;
+  }
+  await logActivity({
+    academyId,
+    actorUserId: req.user!.id,
+    action: "studio.group.updated",
+    entityType: "studio_group",
+    entityId: id,
+    summary,
+    metadata: { added, removed },
+  });
+
+  res.json({
+    group: { ...group, studioIds: after },
+    warnings: added.length > 0 ? await groupWarnings(academyId, after) : [],
+  });
+});
+
+/**
+ * Breaking a group up. Nothing is deleted: every rule, position, election and
+ * Tac-On stays with the studio that owns it, and each studio goes back to
+ * seeing only its own.
+ */
+studiosRouter.delete("/groups/:id", requirePermission("studios.group"), async (req, res) => {
+  const academyId = req.user!.academyId;
+  const id = Number(req.params.id);
+  const found = await manageableGroup(academyId, requireScope(req), id);
+  if (!found) return res.status(404).json({ error: "That group doesn't exist." });
+
+  await db.transaction(async (tx) => {
+    await tx.update(studios).set({ groupId: null, updatedAt: new Date() }).where(eq(studios.groupId, id));
+    await tx.delete(studioGroups).where(eq(studioGroups.id, id));
+  });
+
+  await logActivity({
+    academyId,
+    actorUserId: req.user!.id,
+    action: "studio.group.removed",
+    entityType: "studio_group",
+    entityId: id,
+    summary: `${req.user!.name} broke up the "${found.group.name}" group. ${listWords(found.members.map((studio) => studio.name))} each govern on their own again.`,
+  });
+
+  res.json({ ok: true });
 });
 
 /** Remembers the studio the person is looking at across sessions and devices. */

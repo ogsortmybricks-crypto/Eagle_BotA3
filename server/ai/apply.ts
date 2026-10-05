@@ -7,6 +7,7 @@ import {
   wikiRules,
   wikiSections,
 } from "@shared/schema";
+import { studioCircle } from "../studio";
 import type { FindingSpec, PositionSpec, WikiOperation } from "./schemas";
 
 export function slugify(value: string): string {
@@ -79,13 +80,14 @@ export async function applyOperations(opts: {
   // Existing sections are addressable by slug - but only the ones this studio
   // can actually see, so an operation can never reach into another studio's
   // Contract by naming its slug.
+  const circle = await studioCircle(opts.studioId);
   const existingSections = (
     await db.select().from(wikiSections).where(eq(wikiSections.academyId, opts.academyId))
   ).filter(
     (section) =>
       opts.studioId === null ||
-      section.studioId === opts.studioId ||
-      section.studioId === null,
+      section.studioId === null ||
+      circle.includes(section.studioId),
   );
   for (const section of existingSections) keyToSectionId.set(section.slug, section.id);
   const reachableSectionIds = new Set(existingSections.map((section) => section.id));
@@ -494,13 +496,15 @@ export async function savePositions(opts: {
   if (opts.positions.length === 0) return 0;
 
   // Two studios can each have a "Hero Buck Committee"; they are different
-  // committees, so only collide titles within the same studio.
+  // committees, so only collide titles within the same studio - or the same
+  // group, which keeps one position list.
+  const circle = await studioCircle(opts.studioId);
   const existing = (
     await db
       .select({ title: positions.title, studioId: positions.studioId })
       .from(positions)
       .where(eq(positions.academyId, opts.academyId))
-  ).filter((row) => row.studioId === opts.studioId || row.studioId === null);
+  ).filter((row) => row.studioId === null || circle.includes(row.studioId));
   const taken = new Set(existing.map((row) => row.title.trim().toLowerCase()));
 
   const fresh = opts.positions.filter((p) => !taken.has(p.title.trim().toLowerCase()));

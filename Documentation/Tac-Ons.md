@@ -42,7 +42,9 @@ A studio install shows up only in that studio — its pages, its sidebar entry,
 its records. An academy-wide install shows up everywhere. A points ledger
 almost always belongs to one studio; a notice board might belong to all of them.
 You can install the same Tac-On separately in two studios, and they keep
-completely separate records.
+completely separate records. The exception is studios in a
+[group](Studio-Groups.md): a Tac-On installed in one of them shows for the
+whole group, with one set of records.
 
 If the Tac-On has settings, you fill them in here. You can change them later.
 

@@ -11,6 +11,7 @@ import {
   requireScope,
   scopedShared,
   StudioChoiceError,
+  studioCircle,
   writeStudioId,
 } from "../studio";
 
@@ -269,12 +270,15 @@ positionsRouter.post("/:id/holders", requirePermission("positions.manage"), asyn
   const studioRows = await db.select().from(studios).where(eq(studios.academyId, academyId));
 
   // A Middle Studio seat held by someone in Launchpad is almost always a
-  // mistake, and it is the kind that quietly breaks a studio's trust in the tool.
-  const eligibleStudios = [position.studioId, ...(position.sharedStudioIds ?? [])];
+  // mistake - unless the two are grouped and govern together, and it is the kind that quietly breaks a studio's trust in the tool.
+  const eligibleStudios = [
+    ...(await studioCircle(position.studioId)),
+    ...(position.sharedStudioIds ?? []),
+  ];
   if (
     req.settings!.governance.restrictCandidatesToStudio &&
     position.studioId !== null &&
-    !eligibleStudios.includes(person.studioId)
+    !eligibleStudios.includes(person.studioId ?? -1)
   ) {
     const names = studioRows
       .filter((studio) => eligibleStudios.includes(studio.id))

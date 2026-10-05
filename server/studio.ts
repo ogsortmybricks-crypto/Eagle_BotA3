@@ -27,9 +27,20 @@ export type StudioScope = {
   /** The studio being viewed. Null means "everything I'm allowed to see". */
   studioId: number | null;
   studio: Studio | null;
-  /** Every studio this person may read. */
+  /** Every studio this person may open in the switcher. */
   allowed: Studio[];
   allowedIds: number[];
+  /**
+   * The studio being viewed plus every studio grouped with it. Reads in a
+   * studio cover the whole group; empty when no studio is selected.
+   */
+  circleIds: number[];
+  /**
+   * `allowedIds` widened by groups: every studio whose rows this person can
+   * read. A Launchpad learner whose studio is grouped with Middle can read
+   * Middle's rules without being able to switch into Middle.
+   */
+  readableIds: number[];
   /** True when `allowed` is the whole academy, so reads need no studio filter. */
   canSeeAll: boolean;
   /** May file things against the academy rather than one studio. */
@@ -45,6 +56,36 @@ declare global {
       scope?: StudioScope;
     }
   }
+}
+
+/**
+ * A studio and every studio grouped with it - the set its reads cover.
+ *
+ * `all` should include archived studios: a studio archived out of a group
+ * still owns rules the rest of the group lives by.
+ */
+export function circleOf(studioId: number | null, all: Studio[]): number[] {
+  if (studioId === null) return [];
+  const studio = all.find((entry) => entry.id === studioId);
+  if (!studio || studio.groupId === null) return [studioId];
+  return all.filter((entry) => entry.groupId === studio.groupId).map((entry) => entry.id);
+}
+
+/** `circleOf` for code with no request scope to hand: jobs, hooks, vote counts. */
+export async function studioCircle(studioId: number | null): Promise<number[]> {
+  if (studioId === null) return [];
+  const [studio] = await db.select().from(studios).where(eq(studios.id, studioId)).limit(1);
+  if (!studio || studio.groupId === null) return [studioId];
+  const mates = await db
+    .select({ id: studios.id })
+    .from(studios)
+    .where(eq(studios.groupId, studio.groupId));
+  return mates.map((entry) => entry.id);
+}
+
+/** Every studio readable from any of `ids`, groups included. */
+function widenByGroups(ids: number[], all: Studio[]): number[] {
+  return [...new Set(ids.flatMap((id) => circleOf(id, all)))];
 }
 
 export async function listStudios(academyId: number, includeArchived = false): Promise<Studio[]> {
@@ -92,7 +133,8 @@ export async function attachStudioScope(req: Request, _res: Response, next: Next
   if (!req.user || !req.settings) return next();
 
   try {
-    const all = await listStudios(req.user.academyId);
+    const everything = await listStudios(req.user.academyId, true);
+    const all = everything.filter((studio) => !studio.archived);
     const { allowed, canSeeAll } = visibleStudios(
       req.user.role,
       req.user.studioId,
@@ -115,12 +157,15 @@ export async function attachStudioScope(req: Request, _res: Response, next: Next
 
     const studio = allowed.find((entry) => entry.id === studioId) ?? null;
     if (studio === null) studioId = null;
+    const allowedIds = allowed.map((entry) => entry.id);
 
     req.scope = {
       studioId,
       studio,
       allowed,
-      allowedIds: allowed.map((entry) => entry.id),
+      allowedIds,
+      circleIds: circleOf(studioId, everything),
+      readableIds: widenByGroups(allowedIds, everything),
       canSeeAll,
       canWriteShared: req.user.role === "admin",
       effective: effectiveFor(req.settings, studio ? resolveOverrides(studio.settings) : null),
@@ -158,11 +203,20 @@ export async function effectiveForStudio(
  * The studio predicate for one table's `studio_id` column, or undefined when
  * no restriction applies. Academy-wide rows (null) always pass.
  */
-export function studioFilter(column: PgColumn, scope: StudioScope): SQL | undefined {
-  if (scope.studioId !== null) return or(eq(column, scope.studioId), isNull(column));
+export function studioFilter(
+  column: PgColumn,
+  scope: Pick<StudioScope, "studioId" | "circleIds" | "readableIds" | "canSeeAll">,
+): SQL | undefined {
+  if (scope.studioId !== null) return or(inArray(column, circleIdsOf(scope)), isNull(column));
   if (scope.canSeeAll) return undefined;
-  if (scope.allowedIds.length === 0) return isNull(column);
-  return or(inArray(column, scope.allowedIds), isNull(column));
+  if (scope.readableIds.length === 0) return isNull(column);
+  return or(inArray(column, scope.readableIds), isNull(column));
+}
+
+/** The viewed studio's circle, never empty while a studio is selected. */
+function circleIdsOf(scope: Pick<StudioScope, "studioId" | "circleIds">): number[] {
+  if (scope.studioId === null) return scope.circleIds;
+  return scope.circleIds.length > 0 ? scope.circleIds : [scope.studioId];
 }
 
 /** `and(...)` that tolerates the filter being undefined. */
@@ -189,14 +243,15 @@ export function sharedStudioFilter(
   const contains = (id: number) => sql`${sharedColumn} @> ${JSON.stringify([id])}::jsonb`;
 
   if (scope.studioId !== null) {
-    return or(eq(column, scope.studioId), isNull(column), contains(scope.studioId));
+    const circle = circleIdsOf(scope);
+    return or(inArray(column, circle), isNull(column), ...circle.map((id) => contains(id)));
   }
   if (scope.canSeeAll) return undefined;
-  if (scope.allowedIds.length === 0) return isNull(column);
+  if (scope.readableIds.length === 0) return isNull(column);
   return or(
-    inArray(column, scope.allowedIds),
+    inArray(column, scope.readableIds),
     isNull(column),
-    ...scope.allowedIds.map((id) => contains(id)),
+    ...scope.readableIds.map((id) => contains(id)),
   );
 }
 
@@ -218,15 +273,15 @@ export function canReadShared(
   sharedIds: number[] | null | undefined,
 ): boolean {
   if (canReadStudio(scope, studioId)) return true;
-  return (sharedIds ?? []).some((id) => scope.allowedIds.includes(id));
+  return (sharedIds ?? []).some((id) => scope.readableIds.includes(id));
 }
 
 /** Same, but for a column that must match exactly (no academy-wide fallthrough). */
 export function strictStudioFilter(column: PgColumn, scope: StudioScope): SQL | undefined {
-  if (scope.studioId !== null) return eq(column, scope.studioId);
+  if (scope.studioId !== null) return inArray(column, circleIdsOf(scope));
   if (scope.canSeeAll) return undefined;
-  if (scope.allowedIds.length === 0) return isNull(column);
-  return inArray(column, scope.allowedIds);
+  if (scope.readableIds.length === 0) return isNull(column);
+  return inArray(column, scope.readableIds);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -258,7 +313,9 @@ export function writeStudioId(scope: StudioScope, explicit?: number | null | und
       }
       return null;
     }
-    if (!scope.allowedIds.includes(explicit)) {
+    // A grouped studio is one governing body, so filing against a studio in
+    // the group is as good as filing against your own.
+    if (!scope.readableIds.includes(explicit)) {
       throw new StudioChoiceError("That isn't a studio you can add to.");
     }
     return explicit;
@@ -276,7 +333,7 @@ export function writeStudioId(scope: StudioScope, explicit?: number | null | und
 /** True when this person can read rows carrying `studioId`. */
 export function canReadStudio(scope: StudioScope, studioId: number | null): boolean {
   if (studioId === null) return true;
-  return scope.allowedIds.includes(studioId);
+  return scope.readableIds.includes(studioId);
 }
 
 /** Labels a studio for prose: "Middle Studio" or "the whole academy". */

@@ -5,6 +5,7 @@ import { taconRecords, users } from "@shared/schema";
 import { marketStore } from "@shared/tacons/market";
 import type { MarketDef } from "@shared/tacons";
 import type { MarketEntry, MarketProduct, MarketPurchase, ViewMarket } from "@shared/tacons/view";
+import { studioCircle } from "../studio";
 import type { Runtime } from "./runtime";
 
 const RECENT_LIMIT = 200;
@@ -66,13 +67,17 @@ async function eligibleLearners(runtime: Runtime) {
     .from(users)
     .where(and(eq(users.academyId, runtime.academyId), eq(users.active, true), eq(users.role, "learner")));
   const scope = runtime.scope;
+  // An install in a grouped studio is the whole group's market.
+  const installCircle = await studioCircle(runtime.install.install.studioId);
   return all.filter((person) => {
     if (!runtime.people.has(person.id)) return false;
-    if (runtime.install.install.studioId !== null) return person.studioId === runtime.install.install.studioId;
+    if (runtime.install.install.studioId !== null) return installCircle.includes(person.studioId ?? -1);
     if (!scope) return false;
-    if (scope.studioId !== null) return person.studioId === scope.studioId || person.studioId === null;
-    if (scope.canSeeAll) return person.studioId === null || scope.allowedIds.includes(person.studioId ?? -1);
-    return person.studioId === null || scope.allowedIds.includes(person.studioId ?? -1);
+    if (scope.studioId !== null) {
+      return scope.circleIds.includes(person.studioId ?? -1) || person.studioId === null;
+    }
+    if (scope.canSeeAll) return person.studioId === null || scope.readableIds.includes(person.studioId ?? -1);
+    return person.studioId === null || scope.readableIds.includes(person.studioId ?? -1);
   });
 }
 

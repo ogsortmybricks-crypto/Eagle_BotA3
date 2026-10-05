@@ -30,6 +30,15 @@ export type Studio = {
   simpleMode: boolean;
   orderIndex: number;
   archived: boolean;
+  /** The group this studio governs with, if any. */
+  groupId: number | null;
+};
+
+/** Studios that share one wiki, position list, Town Hall and set of Tac-Ons. */
+export type StudioGroup = {
+  id: number;
+  name: string;
+  studios: { id: number; name: string; color: string }[];
 };
 
 export type Academy = {
@@ -70,6 +79,8 @@ type SessionValue = {
   studio: Studio | null;
   studioId: number | null;
   canSeeAllStudios: boolean;
+  /** The group the selected studio is in. Null when it governs alone. */
+  studioGroup: StudioGroup | null;
   /** Settings with the selected studio's overrides applied. */
   effective: EffectiveSettings | null;
   /** What this studio calls its learners. Falls back to the academy's word. */
@@ -97,6 +108,7 @@ type MeResponse = {
   selectedStudioId: number | null;
   learnerNoun: string;
   canSeeAllStudios: boolean;
+  studioGroup: StudioGroup | null;
   effective: EffectiveSettings | null;
   simpleMode: boolean;
   simpleModePreview: boolean;
@@ -183,6 +195,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       studio,
       studioId,
       canSeeAllStudios: data?.canSeeAllStudios ?? false,
+      // Only trust it for the studio it was worked out for - the local pick
+      // can run a request ahead of the server's.
+      studioGroup:
+        data?.studioGroup?.studios.some((entry) => entry.id === studioId) ? data.studioGroup : null,
       effective: data?.effective ?? null,
       learnerNoun: studio?.learnerNoun ?? data?.learnerNoun ?? data?.academy?.learnerNoun ?? "Hero",
       simpleMode: data?.simpleMode ?? false,

@@ -18,6 +18,7 @@ export const PERMISSIONS = {
     "academy.manage",
     "settings.manage",
     "studios.manage",
+    "studios.group",
     "users.manage",
     "invites.send",
     "documents.upload",
@@ -57,6 +58,9 @@ export const PERMISSIONS = {
     "tacons.use",
   ],
   guide: [
+    // Which studios govern together is a call about the room, not about the
+    // Contract, so guides can make it - but only for studios they can see.
+    "studios.group",
     "wiki.read",
     "positions.read",
     "meetings.read",

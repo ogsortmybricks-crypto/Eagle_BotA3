@@ -38,6 +38,7 @@ import {
   requireScope,
   scoped,
   scopedShared,
+  studioCircle,
   studioFilter,
   StudioChoiceError,
   writeStudioId,
@@ -588,6 +589,7 @@ wikiRouter.post("/build", requirePermission("wiki.ai_build"), async (req, res) =
   const filter = studioFilter(documents.studioId, {
     ...scope,
     studioId,
+    circleIds: await studioCircle(studioId),
     canSeeAll: studioId === null && scope.canSeeAll,
   });
   const [pending] = await db

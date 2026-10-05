@@ -67,8 +67,9 @@ export async function visibleInstalls(
   const allowed = (install: TaconInstall): boolean => {
     if (install.studioId === null) return true;
     if (!scope) return false;
-    if (scope.studioId !== null) return install.studioId === scope.studioId;
-    return scope.canSeeAll || scope.allowedIds.includes(install.studioId);
+    // A studio in a group runs the whole group's Tac-Ons, with one set of records.
+    if (scope.studioId !== null) return scope.circleIds.includes(install.studioId);
+    return scope.canSeeAll || scope.readableIds.includes(install.studioId);
   };
 
   const loaded: LoadedInstall[] = [];
@@ -138,7 +139,7 @@ export async function loadInstall(
   if (!row) return null;
   if (row.install.studioId !== null && scope) {
     const reachable =
-      scope.canSeeAll || scope.allowedIds.includes(row.install.studioId);
+      scope.canSeeAll || scope.readableIds.includes(row.install.studioId);
     if (!reachable) return null;
   }
   const manifest = readManifest(row.version);

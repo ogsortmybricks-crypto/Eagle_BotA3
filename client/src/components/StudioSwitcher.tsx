@@ -9,7 +9,7 @@ import { useSession } from "@/lib/session";
  * which studio you're in even when there's only one.
  */
 export function StudioSwitcher({ onNavigate }: { onNavigate?: () => void }) {
-  const { studios, studio, studioId, canSeeAllStudios, selectStudio } = useSession();
+  const { studios, studio, studioId, canSeeAllStudios, studioGroup, selectStudio } = useSession();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -54,8 +54,13 @@ export function StudioSwitcher({ onNavigate }: { onNavigate?: () => void }) {
   }
 
   const label = studio?.name ?? "All studios";
+  // A grouped studio shares everything with the rest of its group, which is
+  // worth saying wherever the studio's name is.
+  const groupMates = studioGroup?.studios.filter((entry) => entry.id !== studio?.id) ?? [];
   const sub = studio
-    ? (studio.ageRange ?? "Studio")
+    ? groupMates.length > 0
+      ? `With ${groupMates.map((entry) => entry.name).join(", ")} · ${studioGroup!.name}`
+      : (studio.ageRange ?? "Studio")
     : `${studios.length} studios at once`;
 
   const swatch = (

@@ -27,6 +27,7 @@ import {
   requireScope,
   scoped,
   StudioChoiceError,
+  studioCircle,
   writeStudioId,
 } from "../studio";
 import type { AcademySettings } from "@shared/settings";
@@ -53,6 +54,8 @@ function canVoteIn(
   settings: AcademySettings,
   effective: { guidesCanVote: boolean },
   electionStudioId: number | null,
+  /** The election's studio and every studio grouped with it. */
+  circle: number[],
   studioName: string | null,
 ): VoteCheck {
   if (user.role === "guide" && !effective.guidesCanVote) {
@@ -63,11 +66,11 @@ function canVoteIn(
     };
   }
 
-  if (electionStudioId !== null && user.studioId !== electionStudioId) {
+  if (electionStudioId !== null && !circle.includes(user.studioId ?? -1)) {
     if (user.role === "admin" && settings.governance.adminsVoteInAllStudios) return { ok: true };
     return {
       ok: false,
-      reason: `This vote belongs to ${studioName ?? "another studio"}. You can follow it, but only that studio casts ballots.`,
+      reason: `This vote belongs to ${studioName ?? "another studio"}. You can follow it, but only ${circle.length > 1 ? "the studios in its group cast" : "that studio casts"} ballots.`,
     };
   }
 
@@ -85,8 +88,9 @@ async function eligibleVoters(
     .select()
     .from(users)
     .where(and(eq(users.academyId, academyId), eq(users.active, true)));
+  const circle = await studioCircle(electionStudioId);
   return roster.filter(
-    (person) => canVoteIn(person, settings, effective, electionStudioId, null).ok,
+    (person) => canVoteIn(person, settings, effective, electionStudioId, circle, null).ok,
   );
 }
 
@@ -166,6 +170,7 @@ electionsRouter.get("/", requirePermission("elections.read"), async (req, res) =
       req.settings!,
       effective,
       row.election.studioId,
+      await studioCircle(row.election.studioId),
       row.studioName,
     );
     withEligibility.push({ ...row, canVote: check.ok });
@@ -199,7 +204,8 @@ electionsRouter.get("/:id", requirePermission("elections.read"), async (req, res
     : [null];
 
   const effective = await ballotRules(election.studioId, settings);
-  const check = canVoteIn(req.user!, settings, effective, election.studioId, studio?.name ?? null);
+  const circle = await studioCircle(election.studioId);
+  const check = canVoteIn(req.user!, settings, effective, election.studioId, circle, studio?.name ?? null);
 
   const options = await db
     .select({
@@ -423,11 +429,12 @@ electionsRouter.post("/:id/candidates", requireAuth, async (req, res) => {
     return res.status(400).json({ error: "That person isn't in this academy." });
   }
 
-  // You run for your own studio's positions. Elsewhere you're a spectator.
+  // You run for your own studio's positions (or your group's). Elsewhere
+  // you're a spectator.
   if (
     req.settings!.governance.restrictCandidatesToStudio &&
     election.studioId !== null &&
-    candidateUser.studioId !== election.studioId
+    !(await studioCircle(election.studioId)).includes(candidateUser.studioId ?? -1)
   ) {
     const [studio] = await db.select().from(studios).where(eq(studios.id, election.studioId)).limit(1);
     return res.status(403).json({
@@ -607,7 +614,8 @@ electionsRouter.post("/:id/vote", requireAuth, async (req, res) => {
     ? await db.select().from(studios).where(eq(studios.id, election.studioId)).limit(1)
     : [null];
   const effective = await ballotRules(election.studioId, settings);
-  const check = canVoteIn(req.user!, settings, effective, election.studioId, studio?.name ?? null);
+  const circle = await studioCircle(election.studioId);
+  const check = canVoteIn(req.user!, settings, effective, election.studioId, circle, studio?.name ?? null);
   if (!check.ok) return res.status(403).json({ error: check.reason });
 
   if (election.status !== "open") return res.status(409).json({ error: "This vote isn't open." });

@@ -5,6 +5,7 @@ import {
   Bell,
   Bot,
   Building2,
+  Combine,
   Eye,
   Gavel,
   KeyRound,
@@ -16,6 +17,7 @@ import {
   RotateCcw,
   Save,
   Scale,
+  Unlink,
   Vote,
 } from "lucide-react";
 import { apiDelete, apiGet, apiPatch, apiPost, fileToDataUrl } from "@/lib/api";
@@ -30,9 +32,11 @@ import {
 } from "@/components/SettingControls";
 import type { AcademySettings, StudioOverrides } from "@shared/settings";
 
-const TABS = [
+/** `perm` opens a tab to anyone holding it, admin or not. */
+const TABS: readonly { id: string; label: string; icon: typeof Layers; admin: boolean; perm?: string }[] = [
   { id: "academy", label: "Academy", icon: Building2, admin: true },
   { id: "studios", label: "Studios", icon: Layers, admin: true },
+  { id: "groups", label: "Studio groups", icon: Combine, admin: true, perm: "studios.group" },
   { id: "governance", label: "Governance", icon: Scale, admin: true },
   { id: "elections", label: "Elections", icon: Vote, admin: true },
   { id: "townhall", label: "Town Hall", icon: Gavel, admin: true },
@@ -41,9 +45,9 @@ const TABS = [
   { id: "access", label: "Access", icon: Lock, admin: true },
   { id: "display", label: "Display", icon: Monitor, admin: true },
   { id: "account", label: "My account", icon: KeyRound, admin: false },
-] as const;
+];
 
-type TabId = (typeof TABS)[number]["id"];
+type TabId = string;
 
 type ServerInfo = {
   aiConfigured: boolean;
@@ -62,7 +66,9 @@ export function Settings() {
     queryFn: () => apiGet("/settings"),
   });
 
-  const visible = TABS.filter((entry) => !entry.admin || isAdmin);
+  const visible = TABS.filter(
+    (entry) => !entry.admin || isAdmin || (entry.perm !== undefined && can(entry.perm)),
+  );
   const server = info.data?.server;
 
   return (
@@ -95,6 +101,7 @@ export function Settings() {
       <div className="max-w-3xl">
         {tab === "academy" && <AcademyTab />}
         {tab === "studios" && <StudiosTab />}
+        {tab === "groups" && <GroupsTab />}
         {tab === "governance" && <GovernanceTab />}
         {tab === "elections" && <ElectionsTab />}
         {tab === "townhall" && <TownHallTab />}
@@ -402,6 +409,7 @@ function StudiosTab() {
         also <strong>share</strong> a particular section or position with specific other studios —
         a Hero Bucks system Middle and Launchpad run together, say — which you arrange on the Wiki
         and Positions pages. Anything filed academy-wide shows up everywhere, so use that sparingly.
+        If two studios should share <em>everything</em>, put them in a group under Studio groups.
       </Banner>
 
       <div className="flex flex-wrap justify-end gap-2">
@@ -485,6 +493,278 @@ function StudiosTab() {
         />
       )}
     </div>
+  );
+}
+
+/* ------------------------------ studio groups ------------------------------ */
+
+type GroupRow = {
+  id: number;
+  name: string;
+  description: string | null;
+  studioIds: number[];
+};
+
+type GroupsResponse = {
+  studios: (StudioRow & { groupId: number | null })[];
+  groups: GroupRow[];
+};
+
+/**
+ * Studios that govern together. Admins and guides both get this tab: whether
+ * Middle and Launchpad hold one Town Hall is a call about the room, and a
+ * guide is usually the one who knows.
+ */
+function GroupsTab() {
+  const queryClient = useQueryClient();
+  const { refresh } = useSession();
+  const [editing, setEditing] = useState<GroupRow | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [notice, setNotice] = useState<{ tone: "warning" | "error"; text: string } | null>(null);
+
+  const query = useQuery<GroupsResponse>({ queryKey: ["studios"], queryFn: () => apiGet("/studios") });
+
+  const breakUp = useMutation({
+    mutationFn: (id: number) => apiDelete(`/studios/groups/${id}`),
+    onSuccess: async () => {
+      setNotice(null);
+      // Every list on screen just changed shape, not only this one.
+      await queryClient.invalidateQueries();
+      await refresh();
+    },
+    onError: (breakError: Error) => setNotice({ tone: "error", text: breakError.message }),
+  });
+
+  if (query.isLoading) return <LoadingPage />;
+  const studios = query.data?.studios ?? [];
+  const groups = query.data?.groups ?? [];
+  const byId = new Map(studios.map((studio) => [studio.id, studio]));
+  const ungrouped = studios.filter((studio) => studio.groupId === null);
+
+  return (
+    <div className="space-y-5">
+      {notice && <Banner tone={notice.tone}>{notice.text}</Banner>}
+
+      <Banner tone="info" title="Studios that govern together">
+        Put two or more studios in a group and they become one governing body: one wiki, one list
+        of positions, one Town Hall, one set of elections and one set of Tac-Ons. Everybody in the
+        group votes on the group's ballots and counts toward its quorum. Nothing is copied or
+        moved, so breaking a group up puts every studio back exactly as it was, with whatever it
+        added while grouped.
+      </Banner>
+
+      <div className="flex justify-end">
+        <button
+          onClick={() => setCreating(true)}
+          disabled={ungrouped.length < 2}
+          title={ungrouped.length < 2 ? "You need two studios that aren't in a group yet." : undefined}
+          className="btn-primary btn-sm"
+        >
+          <Plus className="h-3.5 w-3.5" /> New group
+        </button>
+      </div>
+
+      {groups.length === 0 && (
+        <div className="card border-dashed p-6 text-center text-sm text-gray-500">
+          No groups yet. Every studio governs on its own.
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {groups.map((group) => (
+          <div key={group.id} className="card p-4">
+            <div className="flex items-start gap-3">
+              <span className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gray-100">
+                <Combine className="h-4 w-4 text-gray-500" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <h3 className="font-semibold text-gray-900">{group.name}</h3>
+                {group.description && <p className="mt-1 text-sm text-gray-600">{group.description}</p>}
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {group.studioIds.map((id) => {
+                    const studio = byId.get(id);
+                    if (!studio) return null;
+                    return (
+                      <span
+                        key={id}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 px-2.5 py-0.5 text-xs text-gray-700"
+                      >
+                        <span className="h-2 w-2 rounded-full" style={{ background: studio.color }} />
+                        {studio.name}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <button onClick={() => setEditing(group)} className="btn-secondary btn-sm">
+                  Edit
+                </button>
+                <button
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Break up "${group.name}"? Each studio goes back to its own wiki, positions, Town Halls and Tac-Ons. Nothing is deleted.`,
+                      )
+                    ) {
+                      breakUp.mutate(group.id);
+                    }
+                  }}
+                  disabled={breakUp.isPending}
+                  className="btn-ghost btn-sm text-gray-400 hover:text-red-600"
+                  title="Break up this group"
+                >
+                  <Unlink className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {(creating || editing) && (
+        <GroupModal
+          group={editing}
+          studios={studios}
+          onSaved={(warnings) =>
+            setNotice(warnings.length > 0 ? { tone: "warning", text: warnings.join(" ") } : null)
+          }
+          onClose={() => {
+            setEditing(null);
+            setCreating(false);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function GroupModal({
+  group,
+  studios,
+  onSaved,
+  onClose,
+}: {
+  group: GroupRow | null;
+  studios: GroupsResponse["studios"];
+  onSaved: (warnings: string[]) => void;
+  onClose: () => void;
+}) {
+  const queryClient = useQueryClient();
+  const { refresh } = useSession();
+  const [name, setName] = useState(group?.name ?? "");
+  const [description, setDescription] = useState(group?.description ?? "");
+  const [members, setMembers] = useState<number[]>(group?.studioIds ?? []);
+  const [error, setError] = useState<string | null>(null);
+
+  // A studio already in a different group has to leave that one first.
+  const choosable = studios.filter((studio) => studio.groupId === null || studio.groupId === group?.id);
+  const removing = (group?.studioIds ?? []).filter((id) => !members.includes(id));
+
+  const save = useMutation({
+    mutationFn: () => {
+      const body = { name: name.trim(), description: description.trim() || null, studioIds: members };
+      return group
+        ? apiPatch<{ warnings: string[] }>(`/studios/groups/${group.id}`, body)
+        : apiPost<{ warnings: string[] }>("/studios/groups", body);
+    },
+    onSuccess: async (data) => {
+      onSaved(data.warnings ?? []);
+      await queryClient.invalidateQueries();
+      await refresh();
+      onClose();
+    },
+    onError: (saveError: Error) => setError(saveError.message),
+  });
+
+  function toggle(id: number) {
+    setMembers((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id]));
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={group ? `Edit ${group.name}` : "New studio group"}
+      description="Studios in a group share a wiki, positions, Town Halls, elections and Tac-Ons."
+      footer={
+        <>
+          <button onClick={onClose} className="btn-secondary">
+            Cancel
+          </button>
+          <button
+            onClick={() => save.mutate()}
+            disabled={save.isPending || name.trim().length < 2 || members.length < 2}
+            className="btn-primary"
+          >
+            {save.isPending && <Spinner />} Save
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {error && <Banner tone="error">{error}</Banner>}
+
+        <div>
+          <label className="label" htmlFor="group-name">
+            Name
+          </label>
+          <input
+            id="group-name"
+            className="input"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Upper Studios"
+            autoFocus
+          />
+        </div>
+
+        <div>
+          <label className="label" htmlFor="group-desc">
+            Why these studios govern together
+          </label>
+          <textarea
+            id="group-desc"
+            className="input min-h-[64px]"
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            placeholder="Middle and Launchpad hold one Town Hall and keep one Contract."
+          />
+        </div>
+
+        <div>
+          <span className="label">Studios</span>
+          <div className="space-y-1.5">
+            {choosable.map((studio) => (
+              <label
+                key={studio.id}
+                className="flex cursor-pointer items-center gap-2.5 rounded-lg border border-gray-200 px-3 py-2 hover:bg-gray-50"
+              >
+                <input
+                  type="checkbox"
+                  checked={members.includes(studio.id)}
+                  onChange={() => toggle(studio.id)}
+                />
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: studio.color }} />
+                <span className="text-sm text-gray-900">{studio.name}</span>
+                {studio.ageRange && <span className="text-xs text-gray-400">{studio.ageRange}</span>}
+              </label>
+            ))}
+          </div>
+          <p className="hint">
+            Pick at least two. Studios already in another group aren't listed - take them out of
+            that group first.
+          </p>
+        </div>
+
+        {removing.length > 0 && (
+          <Banner tone="warning">
+            A studio you take out keeps everything it owns and stops seeing the rest of the
+            group's rules, positions and Tac-Ons.
+          </Banner>
+        )}
+      </div>
+    </Modal>
   );
 }
 

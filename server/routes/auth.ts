@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "../db";
-import { academies, invites, positionHolders, positions, studios, users } from "@shared/schema";
+import { academies, invites, positionHolders, positions, studioGroups, studios, users } from "@shared/schema";
 import { hashPassword, publicUser, requireAuth, verifyPassword } from "../auth";
 import { logActivity } from "../activity";
 import { effectivePermissions } from "@shared/permissions";
@@ -75,6 +75,20 @@ authRouter.get("/me", async (req, res) => {
   const selectedStudioId = scope?.studioId ?? null;
   const selected = allowed.find((studio) => studio.id === selectedStudioId) ?? null;
 
+  // The group the selected studio governs with, so the switcher can say so.
+  const [group] = selected?.groupId
+    ? await db.select().from(studioGroups).where(eq(studioGroups.id, selected.groupId)).limit(1)
+    : [null];
+  const studioGroup = group
+    ? {
+        id: group.id,
+        name: group.name,
+        studios: all
+          .filter((studio) => studio.groupId === group.id)
+          .map((studio) => ({ id: studio.id, name: studio.name, color: studio.color })),
+      }
+    : null;
+
   const held = await db
     .select({
       id: positionHolders.id,
@@ -120,6 +134,8 @@ authRouter.get("/me", async (req, res) => {
     learnerNoun: selected?.learnerNoun ?? academy?.learnerNoun ?? "Hero",
     homeStudio: homeStudio ?? null,
     canSeeAllStudios: canSeeAll,
+    /** The group the selected studio shares its wiki, positions and Tac-Ons with. */
+    studioGroup,
     effective: scope?.effective ?? null,
     simpleMode,
     /** True when the full view is only hidden because the admin asked to preview. */

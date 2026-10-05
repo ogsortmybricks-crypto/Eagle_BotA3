@@ -107,6 +107,36 @@ export const academies = pgTable("academies", {
 });
 
 /* -------------------------------------------------------------------------- */
+/*  Studio groups                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Two or more studios that govern together.
+ *
+ * Plenty of Actons run Middle and Launchpad as one body: one Contract, one set
+ * of elected positions, one Town Hall. Putting them in a group makes each
+ * studio's view include everything the others own, so nothing has to be filed
+ * academy-wide (which would drag Spark in) or shared row by row.
+ *
+ * Nothing moves when a group forms or breaks up - every rule, position and
+ * install keeps the studio that owns it. A group only changes who can see it.
+ */
+export const studioGroups = pgTable(
+  "studio_groups",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    description: text("description"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    academyIdx: index("studio_groups_academy_idx").on(t.academyId),
+  }),
+);
+
+/* -------------------------------------------------------------------------- */
 /*  Studios                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -142,6 +172,8 @@ export const studios = pgTable(
     simpleMode: boolean("simple_mode").notNull().default(false),
     orderIndex: integer("order_index").notNull().default(0),
     archived: boolean("archived").notNull().default(false),
+    /** The group this studio governs with, if any. A studio is in at most one. */
+    groupId: integer("group_id").references(() => studioGroups.id, { onDelete: "set null" }),
     /** Per-studio overrides. Shape lives in shared/settings.ts. */
     settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
     createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -986,6 +1018,7 @@ export const positionHoldersRelations = relations(positionHolders, ({ one }) => 
 
 export type Academy = typeof academies.$inferSelect;
 export type Studio = typeof studios.$inferSelect;
+export type StudioGroup = typeof studioGroups.$inferSelect;
 export type User = typeof users.$inferSelect;
 export type Invite = typeof invites.$inferSelect;
 export type Document = typeof documents.$inferSelect;

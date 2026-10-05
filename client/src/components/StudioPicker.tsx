@@ -25,7 +25,7 @@ export function StudioPicker({
   allowShared?: boolean;
   disabled?: boolean;
 }) {
-  const { studios, studio, studioId, can } = useSession();
+  const { studios, studio, studioId, studioGroup, can } = useSession();
   const canShare = allowShared ?? can("academy.manage");
   // Following the view while viewing every studio means nothing is chosen yet.
   // Resolving that to `null` used to show "Academy-wide" as picked without ever
@@ -66,7 +66,9 @@ export function StudioPicker({
       <p className="hint">
         {hint ??
           (studio
-            ? `Defaults to ${studio.name}, the studio you're in. Other studios won't see it.`
+            ? studioGroup
+              ? `Defaults to ${studio.name}, the studio you're in. The rest of "${studioGroup.name}" sees it too; other studios won't.`
+              : `Defaults to ${studio.name}, the studio you're in. Other studios won't see it.`
             : "You're viewing every studio, so this one needs an answer.")}
       </p>
     </div>

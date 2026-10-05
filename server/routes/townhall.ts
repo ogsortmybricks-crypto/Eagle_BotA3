@@ -13,6 +13,7 @@ import {
   requireScope,
   scoped,
   StudioChoiceError,
+  studioCircle,
   writeStudioId,
 } from "../studio";
 import {
@@ -51,8 +52,10 @@ async function quorumFor(
     .from(users)
     .where(and(eq(users.academyId, academyId), eq(users.active, true)));
 
+  // A grouped studio meets as one body, so the whole group counts toward quorum.
+  const circle = await studioCircle(studioId);
   const members = roster.filter((person) => {
-    if (studioId !== null && person.studioId !== studioId) return false;
+    if (studioId !== null && !circle.includes(person.studioId ?? -1)) return false;
     if (person.role === "guide" && !settings.townHall.guidesCountTowardQuorum) return false;
     return true;
   });
@@ -130,9 +133,12 @@ townHallRouter.post("/", requirePermission("meetings.write"), async (req, res) =
             eq(meetingItems.academyId, academyId),
             eq(meetingItems.type, "action_item"),
             eq(meetingItems.completed, false),
-            // Strictly this studio's own meetings. An academy-wide meeting
-            // carries academy-wide items, not four studios' chores at once.
-            studioId === null ? isNull(meetings.studioId) : eq(meetings.studioId, studioId),
+            // Strictly this studio's own meetings (its group's, if it has
+            // one). An academy-wide meeting carries academy-wide items, not
+            // four studios' chores at once.
+            studioId === null
+              ? isNull(meetings.studioId)
+              : inArray(meetings.studioId, await studioCircle(studioId)),
           ),
         )
         .orderBy(asc(meetingItems.dueDate))
@@ -220,7 +226,9 @@ townHallRouter.get("/:id", requirePermission("meetings.read"), async (req, res) 
     ? await db.select().from(studios).where(eq(studios.id, meeting.studioId)).limit(1)
     : [null];
 
-  // The roster is the people who are actually in this meeting's studio.
+  // The roster is the people who are actually in this meeting's studio, or
+  // in any studio grouped with it.
+  const circle = await studioCircle(meeting.studioId);
   const roster = await db
     .select({ id: users.id, name: users.name, role: users.role, studioId: users.studioId })
     .from(users)
@@ -229,7 +237,7 @@ townHallRouter.get("/:id", requirePermission("meetings.read"), async (req, res) 
   const studioRoster =
     meeting.studioId === null
       ? roster
-      : roster.filter((person) => person.studioId === meeting.studioId);
+      : roster.filter((person) => circle.includes(person.studioId ?? -1));
 
   const effective = await effectiveForStudio(meeting.studioId, settings);
   const quorum = await quorumFor(req.user!.academyId, meeting.studioId, settings, effective);

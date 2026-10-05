@@ -1,6 +1,7 @@
-import { and, asc, eq, isNull, ne, or, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, or, type SQL } from "drizzle-orm";
 import { db } from "../db";
-import { positions, studios, wikiRules, wikiSections, type Studio } from "@shared/schema";
+import { positions, studioGroups, studios, wikiRules, wikiSections, type Studio } from "@shared/schema";
+import { studioCircle } from "../studio";
 
 /**
  * Everything the AI sees is scoped to one studio.
@@ -11,10 +12,29 @@ import { positions, studios, wikiRules, wikiSections, type Studio } from "@share
  * learner sees when they open the wiki.
  */
 
-/** Studio rows plus academy-wide rows. A null studioId means the whole academy. */
-function inStudio(column: Parameters<typeof eq>[0], studioId: number | null): SQL | undefined {
+/**
+ * Studio rows plus academy-wide rows. A null studioId means the whole academy.
+ * A grouped studio's rows include every studio in its group - they keep one
+ * Contract, so the AI has to see all of it.
+ */
+async function inStudio(column: Parameters<typeof eq>[0], studioId: number | null): Promise<SQL | undefined> {
   if (studioId === null) return undefined;
-  return or(eq(column, studioId), isNull(column));
+  return or(inArray(column, await studioCircle(studioId)), isNull(column));
+}
+
+/** The group a studio governs with, and the other studios in it. */
+export type StudioGroupContext = { name: string; others: string[] } | null;
+
+export async function loadStudioGroup(studio: Studio | null): Promise<StudioGroupContext> {
+  if (!studio || studio.groupId === null) return null;
+  const [group] = await db.select().from(studioGroups).where(eq(studioGroups.id, studio.groupId)).limit(1);
+  if (!group) return null;
+  const mates = await db
+    .select({ id: studios.id, name: studios.name })
+    .from(studios)
+    .where(eq(studios.groupId, group.id))
+    .orderBy(asc(studios.orderIndex), asc(studios.id));
+  return { name: group.name, others: mates.filter((mate) => mate.id !== studio.id).map((mate) => mate.name) };
 }
 
 export async function loadStudio(studioId: number | null): Promise<Studio | null> {
@@ -24,7 +44,11 @@ export async function loadStudio(studioId: number | null): Promise<Studio | null
 }
 
 /** Orients Claude in the studio it's working for, in the studio's own terms. */
-export function renderStudioContext(studio: Studio | null, learnerNoun: string): string {
+export function renderStudioContext(
+  studio: Studio | null,
+  learnerNoun: string,
+  group: StudioGroupContext = null,
+): string {
   if (!studio) {
     return [
       "# The studio you're working for",
@@ -45,9 +69,20 @@ export function renderStudioContext(studio: Studio | null, learnerNoun: string):
     "",
     `Learners here are called ${studio.learnerNoun ?? learnerNoun}s.`,
     "",
-    "Everything you write is this studio's Contract, not the academy's. Other studios",
-    "have their own rules, their own elected positions, and their own Town Halls, and",
-    "they are none of this studio's business. Write for the people in this room.",
+    ...(group && group.others.length > 0
+      ? [
+          `${studio.name} governs together with ${group.others.join(", ")} as "${group.name}".`,
+          "They keep one Contract, one set of elected positions and one Town Hall, so the",
+          "existing rules below include all of theirs. Treat them as one body: don't",
+          "duplicate a rule another studio in the group already has, and write so every",
+          "studio in the group can follow it. Studios outside the group are none of its",
+          "business.",
+        ]
+      : [
+          "Everything you write is this studio's Contract, not the academy's. Other studios",
+          "have their own rules, their own elected positions, and their own Town Halls, and",
+          "they are none of this studio's business. Write for the people in this room.",
+        ]),
     studio.ageRange
       ? `Pitch the language at ages ${studio.ageRange} - a rule a ${studio.name} learner can't read alone is a rule that doesn't exist.`
       : "",
@@ -65,7 +100,7 @@ export async function renderWikiContext(
   academyId: number,
   studioId: number | null,
 ): Promise<string> {
-  const studioCondition = inStudio(wikiSections.studioId, studioId);
+  const studioCondition = await inStudio(wikiSections.studioId, studioId);
   const sections = await db
     .select()
     .from(wikiSections)
@@ -132,7 +167,7 @@ export async function renderPositionsContext(
   academyId: number,
   studioId: number | null,
 ): Promise<string> {
-  const studioCondition = inStudio(positions.studioId, studioId);
+  const studioCondition = await inStudio(positions.studioId, studioId);
   const base = and(eq(positions.academyId, academyId), eq(positions.archived, false));
 
   const rows = await db

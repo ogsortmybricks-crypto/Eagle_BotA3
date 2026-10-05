@@ -15,6 +15,7 @@ import { db } from "../db";
 import { academies, users, type Academy, type User } from "@shared/schema";
 import { resolveSettings } from "@shared/settings";
 import { HOOK_EVENTS, matches, type Row } from "@shared/tacons";
+import { studioCircle } from "../studio";
 import { allInstalls, type LoadedInstall } from "./registry";
 import { buildRuntime, contextFor, runActions } from "./runtime";
 
@@ -85,11 +86,13 @@ export async function dispatchTaconEvent(event: TaconEvent): Promise<void> {
   // Hooks run with no viewer: they are the Tac-On acting on its own behalf, so
   // they can only ever touch their own storage. That also means the usual
   // "what may this person see" filter doesn't apply - the event's studio does.
+  // A grouped studio's Tac-Ons hear about everything that happens in the group.
   const installs = await allInstalls(event.academyId);
+  const circle = await studioCircle(event.studioId);
   const relevant = installs.filter(
     (entry) =>
       entry.manifest.hooks.some((hook) => hook.event === event.action) &&
-      (entry.install.studioId === null || entry.install.studioId === event.studioId),
+      (entry.install.studioId === null || circle.includes(entry.install.studioId)),
   );
   if (relevant.length === 0) return;
 
