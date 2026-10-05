@@ -16,8 +16,11 @@ keeps that record.
 two columns, **AP 1** and **AP 2**, with a dropdown for each seat, plus an
 optional **AP 3** for groups of three. *Pair the rest randomly* fills in
 whoever is left. Pairings can change at any time. A changed pairing is ended,
-not deleted, so earlier check-ins still show who they were with. Only admins
-see the switch that lets admins and guides be partners; it is off by default.
+not deleted, so earlier check-ins still show who they were with.
+
+**Who can be an AP.** Learners, secretaries (who are almost always learners)
+and learner admins. Guides and other admins can't; there is no switch for it.
+An admin becomes a learner admin under **Admin → People**.
 
 **The dashboard (partners).** Each partner gets a **You** tab and one tab
 named after each partner.

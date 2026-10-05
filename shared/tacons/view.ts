@@ -160,9 +160,7 @@ export type ViewPartners = {
   goals: PartnerGoals[];
   /** Present only for people who may set the pairings. */
   manage: null | {
-    allowStaff: boolean;
-    /** Only admins decide whether staff can be paired. */
-    canToggleStaff: boolean;
+    /** Learners, secretaries and learner admins. Guides and staff admins never. */
     candidates: PartnerCandidate[];
     groups: PartnerGroup[];
   };

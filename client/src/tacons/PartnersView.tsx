@@ -834,12 +834,6 @@ function Pairings({ view, target }: Props) {
     onError: (error: Error) => setNotice({ tone: "error", text: error.message }),
   });
 
-  const toggleStaff = useMutation({
-    mutationFn: (allow: boolean) => apiPost(`${api.base}/staff`, api.body({ allow })),
-    onSuccess: () => api.refresh(),
-    onError: (error: Error) => setNotice({ tone: "error", text: error.message }),
-  });
-
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -849,19 +843,10 @@ function Pairings({ view, target }: Props) {
             Pick partners for each row{view.trios && "; fill AP 3 for a group of three"}. You can change these at any time —
             ending a pairing keeps its check-in history.
           </p>
+          <p className="mt-1 text-xs text-gray-400">
+            Learners, secretaries and learner admins can be APs. Guides and other admins can't.
+          </p>
         </div>
-        {manage.canToggleStaff && (
-          <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              className="h-4 w-4 rounded border-gray-300 text-brand-600"
-              checked={manage.allowStaff}
-              disabled={toggleStaff.isPending}
-              onChange={(event) => toggleStaff.mutate(event.target.checked)}
-            />
-            Admins and guides can be partners
-          </label>
-        )}
       </div>
 
       {notice && <Banner tone={notice.tone}>{notice.text}</Banner>}

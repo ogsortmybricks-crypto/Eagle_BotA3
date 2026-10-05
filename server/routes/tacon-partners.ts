@@ -15,7 +15,6 @@ import {
   saveCheckin,
   saveGoals,
   savePairings,
-  setAllowStaff,
   uploadShot,
 } from "../tacons/partners";
 import { findMarketWidget, marketLocation, marketLocationShape } from "./tacon-market";
@@ -29,7 +28,6 @@ const located = <T extends z.ZodRawShape>(shape: T) =>
 const pairingsSchema = located({
   groups: z.array(z.array(z.number().int().positive()).min(2).max(3)).max(500),
 });
-const staffSchema = located({ allow: z.boolean() });
 const goalsSchema = located({
   week: z.string(),
   goals: z.record(z.string().max(300)),
@@ -114,22 +112,6 @@ taconPartnersRouter.post(`${base}/pairings`, requirePermission("tacons.use"), as
       });
     }
     return res.json({ ok: true, ...result });
-  } catch (error) {
-    return sendError(res, error);
-  }
-});
-
-taconPartnersRouter.post(`${base}/staff`, requirePermission("tacons.use"), async (req, res) => {
-  const parsed = staffSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Check the setting and try again." });
-  try {
-    const access = await authorized(req, parsed.data, parsed.data.index);
-    if (!access.ok) return res.status(access.status).json({ error: access.error });
-    if (req.user!.role !== "admin" || !canManagePartners(access.runtime, access.def)) {
-      return res.status(403).json({ error: "Only an admin can decide whether staff can be partners." });
-    }
-    await setAllowStaff(access.runtime, access.def, parsed.data.allow, req.user!.id);
-    return res.json({ ok: true });
   } catch (error) {
     return sendError(res, error);
   }

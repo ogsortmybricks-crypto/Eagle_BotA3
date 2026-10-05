@@ -27,7 +27,6 @@ import { audienceAllows, type Runtime } from "./runtime";
 
 /** How far back a dashboard looks: this week, plus five before it. */
 const HISTORY_DAYS = 42;
-const STAFF_ROLES = ["admin", "guide"];
 
 export class PartnersError extends Error {
   constructor(message: string) {
@@ -83,15 +82,30 @@ async function lock(tx: any, runtime: Runtime, def: PartnersDef) {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
 }
 
-async function allowStaff(runtime: Runtime, def: PartnersDef): Promise<boolean> {
-  const [config] = await rows(runtime, def, "config");
-  return config ? data(config).allowStaff === true : false;
+/**
+ * APs are learners holding each other accountable, so only learners can be
+ * one - including the learners who happen to carry a secretary's or an
+ * admin's job. Secretaries almost always are learners; a learner admin is by
+ * definition. Guides and staff admins never are.
+ */
+export function canBePartner(person: { role: string; learnerAdmin: boolean }): boolean {
+  return (
+    person.role === "learner" ||
+    person.role === "secretary" ||
+    (person.role === "admin" && person.learnerAdmin)
+  );
 }
 
-/** Who can be put in a group: learners in this install's reach, plus staff if allowed. */
-async function candidates(runtime: Runtime, includeStaff: boolean): Promise<PartnerCandidate[]> {
+/** Who can be put in a group: learners (in any of the forms above) in this install's reach. */
+async function candidates(runtime: Runtime): Promise<PartnerCandidate[]> {
   const everyone = await db
-    .select({ id: users.id, name: users.name, role: users.role, studioId: users.studioId })
+    .select({
+      id: users.id,
+      name: users.name,
+      role: users.role,
+      learnerAdmin: users.learnerAdmin,
+      studioId: users.studioId,
+    })
     .from(users)
     .where(and(eq(users.academyId, runtime.academyId), eq(users.active, true)));
   const installStudio = runtime.install.install.studioId;
@@ -99,9 +113,9 @@ async function candidates(runtime: Runtime, includeStaff: boolean): Promise<Part
   const circle = await studioCircle(installStudio);
   const scope = runtime.scope;
   return everyone
-    .filter((person) => person.role === "learner" || (includeStaff && STAFF_ROLES.includes(person.role)))
+    .filter(canBePartner)
     .filter((person) => {
-      // Staff often sit outside any one studio; they can partner anywhere they're allowed.
+      // Someone not yet placed in a studio can partner anywhere they're allowed.
       if (person.studioId === null) return true;
       if (installStudio !== null) return circle.includes(person.studioId);
       if (!scope) return false;
@@ -152,11 +166,10 @@ export async function renderPartners(
   const user = runtime.user;
   const manager = canManagePartners(runtime, def);
   const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000);
-  const [groupRows, checkinRows, goalRows, staff] = await Promise.all([
+  const [groupRows, checkinRows, goalRows] = await Promise.all([
     rows(runtime, def, "groups"),
     rows(runtime, def, "checkins", since),
     rows(runtime, def, "goals", since),
-    allowStaff(runtime, def),
   ]);
   const groups = groupRows.map((row) => groupView(runtime, row));
   const mine = user ? groups.find((group) => group.active && group.members.some((m) => m.id === user.id)) ?? null : null;
@@ -196,9 +209,7 @@ export async function renderPartners(
     goals,
     manage: manager
       ? {
-          allowStaff: staff,
-          canToggleStaff: user?.role === "admin",
-          candidates: await candidates(runtime, staff),
+          candidates: await candidates(runtime),
           groups: groups.filter((group) => group.active || (group.endedAt ?? "") >= recentCutoff),
         }
       : null,
@@ -211,21 +222,6 @@ export async function renderPartners(
 
 function key(members: number[]): string {
   return [...members].sort((a, b) => a - b).join(",");
-}
-
-export async function setAllowStaff(runtime: Runtime, def: PartnersDef, allow: boolean, actorId: number) {
-  await db.transaction(async (tx) => {
-    await lock(tx, runtime, def);
-    await tx.delete(taconRecords).where(rowsQuery(runtime, def, "config"));
-    await tx.insert(taconRecords).values({
-      academyId: runtime.academyId,
-      installId: runtime.install.install.id,
-      store: partnersStore(def.name, "config"),
-      createdByType: "user",
-      createdBy: actorId,
-      data: { allowStaff: allow },
-    });
-  });
 }
 
 /**
@@ -252,15 +248,12 @@ export async function savePairings(
       seen.add(id);
     }
   }
-  const staff = await allowStaff(runtime, def);
-  const eligible = new Map((await candidates(runtime, staff)).map((person) => [person.id, person]));
+  const eligible = new Map((await candidates(runtime)).map((person) => [person.id, person]));
   for (const id of seen) {
     if (!eligible.has(id)) {
       const name = runtime.people.get(id) ?? "Someone";
       throw new PartnersError(
-        staff
-          ? `${name} can't be paired in this install.`
-          : `${name} can't be paired. Only learners can, unless an admin lets staff be partners.`,
+        `${name} can't be an AP here. APs are learners, secretaries and learner admins in this Tac-On's studio.`,
       );
     }
   }

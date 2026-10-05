@@ -14,7 +14,6 @@ import {
   saveCheckin,
   saveGoals,
   savePairings,
-  setAllowStaff,
   uploadShot,
 } from "./partners";
 
@@ -40,14 +39,21 @@ test("accountability partners: pairings, goals, check-ins and screenshot privacy
     }).returning();
     academyId = academy.id;
     const [studio] = await db.insert(studios).values({ academyId, name: "Studio", slug: `ap-${key}` }).returning();
-    const person = async (name: string, role: "admin" | "guide" | "learner", studioId: number | null) => {
+    const person = async (
+      name: string,
+      role: "admin" | "guide" | "secretary" | "learner",
+      studioId: number | null,
+      learnerAdmin = false,
+    ) => {
       const [row] = await db.insert(users).values({
-        academyId: academyId!, studioId, email: `${name.replace(/\s/g, "")}-${key}@partners.invalid`, name, role,
+        academyId: academyId!, studioId, email: `${name.replace(/\s/g, "")}-${key}@partners.invalid`, name, role, learnerAdmin,
       }).returning();
       return row;
     };
     const admin = await person("Ada Admin", "admin", null);
     const guide = await person("Gus Guide", "guide", null);
+    const secretary = await person("Sal Secretary", "secretary", studio.id);
+    const learnerAdmin = await person("Lou Learner Admin", "admin", studio.id, true);
     const [a, b, c, d] = await Promise.all(
       ["Ana", "Ben", "Cam", "Dee"].map((name) => person(name, "learner", studio.id)),
     );
@@ -67,7 +73,7 @@ test("accountability partners: pairings, goals, check-ins and screenshot privacy
       academyId, studioId: studio.id, taconId: tacon.id, versionId: version.id, installedBy: admin.id,
     }).returning();
 
-    const everyone = [admin, guide, a, b, c, d];
+    const everyone = [admin, guide, secretary, learnerAdmin, a, b, c, d];
     const runtimeFor = (user: typeof admin): Runtime => ({
       academyId,
       user,
@@ -88,24 +94,25 @@ test("accountability partners: pairings, goals, check-ins and screenshot privacy
     // The first screen: nothing paired, the admin manages, a learner waits.
     const adminView = await renderPartners(runtimeFor(admin), widget, 0);
     assert.ok(adminView?.manage);
-    assert.deepEqual(adminView.manage.candidates.map((p) => p.name), ["Ana", "Ben", "Cam", "Dee"]);
-    assert.equal(adminView.manage.canToggleStaff, true);
+    // Learners, secretaries and learner admins can be APs; guides and staff admins can't.
+    assert.deepEqual(
+      adminView.manage.candidates.map((p) => p.name),
+      ["Ana", "Ben", "Cam", "Dee", "Lou Learner Admin", "Sal Secretary"],
+    );
     const learnerView = await renderPartners(runtimeFor(a), widget, 0);
     assert.equal(learnerView?.manage, null);
     assert.equal(learnerView?.group, null);
-    assert.ok((await renderPartners(runtimeFor(guide), widget, 0))?.manage?.canToggleStaff === false);
 
     // Pairing rules.
     await assert.rejects(() => savePairings(runtimeFor(admin), def, [[a.id, b.id], [b.id, c.id]], admin.id), /more than one group/);
-    await assert.rejects(() => savePairings(runtimeFor(admin), def, [[a.id, admin.id]], admin.id), /Only learners/);
+    await assert.rejects(() => savePairings(runtimeFor(admin), def, [[a.id, admin.id]], admin.id), /can't be an AP/);
+    await assert.rejects(() => savePairings(runtimeFor(admin), def, [[a.id, guide.id]], admin.id), /can't be an AP/);
     await assert.rejects(() => savePairings(runtimeFor(admin), def, [[a.id, b.id, c.id, d.id]], admin.id), /at most three/);
-    await setAllowStaff(runtimeFor(admin), def, true, admin.id);
-    const staffView = await renderPartners(runtimeFor(admin), widget, 0);
-    assert.ok(staffView?.manage?.candidates.some((p) => p.id === admin.id));
-    await setAllowStaff(runtimeFor(admin), def, false, admin.id);
+    const learnerStaff = await savePairings(runtimeFor(admin), def, [[secretary.id, learnerAdmin.id]], admin.id);
+    assert.deepEqual(learnerStaff, { kept: 0, started: 1, ended: 0 });
 
     let result = await savePairings(runtimeFor(admin), def, [[a.id, b.id], [c.id, d.id]], admin.id);
-    assert.deepEqual(result, { kept: 0, started: 2, ended: 0 });
+    assert.deepEqual(result, { kept: 0, started: 2, ended: 1 });
 
     // Goals and a check-in.
     const monday = weekStart(today);
