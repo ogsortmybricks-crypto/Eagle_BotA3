@@ -20,3 +20,6 @@ successful published build querying fields absent from both databases.
 apply safe missing changes in development, then ask the user to republish using
 schema synchronization without overwriting production data. Do not add
 production migration scripts or startup-time schema changes.
+When schema errors recur, validate all declared tables and columns and compare
+the full development/production column sets before delivery, rather than
+checking only the field named in the latest error.
