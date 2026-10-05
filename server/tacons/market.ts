@@ -41,8 +41,9 @@ export function marketInstallCompatible(def: MarketDef, studioId: number | null)
   return !marketRequiresAcademyInstall(def) || studioId === null;
 }
 
+/** Stores the built-in engines (`market`, `partners`) own. */
 export function isReservedMarketStore(storeName: string): boolean {
-  return storeName.startsWith("__market_");
+  return storeName.startsWith("__");
 }
 
 function store(def: MarketDef, kind: MarketKind): string {

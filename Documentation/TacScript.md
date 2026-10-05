@@ -40,6 +40,7 @@ tacon hero-bucks {          # lowercase letters, numbers and hyphens
   panel ...                  # cards on Eagle Bot's own pages
   position ...               # positions on the Positions page, and their holder's desk
   market ...                 # built-in points ledger, catalog and safe purchases
+  partners ...               # built-in accountability partners and check-ins
   when ...                   # things that happen by themselves
 
   provides entry, balance    # what other Tac-Ons may read
@@ -280,6 +281,50 @@ turning it off preserves them.
 
 This syntax needs the updated Eagle Bot market engine. It cannot compile on
 older versions.
+
+---
+
+## `partners` — accountability partners
+
+Declare the partners at the top level, then show them on a page:
+
+```
+partners ap {
+  title "Accountability Partners"
+  core "Math", "Reading"                              # goal + progress at each check-in
+  evidence "Writers' Workshop", "Civilization", "Quest"   # screenshots + notes
+  required 3          # distinct days a week to check in on each partner (1-7)
+  due friday          # one of them must be this day; `due none` for no rule
+  trios true          # allow groups of three
+  managers admin, guide   # who sets the pairings; roles or your own positions
+}
+
+page partners {
+  title "My AP"
+  partners ap
+}
+```
+
+The widget shows each person what fits them:
+
+- **Managers** get a *Pairings* screen — columns AP 1, AP 2 (and AP 3 for
+  trios), a dropdown per seat, and *Pair the rest randomly* — plus a *This week*
+  overview of every group's check-ins, with the screenshots. A group's standing
+  is its weakest link. Pairings can change at any time; ending a pairing keeps
+  its history. Until there are pairings, managers land on the Pairings screen.
+- **Admins** also decide whether admins and guides can be paired. Off by default.
+- **Partners** get a dashboard with a *You* tab — this week's calendar of their
+  check-ins on each partner, their own weekly goals, and what their partner
+  recorded about them — and a tab per partner holding the check-in form.
+
+A check-in is recorded by the partner doing the checking, for today only.
+Checking in again the same day updates it, so it still counts once. Only your
+current partner can be checked on, only your own uploads can be attached, and
+screenshots are visible to the group and its managers, nobody else. Weeks run
+Monday to Sunday on the viewer's own calendar.
+
+Like `market`, the records are private to the built-in engine: ordinary forms,
+lists and reactions can't read or change them.
 
 ---
 

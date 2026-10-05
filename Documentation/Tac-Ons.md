@@ -83,6 +83,13 @@ for a source package using 100 points per Eagle Buck and a maximum balance of
 10 Eagle Bucks, with learner purchases and a Shopkeeper log. The package is not
 automatically published or installed.
 
+Accountability partners are supported by the built-in `partners` declaration.
+See [`built-tacons/accountability-partners`](../built-tacons/accountability-partners/)
+for a package where guides pair learners (or make trios), and partners check in
+at least three days a week, Friday included, with goals for Math and Reading and
+screenshots for Writers' Workshop, Civilization and Quest. It is not
+automatically published or installed either.
+
 ### Positions a Tac-On adds
 
 Some Tac-Ons add a position. A points-economy Tac-On, for example, might add a

@@ -17,7 +17,7 @@ import {
 
 export const taconMarketRouter = Router();
 
-function marketLocation(location: { page?: string; panel?: string; position?: string }) {
+export function marketLocation(location: { page?: string; panel?: string; position?: string }) {
   return Number(Boolean(location.page)) + Number(Boolean(location.panel)) + Number(Boolean(location.position)) === 1;
 }
 
@@ -25,7 +25,7 @@ function ownerAudience(owner: PageDef | PanelDef | PositionDef): string[] {
   return "showTo" in owner ? owner.showTo : [positionAudience(owner.name)];
 }
 
-function findMarketWidget(
+export function findMarketWidget(
   manifest: Manifest,
   location: { page?: string; panel?: string; position?: string },
   index: number,
@@ -42,7 +42,7 @@ function findMarketWidget(
   return widget ? { widget, audience: ownerAudience(owner) } : null;
 }
 
-const marketLocationShape = z.object({
+export const marketLocationShape = z.object({
   page: z.string().max(60).optional(),
   panel: z.string().max(60).optional(),
   position: z.string().max(60).optional(),

@@ -59,9 +59,11 @@ import {
   marketRequiresAcademyInstall,
 } from "../tacons/market";
 import { taconMarketRouter } from "./tacon-market";
+import { taconPartnersRouter } from "./tacon-partners";
 
 export const taconsRouter = Router();
 taconsRouter.use(taconMarketRouter);
+taconsRouter.use(taconPartnersRouter);
 
 /* -------------------------------------------------------------------------- */
 /*  What this academy is running                                               */
@@ -333,7 +335,7 @@ taconsRouter.delete(
       .limit(1);
     if (!record) return res.status(404).json({ error: "That row is already gone." });
     if (isReservedMarketStore(record.store)) {
-      return res.status(403).json({ error: "Market records are immutable and cannot be removed here." });
+      return res.status(403).json({ error: "Built-in records can only be changed through their own widget." });
     }
 
     // Removal is only ever offered by a list that said who may remove, so the

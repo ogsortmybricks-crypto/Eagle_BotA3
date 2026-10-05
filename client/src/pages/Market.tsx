@@ -380,6 +380,13 @@ export function TaconDetail({ slug }: { slug: string }) {
                     happens
                   </li>
                 ))}
+                {(manifest.partners ?? []).map((partners) => (
+                  <li key={`partners-${partners.name}`}>
+                    <span className="font-medium text-gray-800">{partners.title}</span> — accountability
+                    pairings set by {audienceLabel(partners.managers, manifest)}, with check-ins and
+                    screenshots its members and their guides can see
+                  </li>
+                ))}
                 {manifest.stores.map((store) => (
                   <li key={store.name}>
                     Keeps its own records: {store.label} ({store.fields.length} field

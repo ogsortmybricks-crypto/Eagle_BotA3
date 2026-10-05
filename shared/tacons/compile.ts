@@ -37,6 +37,7 @@ import {
   type HookEvent,
   type Manifest,
   type MarketDef,
+  type PartnersDef,
   type PageDef,
   type PanelDef,
   type PanelHost,
@@ -63,6 +64,7 @@ type Ctx = {
   /** Position names, collected up front so any `allow` can name one. */
   positions: Set<string>;
   markets: Map<string, MarketDef>;
+  partners: Map<string, PartnersDef>;
 };
 
 function error(ctx: Ctx, node: { line: number; column: number }, message: string) {
@@ -376,6 +378,67 @@ function compileMarket(ctx: Ctx, node: Node): MarketDef | null {
   return market;
 }
 
+const WEEKDAY_NAMES = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+
+function compilePartners(ctx: Ctx, node: Node): PartnersDef | null {
+  const name = text(node.args[0]);
+  if (!IDENTIFIER.test(name) || name.length > 48) {
+    error(ctx, node, "Partners need a one-word name, like `partners ap { ... }` (up to 48 characters).");
+    return null;
+  }
+  if (ctx.partners.has(name)) {
+    error(ctx, node, `There's already a partners block called "${name}".`);
+    return null;
+  }
+  const partners: PartnersDef = {
+    name,
+    title: "Accountability Partners",
+    core: ["Math", "Reading"],
+    evidence: [],
+    required: 3,
+    due: null,
+    trios: true,
+    managers: ["admin", "guide"],
+  };
+  const seen = new Set<string>();
+  for (const child of node.children) {
+    const keyword = child.keyword.toLowerCase();
+    if (seen.has(keyword)) error(ctx, child, `"${keyword}" is already set for these partners.`);
+    seen.add(keyword);
+    if (keyword === "title") partners.title = joined(child.args) || partners.title;
+    else if (keyword === "core" || keyword === "evidence") {
+      const subjects = words(child.args);
+      const unique = new Set(subjects.map((subject) => subject.toLowerCase()));
+      if (subjects.some((subject) => subject.length > 40) || unique.size !== subjects.length || subjects.length > 8) {
+        error(ctx, child, `List up to 8 different ${keyword} subjects, each under 40 characters.`);
+      } else partners[keyword] = subjects;
+    } else if (keyword === "required") {
+      const number = Number(joined(child.args));
+      if (!Number.isSafeInteger(number) || number < 1 || number > 7) {
+        error(ctx, child, "`required` is how many days a week to check in: a whole number from 1 to 7.");
+      } else partners.required = number;
+    } else if (keyword === "due") {
+      const day = joined(child.args).toLowerCase();
+      if (day === "none") partners.due = null;
+      else if (!WEEKDAY_NAMES.includes(day)) error(ctx, child, "`due` takes a day of the week, like `due friday`, or `due none`.");
+      else partners.due = WEEKDAY_NAMES.indexOf(day);
+    } else if (keyword === "trios") {
+      partners.trios = flag(child);
+    } else if (keyword === "managers") {
+      const managers = audiences(ctx, child);
+      if (managers.length === 0) error(ctx, child, "Name who sets the pairings, like `managers admin, guide`.");
+      else partners.managers = managers;
+    } else {
+      error(ctx, child, `"${child.keyword}" doesn't belong in partners. Use title, core, evidence, required, due, trios or managers.`);
+    }
+  }
+  if (partners.core.length + partners.evidence.length === 0) {
+    error(ctx, node, "Partners need something to check: add `core` or `evidence` subjects.");
+  }
+  ctx.partners.set(name, partners);
+  return partners;
+}
+
 function compileWidget(ctx: Ctx, node: Node): Widget | null {
   const keyword = node.keyword.toLowerCase();
 
@@ -452,11 +515,23 @@ function compileWidget(ctx: Ctx, node: Node): Widget | null {
       return { kind: "market", market };
     }
 
+    case "partners": {
+      const partners = text(node.args[0]);
+      if (!ctx.partners.has(partners)) {
+        error(ctx, node, `There are no partners called "${partners}". Declare them at the top level first.`);
+        return null;
+      }
+      if (node.children.length > 0 || node.args.length !== 1) {
+        error(ctx, node, "Show partners with `partners <name>`; configure them in the top-level partners block.");
+      }
+      return { kind: "partners", partners };
+    }
+
     default:
       error(
         ctx,
         node,
-        `"${node.keyword}" isn't something a page can show. Use note, heading, stat, list, form, button, market or divider.`,
+        `"${node.keyword}" isn't something a page can show. Use note, heading, stat, list, form, button, market, partners or divider.`,
       );
       return null;
   }
@@ -902,6 +977,7 @@ export function compile(source: string): CompileResult {
     needs: new Set(),
     positions: new Set(),
     markets: new Map(),
+    partners: new Map(),
   };
 
   const roots = parsed.nodes.filter((node) => node.keyword.toLowerCase() === "tacon");
@@ -952,6 +1028,7 @@ export function compile(source: string): CompileResult {
     hooks: [],
     computes: [],
     markets: [],
+    partners: [],
   };
 
   // Two passes: stores and `use` first, so a page written above the store it
@@ -1001,6 +1078,13 @@ export function compile(source: string): CompileResult {
     }
   }
 
+  // After every position is known, so `managers` can name one declared below.
+  for (const node of root.children) {
+    if (node.keyword.toLowerCase() !== "partners") continue;
+    const partners = compilePartners(ctx, node);
+    if (partners) manifest.partners!.push(partners);
+  }
+
   for (const node of root.children) {
     const keyword = node.keyword.toLowerCase();
     const value = joined(node.args);
@@ -1010,6 +1094,7 @@ export function compile(source: string): CompileResult {
       case "use":
       case "setting":
       case "market":
+      case "partners":
         break;
 
       case "name":
@@ -1101,7 +1186,7 @@ export function compile(source: string): CompileResult {
         error(
           ctx,
           node,
-          `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, market, page, panel, position, when, ask, needs, provides or use.`,
+          `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, market, partners, page, panel, position, when, ask, needs, provides or use.`,
         );
     }
   }

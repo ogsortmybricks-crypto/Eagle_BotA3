@@ -207,6 +207,30 @@ export type MarketDef = {
 
 export type MarketWidget = { kind: "market"; market: string };
 
+/**
+ * Built-in accountability partners: pairings (or trios) of learners who check
+ * in on each other through the week. Like `market`, the storage and rules live
+ * in Eagle Bot; the Tac-On only decides the subjects and the weekly minimum.
+ */
+export type PartnersDef = {
+  name: string;
+  title: string;
+  /** Core skills checked as goal + progress, e.g. Math, Reading. */
+  core: string[];
+  /** Work checked with screenshots and notes, e.g. Writers' Workshop. */
+  evidence: string[];
+  /** Distinct days per week each partner must check in on each counterpart. */
+  required: number;
+  /** A weekday (0 = Sunday ... 6 = Saturday) that must be one of those days, or null. */
+  due: number | null;
+  /** Whether groups of three are allowed. */
+  trios: boolean;
+  /** Roles or positions that may set the pairings. */
+  managers: string[];
+};
+
+export type PartnersWidget = { kind: "partners"; partners: string };
+
 export type Widget =
   | NoteWidget
   | HeadingWidget
@@ -215,7 +239,8 @@ export type Widget =
   | ListWidget
   | FormWidget
   | ButtonWidget
-  | MarketWidget;
+  | MarketWidget
+  | PartnersWidget;
 
 /* -------------------------------------------------------------------------- */
 /*  Pages, panels, hooks, computed values                                      */
@@ -357,6 +382,8 @@ export type Manifest = {
   computes: ComputeDef[];
   /** Absent on older manifests. */
   markets?: MarketDef[];
+  /** Absent on older manifests. */
+  partners?: PartnersDef[];
 };
 
 /* -------------------------------------------------------------------------- */

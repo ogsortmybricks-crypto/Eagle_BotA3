@@ -1,0 +1,27 @@
+# Requires Eagle Bot's built-in accountability-partners extension.
+# Partners check in on each other at least 3 days a week, one of them Friday.
+tacon accountability-partners {
+  name "Accountability Partners"
+  version 1.0.0
+  about "Pair learners up, keep a record of every AP check-in, and see who's really holding who accountable."
+  icon users
+  category tracking
+
+  partners ap {
+    title "Accountability Partners"
+    core "Math", "Reading"
+    evidence "Writers' Workshop", "Civilization", "Quest"
+    required 3
+    due friday
+    trios true
+    managers admin, guide
+  }
+
+  page partners {
+    title "My AP"
+    icon users
+    nav true
+    subtitle "Check in on your partner, show the work, and keep each other honest."
+    partners ap
+  }
+}
