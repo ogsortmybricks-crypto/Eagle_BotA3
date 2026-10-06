@@ -220,6 +220,8 @@ export const users = pgTable(
      * while `role` is admin; changing the role away clears it.
      */
     learnerAdmin: boolean("learner_admin").notNull().default(false),
+    /** Recurring attendance is an account preference, reusable by Tac-Ons. */
+    attendanceDays: jsonb("attendance_days").$type<number[]>().notNull().default([1, 2, 3, 4, 5]),
     active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     lastLoginAt: timestamp("last_login_at"),
@@ -240,6 +242,16 @@ export const verificationCodes = pgTable("user_verification_codes", {
   lockedUntil: timestamp("locked_until"),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+
+export const absences = pgTable("absences", {
+  id: serial("id").primaryKey(),
+  academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  day: varchar("day", { length: 10 }).notNull(),
+  kind: text("kind").$type<"sick" | "other">().notNull().default("sick"),
+  note: text("note"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, t => ({ personDayIdx: uniqueIndex("absences_user_day_idx").on(t.userId, t.day) }));
 
 export const invites = pgTable(
   "invites",

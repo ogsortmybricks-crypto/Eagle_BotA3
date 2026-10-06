@@ -1,0 +1,17 @@
+import { readFileSync } from "node:fs";
+import { academies, studios, taconInstalls, taconVersions, tacons, users } from "@shared/schema";
+import { compile } from "@shared/tacons";
+import { db } from "../../server/db";
+import { hashPassword } from "../../server/auth";
+const pw = await hashPassword("password123");
+const [academy] = await db.insert(academies).values({ name: "Repro", emailDomain: "repro.test", palette: { primary: "#000000", accent: "#ffffff", surface: "#ffffff" } }).returning();
+const [studio] = await db.insert(studios).values({ academyId: academy.id, name: "Studio", slug: "studio" }).returning();
+const [admin] = await db.insert(users).values({ academyId: academy.id, email: "admin@repro.test", name: "Ada", role: "admin", passwordHash: pw, studioId: studio.id }).returning();
+for (const n of ["Ana","Ben","Cam","Dee"]) await db.insert(users).values({ academyId: academy.id, email: `${n}@repro.test`.toLowerCase(), name: n, role: "learner", studioId: studio.id });
+const source = readFileSync("built-tacons/accountability-partners/accountability-partners.tacon", "utf8");
+const c = compile(source); if (!c.ok) throw new Error("compile");
+const [t] = await db.insert(tacons).values({ slug: "ap", name: "AP", academyId: academy.id, authorUserId: admin.id }).returning();
+const [v] = await db.insert(taconVersions).values({ taconId: t.id, version: "1.0.0", source, manifest: c.manifest as any }).returning();
+const [i] = await db.insert(taconInstalls).values({ academyId: academy.id, studioId: studio.id, taconId: t.id, versionId: v.id, installedBy: admin.id }).returning();
+console.log(JSON.stringify({ install: i.id }));
+process.exit(0);

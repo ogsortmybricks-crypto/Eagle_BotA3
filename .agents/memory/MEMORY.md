@@ -4,3 +4,4 @@
 - [Tac-On portal imports](tacon-portal-imports.md) — folder upload is the primary publishing path; verify live compiler compatibility rather than bypassing errors.
 - [Browser testing fallback](browser-testing-fallback.md) — when the testing subagent is unavailable, existing Chromium plus CDP can verify protected UI without app auth bypasses.
 - [AP workspace rules](ap-workspace-rules.md) — package-owned AP features, core account codes, learner-admin planning, preserved history, and explicit attendance.
+- [Git state after approval](git-merge-state.md) — operation state can change while waiting; recheck markers, branch history and worktree before repairs.

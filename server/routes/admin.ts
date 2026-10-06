@@ -15,6 +15,7 @@ import {
   ROLES,
 } from "@shared/schema";
 import { publicUser, requirePermission } from "../auth";
+import { clearVerifyCode } from "../personal";
 import { logActivity } from "../activity";
 import { inviteEmail, sendMail } from "../mailer";
 import { aiConfigured, emailConfigured, env } from "../env";
@@ -213,6 +214,19 @@ adminRouter.patch("/users/:id", requirePermission("users.manage"), async (req, r
 });
 
 /* --------------------------------- invites --------------------------------- */
+/** Account confirmation codes can only be reset, never recovered. */
+adminRouter.delete("/users/:id/verify-code", requirePermission("users.manage"), async (req, res) => {
+  const [person] = await db.select().from(users)
+    .where(and(eq(users.id, Number(req.params.id)), eq(users.academyId, req.user!.academyId))).limit(1);
+  if (!person) return res.status(404).json({ error: "That person isn't in this academy." });
+  await clearVerifyCode(person.id);
+  await logActivity({
+    academyId: req.user!.academyId, studioId: person.studioId,
+    actorUserId: req.user!.id, action: "user.verify_code_cleared", entityType: "user",
+    entityId: person.id, summary: `${req.user!.name} cleared ${person.name}'s account confirmation code.`,
+  });
+  res.json({ ok: true });
+});
 
 adminRouter.get("/invites", requirePermission("invites.send"), async (req, res) => {
   const academyId = req.user!.academyId;

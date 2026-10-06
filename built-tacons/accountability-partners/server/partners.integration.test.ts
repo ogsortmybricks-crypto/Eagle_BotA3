@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { eq } from "drizzle-orm";
-import { academies, studios, taconInstalls, taconVersions, tacons, users } from "@shared/schema";
+import { absences, academies, studios, taconInstalls, taconVersions, tacons, taconRecords, users } from "@shared/schema";
 import { compile } from "@shared/tacons";
 import { addDays, weekStart } from "../shared/partners";
 import { db } from "../../../server/db";
@@ -14,6 +14,8 @@ import { certifyApAssignment, readPublicApCertificate, renderApWorkspace, revoke
 import { addRecord, renderPage, type Runtime } from "../../../server/tacons/runtime";
 import type { Manifest } from "@shared/tacons";
 import { partnerWidget } from "../shared/definition";
+import { lookupVerification } from "./legacy-work";
+import { attendanceFor, checkVerifyCode, setVerifyCode, clearVerifyCode } from "../../../server/personal";
 import {
   readShot,
   renderPartners,
@@ -125,6 +127,30 @@ test("accountability partners: pairings, goals, check-ins and screenshot privacy
     const oldRuntime = { ...newRuntime, install: { ...newRuntime.install, manifest: legacyManifest } };
     const oldPage = await renderPage(oldRuntime, legacyManifest.pages[0]);
     assert.deepEqual(oldPage.widgets, newPage.widgets);
+
+    // Incoming compatibility APIs share the core credential authority.
+    await setVerifyCode(a.id, "246810");
+    assert.equal(await hasVerificationCode(a.id), true);
+    await checkVerifyCode(a.id, "246810");
+    await assert.rejects(() => checkVerifyCode(a.id, "000000"), /doesn't match/);
+    await clearVerifyCode(a.id);
+    assert.equal(await hasVerificationCode(a.id), false);
+    await db.insert(absences).values({ academyId: academyId!, userId: a.id, day: today, kind: "sick", note: "Private absence" });
+    const attendance = await attendanceFor([a.id], today, today);
+    assert.deepEqual(attendance.get(a.id)?.days, [1, 2, 3, 4, 5]);
+    assert.equal(attendance.get(a.id)?.absences[0]?.day, today);
+    const oldToken = randomUUID().replaceAll("-", "").slice(0, 24);
+    await db.insert(taconRecords).values({
+      academyId: academyId!, installId: install.id, store: "__partners_ap_completions",
+      createdByType: "user", createdBy: b.id,
+      data: { token: oldToken, status: "confirmed", excellence: true,
+        personId: a.id, confirmerId: b.id, title: "Legacy work", category: "Quest",
+        week: weekStart(today), confirmedAt: new Date().toISOString(),
+        apNotes: "Private review note", notes: "Private work evidence" },
+    });
+    const oldCertificate = await lookupVerification(oldToken);
+    assert.equal(oldCertificate?.assignment, "Legacy work");
+    assert.equal(JSON.stringify(oldCertificate).includes("Private"), false);
 
     // Pairing rules.
     await assert.rejects(() => savePairings(runtimeFor(admin), def, [[a.id, b.id], [b.id, c.id]], admin.id), /more than one group/);

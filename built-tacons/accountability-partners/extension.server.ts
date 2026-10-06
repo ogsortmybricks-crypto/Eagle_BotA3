@@ -4,8 +4,10 @@ import { EXTENSION_ID, partnerWidget } from "./shared/definition";
 import { renderPartners } from "./server/partners";
 import { taconPartnersRouter } from "./server/routes";
 import { readPublicApCertificate } from "./server/workspace";
+import { verifyRouter } from "./server/legacy-verification";
 
 const publicRoutes = Router();
+publicRoutes.use("/verify", verifyRouter);
 publicRoutes.get("/ap/verify/:token", async (req, res) => {
   res.setHeader("Cache-Control", "no-store");
   res.setHeader("X-Robots-Tag", "noindex, nofollow");

@@ -3,8 +3,9 @@ import { apiGet } from "@/lib/api";
 import { Banner, LoadingPage } from "@/components/ui";
 import type { ApPublicCertificate } from "../shared/workspace";
 
-export function ApVerification({ token: suppliedToken }: { token?: string }) {
+export function ApVerification({ token: suppliedToken, apiPath = "/ap/verify" }: { token?: string; apiPath?: string }) {
   const token = suppliedToken;
+  const requestKey = `${apiPath}/${token ?? ""}`;
   const [result, setResult] = useState<{ token: string; certificate: ApPublicCertificate | null; error: boolean } | null>(null);
 
   useEffect(() => {
@@ -13,12 +14,12 @@ export function ApVerification({ token: suppliedToken }: { token?: string }) {
       return;
     }
     let current = true;
-    setResult({ token, certificate: null, error: false });
-    apiGet<ApPublicCertificate>(`/ap/verify/${encodeURIComponent(token)}`)
-      .then((certificate) => current && setResult({ token, certificate, error: false }))
-      .catch(() => current && setResult({ token, certificate: null, error: true }));
+    setResult({ token: requestKey, certificate: null, error: false });
+    apiGet<ApPublicCertificate>(`${apiPath}/${encodeURIComponent(token)}`)
+      .then((certificate) => current && setResult({ token: requestKey, certificate, error: false }))
+      .catch(() => current && setResult({ token: requestKey, certificate: null, error: true }));
     return () => { current = false; };
-  }, [token]);
+  }, [token, apiPath, requestKey]);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -37,8 +38,8 @@ export function ApVerification({ token: suppliedToken }: { token?: string }) {
     };
   }, []);
 
-  const certificate = result && result.token === token ? result.certificate : null;
-  const error = Boolean(result && result.token === token && result.error);
+  const certificate = result && result.token === requestKey ? result.certificate : null;
+  const error = Boolean(result && result.token === requestKey && result.error);
   if (!token || error) {
     return <main className="min-h-[100dvh] bg-amber-50 px-5 py-16"><div className="mx-auto max-w-xl rounded-2xl border border-amber-200 bg-white p-8 shadow-sm">
       <p className="text-xs font-semibold uppercase tracking-[.18em] text-amber-800">Acton learning record</p>
@@ -61,7 +62,7 @@ export function ApVerification({ token: suppliedToken }: { token?: string }) {
         <p className="mt-1 text-slate-600">{certificate.assignmentTitle} <span className="text-slate-400">·</span> {certificate.category}</p>
         <div className={`mt-7 rounded-2xl border p-5 ${certificate.excellence ? "border-amber-300 bg-amber-50" : "border-emerald-200 bg-emerald-50"}`}>
           <p className="font-semibold text-slate-900">{certificate.excellence ? "Reviewed and certified with excellence" : "Reviewed and certified as completed"}</p>
-          <p className="mt-1 text-sm text-slate-600">Completed {new Date(`${certificate.completedDate}T12:00:00`).toLocaleDateString()} · week of {new Date(`${certificate.week}T12:00:00`).toLocaleDateString()}</p>
+          <p className="mt-1 text-sm text-slate-600">{certificate.completedDate && <>Completed {new Date(`${certificate.completedDate}T12:00:00`).toLocaleDateString()} · </>}week of {new Date(`${certificate.week}T12:00:00`).toLocaleDateString()}</p>
         </div>
         <dl className="mt-7 grid gap-5 sm:grid-cols-2">
           <div><dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">Accountability partner</dt><dd className="mt-1 font-medium text-slate-900">{certificate.checkerName}</dd></div>

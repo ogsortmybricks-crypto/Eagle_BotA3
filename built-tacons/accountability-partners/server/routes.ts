@@ -95,6 +95,42 @@ function sendError(res: Response, error: unknown) {
 
 const base = "/view/:installId/partners/:name";
 
+// Incoming incremental pairing APIs use the same safe merge primitive.
+const addPairsShape = located({ groups: z.array(z.array(z.number().int().positive()).min(2).max(3)).max(500) });
+const endPairShape = located({ groupId: z.number().int().positive() });
+taconPartnersRouter.post(`${base}/pairs`, requirePermission("tacons.use"), async (req, res) => {
+  const parsed = addPairsShape.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Check the pairings and try again." });
+  try {
+    const access = await authorized(req, parsed.data, parsed.data.index);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+    const current = await renderPartners(access.runtime, { kind: "partners", partners: access.def.name }, parsed.data.index);
+    const result = await savePairings(access.runtime, access.def, parsed.data.groups, req.user!.id, {
+      mode: "merge", removedGroupIds: [], expectedGroupIds: current?.manage?.revision ?? [],
+    });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    if (error instanceof PartnersError) return res.status(400).json({ error: error.message });
+    return res.status(500).json({ error: "Couldn't create the pairings. Please try again." });
+  }
+});
+taconPartnersRouter.post(`${base}/pairs/end`, requirePermission("tacons.use"), async (req, res) => {
+  const parsed = endPairShape.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a pair to end." });
+  try {
+    const access = await authorized(req, parsed.data, parsed.data.index);
+    if (!access.ok) return res.status(access.status).json({ error: access.error });
+    const current = await renderPartners(access.runtime, { kind: "partners", partners: access.def.name }, parsed.data.index);
+    const result = await savePairings(access.runtime, access.def, [], req.user!.id, {
+      mode: "merge", removedGroupIds: [parsed.data.groupId], expectedGroupIds: current?.manage?.revision ?? [],
+    });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    if (error instanceof PartnersError) return res.status(400).json({ error: error.message });
+    return res.status(500).json({ error: "Couldn't end this pairing. Please try again." });
+  }
+});
+
 taconPartnersRouter.post(`${base}/pairings`, requirePermission("tacons.use"), async (req, res) => {
   const parsed = pairingsSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Check the pairings and try again." });

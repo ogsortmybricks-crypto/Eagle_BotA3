@@ -10,6 +10,10 @@ const extension: ClientExtension = {
   ),
   publicPages: [
     {
+      path: "/verify/:token",
+      render: params => <ApVerification token={params.token} apiPath="/verify" />,
+    },
+    {
       path: "/ap/verify/:token",
       render: (params) => <ApVerification token={params.token} />,
     },

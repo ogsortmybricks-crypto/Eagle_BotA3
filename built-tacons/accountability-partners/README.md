@@ -1,5 +1,11 @@
 # Package ownership
 
+The incoming older submission/certification implementation is retained in
+`server/legacy-*` and `shared/legacy-*`. The current workspace remains the primary
+UI. Older `/verify/...` links remain supported by this package; account settings
+and confirmation codes use shared core services rather than a second credential
+store. The seed helper is package-owned and is never run automatically.
+
 All AP implementation lives in this folder: the TacScript compiler extension,
 shared contracts and helpers, server rules and routes, React screens, public
 verification page, and regression tests. Eagle Bot Main only supplies generic

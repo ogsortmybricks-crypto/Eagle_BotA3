@@ -14,6 +14,7 @@ import { profilesRouter } from "./profiles";
 import { taconsRouter } from "./tacons";
 import { portalRouter } from "./portal";
 import { registerPublicExtensionRoutes } from "../tacons/extensions";
+import { meRouter } from "./me";
 
 export const apiRouter = Router();
 
@@ -33,6 +34,7 @@ apiRouter.use("/auth", authRouter);
 apiRouter.use("/portal", portalRouter);
 
 // Everything else needs a session.
+apiRouter.use("/me", requireAuth, meRouter);
 apiRouter.use("/studios", requireAuth, studiosRouter);
 apiRouter.use("/settings", requireAuth, settingsRouter);
 apiRouter.use("/wiki", requireAuth, wikiRouter);
