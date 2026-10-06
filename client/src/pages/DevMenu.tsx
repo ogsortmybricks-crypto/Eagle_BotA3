@@ -20,6 +20,7 @@ import {
   CircleAlert,
   Code2,
   FileCode,
+  FolderOpen,
   Plus,
   Rocket,
   Upload,
@@ -37,6 +38,7 @@ import {
   Stat,
 } from "@/components/ui";
 import { compile, type Diagnostic, type Manifest } from "@shared/tacons";
+import { TaconPackagePicker } from "@/tacons/TaconPackagePicker";
 
 type MyTacon = {
   id: number;
@@ -137,6 +139,9 @@ export function DevMenu() {
         )}
         <button onClick={() => setEditing("new")} className="btn-primary">
           <Plus className="h-4 w-4" /> New Tac-On
+        </button>
+        <button onClick={() => setEditing("new")} className="btn-secondary">
+          <FolderOpen className="h-4 w-4" /> Upload folder
         </button>
       </PageHeader>
 
@@ -256,6 +261,8 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
   const [visibility, setVisibility] = useState(tacon?.visibility ?? "draft");
   const [error, setError] = useState<string | null>(null);
   const [serverDiagnostics, setServerDiagnostics] = useState<Diagnostic[]>([]);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importPending, setImportPending] = useState(false);
 
   // The compiler is in `shared/`, so the editor checks the exact same rules the
   // publish endpoint will. No round trip, and no chance of the two disagreeing.
@@ -302,6 +309,7 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
   });
 
   const manifest: Manifest | null = checked.ok ? checked.manifest : null;
+  const slugMismatch = !!tacon && !!manifest && manifest.slug !== tacon.slug;
 
   return (
     <Modal
@@ -326,9 +334,19 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
           </button>
           <button
             onClick={() => publish.mutate()}
-            disabled={publish.isPending || !checked.ok}
+            disabled={publish.isPending || importPending || !!importError || !checked.ok || slugMismatch}
             className="btn-primary"
-            title={checked.ok ? undefined : "Fix the errors first"}
+            title={
+              importError
+                ? "Clear the package import error first"
+                : importPending
+                  ? "Wait for the package source to finish reading"
+                  : slugMismatch
+                    ? "Restore this Tac-On's slug or create a new Tac-On"
+                    : checked.ok
+                      ? undefined
+                      : "Fix the errors first"
+            }
           >
             {publish.isPending ? <Spinner /> : <Rocket className="h-4 w-4" />} Publish
             {manifest ? ` ${manifest.version}` : ""}
@@ -338,6 +356,36 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
     >
       <div className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
+        {importError && (
+          <div
+            className="flex flex-col gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900 sm:flex-row sm:items-center sm:justify-between"
+            role="alert"
+          >
+            <span>
+              {importError} The current source has been kept; publishing is blocked until this is
+              cleared or a package is successfully selected.
+            </span>
+            <button
+              type="button"
+              className="btn-secondary btn-sm shrink-0"
+              onClick={() => setImportError(null)}
+            >
+              Clear import error
+            </button>
+          </div>
+        )}
+
+        <TaconPackagePicker
+          blocked={publish.isPending}
+          onReadingChange={setImportPending}
+          onImported={(result) => {
+            setSource(result.source);
+            setImportError(null);
+            setError(null);
+            publish.reset();
+          }}
+          onImportError={setImportError}
+        />
 
         <div className="grid gap-4 lg:grid-cols-[1.35fr_1fr]">
           <div>
@@ -348,6 +396,7 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
               id="source"
               spellCheck={false}
               value={source}
+              disabled={importPending || publish.isPending}
               onChange={(event) => setSource(event.target.value)}
               className="input min-h-[360px] font-mono text-[13px] leading-relaxed"
             />
@@ -406,6 +455,13 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
                   )}
                 </ul>
               </div>
+            )}
+            {slugMismatch && (
+              <Banner tone="error" title="This source belongs to a different Tac-On">
+                This editor is for <code>{tacon.slug}</code>, but the source declares{" "}
+                <code>{manifest.slug}</code>. Change the source slug back to{" "}
+                <code>{tacon.slug}</code>, or use New Tac-On to publish it as a separate listing.
+              </Banner>
             )}
           </div>
         </div>

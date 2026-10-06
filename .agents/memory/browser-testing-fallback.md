@@ -19,3 +19,7 @@ installing dependencies. Authenticate temporary test accounts through the real
 login endpoint, and clean up only their own accounts, sessions and fixtures.
 Running Python may auto-add a Python module to `.replit`; remove that extra test
 runtime when finished if the application itself is still Node-only.
+
+**Cleanup:** Wait for Chromium to exit before deleting its profile directory,
+and allow deletion retries. Removing the profile immediately after SIGTERM can
+raise ENOTEMPTY even when all browser assertions passed.
