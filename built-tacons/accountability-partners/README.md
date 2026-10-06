@@ -1,4 +1,64 @@
+# Package ownership
+
+All AP implementation lives in this folder: the TacScript compiler extension,
+shared contracts and helpers, server rules and routes, React screens, public
+verification page, and regression tests. Eagle Bot Main only supplies generic
+extension dispatch plus reusable services (accounts, permissions, database
+records, studio scope, and the account confirmation-code service).
+
+`extension.json` declares the three trusted build entries. Running
+`npm run tacons:generate` discovers checked-in packages and generates the engine
+registries in `built-tacons/`. It also runs automatically before development,
+type checks and production builds. Adding another checked-in package doesn't
+require adding feature-specific imports to the main compiler, app or router.
+
+Uploaded folders still publish declarative TacScript, not executable code.
+Uploaded TypeScript/JavaScript is never loaded by the server. Package extensions
+must be checked into `built-tacons` and included in a published engine build.
+
+The package accepts older installed manifests and keeps the existing record
+names and `/ap/verify/...` URLs. No reinstall or data conversion is required.
+Publish the engine update, then use the normal Tac-On update flow for the new
+1.2.0 source; do not uninstall an existing AP installation.
+
 # Accountability Partners
+
+## Weekly learning workspace
+
+Admins, including learner admins, plan weekly assignments in Writers' Workshop,
+Civilization, Quest, and custom categories. Core goals and existing check-ins stay
+available. Open **Learning workspace → Weekly work** to plan or review assignments.
+
+Learners review a current partner's actual work, choose Completed or Excellence,
+add an evidence reference and optional notes, and confirm with their own private
+six-digit code. Set or change that code on your own Eagle Bot profile. Codes are
+account-level, stored only as password hashes, never shown to partners or staff,
+and locked for 15 minutes after five incorrect attempts. An admin can reset a
+forgotten code; the learner then sets a new code themselves.
+
+Each certification gets a public verification link suitable for pasting into
+Journey Tracker. It displays only the assignment, learner, certifying AP,
+academy, dates, and completion/excellence status. Private evidence, notes,
+attendance and codes are not public. Completed without Excellence never claims
+Excellence. Certificates can be revoked by their reviewer or an admin. A
+certified assignment's wording cannot be changed without archiving it and
+creating a new assignment; links retain the original reviewed wording.
+
+**My AP settings** stores recurring attendance days, dated sick/other absences,
+and milestones. **Calendar** combines these with core goals, full check-ins, and
+certified work, either for one learner or their current AP group. **History
+folders** organizes original records by pair, year and month, including ended
+pairings. Learners see their own pair history; guides and admins see all pairs
+within this installation's scope.
+
+Pair saves merge new pairs into the active roster. Ending a pair is explicit,
+and a stale roster cannot overwrite somebody else's changes. Check-in and
+certification history survives re-pairing. Do not uninstall/reinstall to update:
+update the existing installation so its records remain attached.
+
+Development applies the account-code table with `npm run db:push`. For Replit's
+managed production database, publish the app after this update; publishing
+applies the development schema change to production.
 
 An installable Tac-On for the AP system. Source:
 [`accountability-partners.tacon`](./accountability-partners.tacon).
@@ -65,7 +125,7 @@ someone, or attach another person's upload.
 
 ## Publish and install
 
-1. Run the Eagle Bot engine with the built-in `partners` declaration.
+1. Run the Eagle Bot engine with this checked-in package extension registered.
 2. Paste the `.tacon` file into **Dev menu → New Tac-On** (or the dev portal for
    an official listing). Check that it compiles, then publish.
 3. Install it from **Tac-Ons → Market**, either in one studio or academy-wide.
@@ -84,7 +144,7 @@ npx tsx --test built-tacons/accountability-partners/compile.test.ts
 Database test, against an **isolated** development database only:
 
 ```sh
-NODE_ENV=development RUN_TACON_PARTNERS_DB_TESTS=true npx tsx --test server/tacons/partners.integration.test.ts
+NODE_ENV=development RUN_TACON_PARTNERS_DB_TESTS=true npx tsx --test built-tacons/accountability-partners/server/partners.integration.test.ts
 ```
 
 It creates a temporary academy and deletes it in `finally`.

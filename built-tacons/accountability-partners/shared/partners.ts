@@ -7,7 +7,7 @@
  * learner sees is the standing a guide sees.
  */
 
-export type PartnersStoreKind = "config" | "groups" | "goals" | "checkins" | "shots";
+export type PartnersStoreKind = "config" | "groups" | "goals" | "checkins" | "shots" | "categories" | "assignments" | "certificates" | "profiles";
 
 /** Reserved names cannot be declared as ordinary TacScript stores. */
 export function partnersStore(name: string, kind: PartnersStoreKind): string {

@@ -14,6 +14,7 @@ import {
   Spinner,
 } from "@/components/ui";
 import { StudioTag } from "@/components/StudioSwitcher";
+import { VerificationCodeSettings } from "@/components/VerificationCodeSettings";
 import { TaconPanels } from "@/pages/TaconPage";
 
 type StudioRow = {
@@ -183,6 +184,7 @@ type ProfileResponse = {
 export function Profile({ id }: { id: number }) {
   const [editing, setEditing] = useState(false);
   const formatDate = useDateFormat();
+  const { user } = useSession();
 
   const query = useQuery<ProfileResponse>({
     queryKey: ["profile", id],
@@ -240,6 +242,8 @@ export function Profile({ id }: { id: number }) {
           )}
         </div>
       </div>
+
+      {user?.id === id && <VerificationCodeSettings />}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="card">

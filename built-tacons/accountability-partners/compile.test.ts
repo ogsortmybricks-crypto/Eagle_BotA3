@@ -2,7 +2,8 @@ import { readFileSync } from "node:fs";
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { compile } from "../../shared/tacons/compile";
-import { weekStanding, weekStart } from "../../shared/tacons/partners";
+import { weekStanding, weekStart } from "./shared/partners";
+import { EXTENSION_ID, partnerDefinitions, partnerWidget } from "./shared/definition";
 
 const source = readFileSync(new URL("./accountability-partners.tacon", import.meta.url), "utf8");
 
@@ -10,7 +11,7 @@ test("Accountability Partners compiles with its subjects, weekly minimum and Fri
   const result = compile(source);
   assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
   if (!result.ok) return;
-  assert.deepEqual(result.manifest.partners, [{
+  assert.deepEqual(partnerDefinitions(result.manifest), [{
     name: "ap",
     title: "Accountability Partners",
     core: ["Math", "Reading"],
@@ -20,7 +21,7 @@ test("Accountability Partners compiles with its subjects, weekly minimum and Fri
     trios: true,
     managers: ["admin", "guide"],
   }]);
-  assert.ok(result.manifest.pages[0].widgets.some((w) => w.kind === "partners" && w.partners === "ap"));
+  assert.ok(result.manifest.pages[0].widgets.some(w => w.kind === "extension" && w.extension === EXTENSION_ID && partnerWidget(w)?.partners === "ap"));
 });
 
 test("partners widgets cannot reference missing partners", () => {
@@ -45,7 +46,7 @@ test("managers may name a position declared later in the file", () => {
     .replace(/\n}\s*$/, '\n  position ap_captain { title "AP Captain" }\n}\n');
   const result = compile(edited);
   assert.equal(result.ok, true, JSON.stringify(result.diagnostics));
-  assert.deepEqual(result.manifest?.partners?.[0].managers, ["admin", "position:ap_captain"]);
+  assert.deepEqual(partnerDefinitions(result.manifest!)[0].managers, ["admin", "position:ap_captain"]);
 });
 
 test("weeks start on Monday", () => {

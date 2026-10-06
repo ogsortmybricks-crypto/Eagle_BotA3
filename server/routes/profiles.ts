@@ -6,8 +6,42 @@ import { positionHolders, positions, studios, users } from "@shared/schema";
 import { publicUser, requireAuth } from "../auth";
 import { logActivity } from "../activity";
 import { canReadStudio, requireScope } from "../studio";
+import { hasVerificationCode, resetVerificationCode, setVerificationCode, VerificationCodeError } from "../verification-code";
 
 export const profilesRouter = Router();
+
+profilesRouter.get("/verification-code", requireAuth, async (req, res) => {
+  try { res.json({ hasCode: await hasVerificationCode(req.user!.id) }); }
+  catch (error) {
+    console.error("[verification-code] couldn't load status");
+    res.status(500).json({ error: "Couldn't load code settings. Please try again." });
+  }
+});
+profilesRouter.post("/verification-code", requireAuth, async (req, res) => {
+  const parsed = z.object({ code: z.string().regex(/^\d{6}$/), currentCode: z.string().regex(/^\d{6}$/).optional() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Codes must be exactly six digits." });
+  try {
+    await setVerificationCode(req.user!.id, parsed.data.code, parsed.data.currentCode);
+    return res.json({ ok: true });
+  } catch (error) {
+    return res.status(error instanceof VerificationCodeError ? 400 : 500).json({
+      error: error instanceof VerificationCodeError ? error.message : "Couldn't save code settings.",
+    });
+  }
+});
+profilesRouter.post("/verification-code/reset", requireAuth, async (req, res) => {
+  if (req.user!.role !== "admin") return res.status(403).json({ error: "Only admins can reset codes." });
+  const parsed = z.object({ personId: z.number().int().positive() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Choose a user." });
+  try {
+    const [person] = await db.select({ id: users.id }).from(users).where(and(
+      eq(users.id, parsed.data.personId), eq(users.academyId, req.user!.academyId),
+    ));
+    if (!person) return res.status(404).json({ error: "That user isn't in this academy." });
+    await resetVerificationCode(person.id);
+    return res.json({ ok: true });
+  } catch { return res.status(500).json({ error: "Couldn't reset the code." }); }
+});
 
 /**
  * The directory, grouped by studio.

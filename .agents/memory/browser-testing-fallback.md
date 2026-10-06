@@ -4,13 +4,14 @@ description: Environment-specific fallback when documented browser testing callb
 ---
 
 The documented testing subagent kind was rejected as unsupported in this
-environment. An existing Chromium executable plus the Python websocket client
-successfully drove the protected portal through CDP, including native directory
-file selection.
+environment. Existing Chromium plus a CDP client can drive protected screens,
+including native directory file selection. Node 20's WebSocket needs the
+`--experimental-websocket` flag; it can avoid adding a Python runtime merely
+for testing. The Python websocket client has also worked in prior sessions.
 
 **Why:** A screenshot cannot inspect an authenticated import modal, and the
-workspace did not have Playwright or Puppeteer installed. The existing browser
-tools avoided adding browser libraries to this application's dependencies.
+workspace did not have Playwright or Puppeteer installed. Existing browser tools
+avoid adding browser libraries to this application's dependencies.
 
 **How to apply:** Try the documented testing interface first; availability may
 change. If it is unavailable, check for an existing Chromium/CDP client before

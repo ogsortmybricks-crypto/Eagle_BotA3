@@ -1,12 +1,12 @@
 /** Authenticated routes for TacScript's built-in accountability partners. */
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import type { PartnersDef } from "@shared/tacons";
-import { ON_TRACK } from "@shared/tacons/partners";
-import { requirePermission } from "../auth";
-import { logActivity } from "../activity";
-import { loadInstall } from "../tacons/registry";
-import { audienceAllows, buildRuntime, type Runtime } from "../tacons/runtime";
+import { partnerWidget, type PartnersDef } from "../shared/definition";
+import { ON_TRACK } from "../shared/partners";
+import { requirePermission } from "../../../server/auth";
+import { logActivity } from "../../../server/activity";
+import { loadInstall } from "../../../server/tacons/registry";
+import { audienceAllows, buildRuntime, type Runtime } from "../../../server/tacons/runtime";
 import {
   PartnersError,
   canManagePartners,
@@ -15,9 +15,11 @@ import {
   saveCheckin,
   saveGoals,
   savePairings,
+  renderPartners,
   uploadShot,
-} from "../tacons/partners";
-import { findMarketWidget, marketLocation, marketLocationShape } from "./tacon-market";
+} from "./partners";
+import { findWidget as findMarketWidget, validLocation as marketLocation, locationShape as marketLocationShape } from "../../../server/tacons/locations";
+import { registerPartnersWorkspaceRoutes } from "./workspace-routes";
 
 export const taconPartnersRouter = Router();
 
@@ -27,6 +29,9 @@ const located = <T extends z.ZodRawShape>(shape: T) =>
 
 const pairingsSchema = located({
   groups: z.array(z.array(z.number().int().positive()).min(2).max(3)).max(500),
+  mode: z.literal("merge").optional(),
+  removedGroupIds: z.array(z.number().int().positive()).max(500).optional(),
+  expectedGroupIds: z.array(z.number().int().positive()).max(500).optional(),
 });
 const goalsSchema = located({
   week: z.string(),
@@ -63,7 +68,8 @@ async function authorized(
   const entry = await loadInstall(req.user!.academyId, Number(req.params.installId), req.scope);
   if (!entry || !entry.install.enabled) return { ok: false, error: "That Tac-On isn't installed here.", status: 404 };
   const found = findMarketWidget(entry.manifest, location, index);
-  if (!found || found.widget.kind !== "partners" || found.widget.partners !== req.params.name) {
+  const widget = found ? partnerWidget(found.widget) : null;
+  if (!found || !widget || widget.partners !== req.params.name) {
     return { ok: false, error: "Those partners aren't at this location.", status: 404 };
   }
   const runtime = await buildRuntime({
@@ -98,7 +104,11 @@ taconPartnersRouter.post(`${base}/pairings`, requirePermission("tacons.use"), as
     if (!canManagePartners(access.runtime, access.def)) {
       return res.status(403).json({ error: "You can't change the pairings." });
     }
-    const result = await savePairings(access.runtime, access.def, parsed.data.groups, req.user!.id);
+    if (parsed.data.mode && (!parsed.data.removedGroupIds || !parsed.data.expectedGroupIds)) {
+      return res.status(400).json({ error: "Refresh the pairing list before saving." });
+    }
+    const result = await savePairings(access.runtime, access.def, parsed.data.groups, req.user!.id,
+      parsed.data.mode ? { mode: parsed.data.mode, removedGroupIds: parsed.data.removedGroupIds!, expectedGroupIds: parsed.data.expectedGroupIds! } : undefined);
     if (result.started + result.ended > 0) {
       await logActivity({
         academyId: access.runtime.academyId,
@@ -111,7 +121,8 @@ taconPartnersRouter.post(`${base}/pairings`, requirePermission("tacons.use"), as
         summary: `${req.user!.name} updated ${access.def.title}: ${result.started} new group(s), ${result.ended} ended.`,
       });
     }
-    return res.json({ ok: true, ...result });
+    const view = await renderPartners(access.runtime, { kind: "partners", partners: access.def.name }, parsed.data.index);
+    return res.json({ ok: true, ...result, groups: view?.manage?.groups ?? [], revision: view?.manage?.revision ?? [] });
   } catch (error) {
     return sendError(res, error);
   }
@@ -185,3 +196,5 @@ taconPartnersRouter.post(`${base}/checkins`, requirePermission("tacons.use"), as
     return sendError(res, error);
   }
 });
+
+registerPartnersWorkspaceRoutes(taconPartnersRouter, authorized);

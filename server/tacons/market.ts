@@ -42,7 +42,7 @@ export function marketInstallCompatible(def: MarketDef, studioId: number | null)
   return !marketRequiresAcademyInstall(def) || studioId === null;
 }
 
-/** Stores the built-in engines (`market`, `partners`) own. */
+/** Reserved stores owned by engine features and trusted Tac-On extensions. */
 export function isReservedMarketStore(storeName: string): boolean {
   return storeName.startsWith("__");
 }

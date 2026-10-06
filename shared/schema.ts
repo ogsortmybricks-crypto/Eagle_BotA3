@@ -216,7 +216,7 @@ export const users = pgTable(
     /**
      * An admin who is a learner: the one the studio gave the job of running
      * Eagle Bot. Same powers as any admin, but they are still a learner
-     * everywhere being a learner matters - an AP, for one. Only meaningful
+     * everywhere being a learner matters. Only meaningful
      * while `role` is admin; changing the role away clears it.
      */
     learnerAdmin: boolean("learner_admin").notNull().default(false),
@@ -231,6 +231,15 @@ export const users = pgTable(
     handleIdx: uniqueIndex("users_dev_handle_idx").on(t.devHandle),
   }),
 );
+
+/** Private account-level confirmation credentials, never part of public users. */
+export const verificationCodes = pgTable("user_verification_codes", {
+  userId: integer("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  hash: text("hash").notNull(),
+  failures: integer("failures").notNull().default(0),
+  lockedUntil: timestamp("locked_until"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
 
 export const invites = pgTable(
   "invites",

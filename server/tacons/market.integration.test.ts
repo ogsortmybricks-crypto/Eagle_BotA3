@@ -76,7 +76,7 @@ test("PostgreSQL market transactions serialize cap awards, purchases, retries an
     const def: MarketDef = {
       name: "wallet", title: "Wallet", rate: 100, cap: 1000, keeper: "shopkeeper", scope: "academy", overdraft: true,
     };
-    const source = readFileSync(new URL("../../tacons/eagle-buck-market/eagle-buck-market.tacon", import.meta.url), "utf8");
+    const source = readFileSync(new URL("../../built-tacons/eagle-buck-market/eagle-buck-market.tacon", import.meta.url), "utf8");
     const compiled = compile(source);
     assert.ok(compiled.ok, JSON.stringify(compiled.diagnostics));
     const manifest = compiled.manifest;

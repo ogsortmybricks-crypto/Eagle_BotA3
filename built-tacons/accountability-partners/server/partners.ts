@@ -1,8 +1,8 @@
-/** Storage, rules and rendering for TacScript's built-in accountability partners. */
+/** Storage, rules and rendering for the Accountability Partners Tac-On. */
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
-import { db } from "../db";
+import { db } from "../../../server/db";
 import { taconRecords, users } from "@shared/schema";
-import type { PartnersDef } from "@shared/tacons";
+import { partnerDefinitions, type PartnersDef } from "../shared/definition";
 import {
   ON_TRACK,
   SHOT_MAX_CHARS,
@@ -14,16 +14,17 @@ import {
   weekday,
   type OnTrack,
   type PartnersStoreKind,
-} from "@shared/tacons/partners";
+} from "../shared/partners";
 import type {
   PartnerCandidate,
   PartnerCheckin,
   PartnerGoals,
   PartnerGroup,
   ViewPartners,
-} from "@shared/tacons/view";
-import { studioCircle } from "../studio";
-import { audienceAllows, type Runtime } from "./runtime";
+} from "../shared/view";
+import { studioCircle } from "../../../server/studio";
+import { audienceAllows, type Runtime } from "../../../server/tacons/runtime";
+import { canReviewAp, renderApWorkspace } from "./workspace";
 
 /** How far back a dashboard looks: this week, plus five before it. */
 const HISTORY_DAYS = 42;
@@ -55,7 +56,7 @@ function string(value: unknown, max: number): string {
 }
 
 export function partnersDef(runtime: Runtime, name: string): PartnersDef | undefined {
-  return runtime.install.manifest.partners?.find((entry) => entry.name === name);
+  return partnerDefinitions(runtime.install.manifest).find((entry) => entry.name === name);
 }
 
 export function canManagePartners(runtime: Runtime, def: PartnersDef): boolean {
@@ -164,12 +165,11 @@ export async function renderPartners(
   const def = partnersDef(runtime, widget.partners);
   if (!def) return null;
   const user = runtime.user;
-  const manager = canManagePartners(runtime, def);
-  const since = new Date(Date.now() - HISTORY_DAYS * 86_400_000);
+  const manager = canReviewAp(runtime, def);
   const [groupRows, checkinRows, goalRows] = await Promise.all([
     rows(runtime, def, "groups"),
-    rows(runtime, def, "checkins", since),
-    rows(runtime, def, "goals", since),
+    rows(runtime, def, "checkins"),
+    rows(runtime, def, "goals"),
   ]);
   const groups = groupRows.map((row) => groupView(runtime, row));
   const mine = user ? groups.find((group) => group.active && group.members.some((m) => m.id === user.id)) ?? null : null;
@@ -177,7 +177,8 @@ export async function renderPartners(
   const myGroupIds = new Set(
     user ? groups.filter((group) => group.members.some((m) => m.id === user.id)).map((group) => group.id) : [],
   );
-  const mates = new Set(mine?.members.map((member) => member.id) ?? []);
+  const visibleGroups = groups.filter(group => manager || myGroupIds.has(group.id));
+  const mates = new Set(visibleGroups.flatMap(group => group.members.map(member => member.id)));
   if (user) mates.add(user.id);
 
   const checkins = checkinRows
@@ -192,7 +193,6 @@ export async function renderPartners(
       updatedAt: row.updatedAt.toISOString(),
     }));
 
-  const recentCutoff = since.toISOString();
   return {
     kind: "partners",
     index,
@@ -203,14 +203,17 @@ export async function renderPartners(
     required: def.required,
     due: def.due,
     trios: def.trios,
+    workspace: await renderApWorkspace(runtime, def),
     me: user ? { id: user.id, name: user.name } : null,
     group: mine,
+    historyGroups: visibleGroups,
     checkins,
     goals,
     manage: manager
       ? {
           candidates: await candidates(runtime),
-          groups: groups.filter((group) => group.active || (group.endedAt ?? "") >= recentCutoff),
+          groups,
+          revision: groups.filter(group => group.active).map(group => group.id).sort((a, b) => a - b),
         }
       : null,
   };
@@ -234,6 +237,7 @@ export async function savePairings(
   def: PartnersDef,
   groups: number[][],
   actorId: number,
+  options?: { mode: "merge"; removedGroupIds: number[]; expectedGroupIds: number[] },
 ): Promise<{ kept: number; started: number; ended: number }> {
   const seen = new Set<number>();
   for (const members of groups) {
@@ -262,6 +266,20 @@ export async function savePairings(
     await lock(tx, runtime, def);
     const current = await tx.select().from(taconRecords).where(rowsQuery(runtime, def, "groups"));
     const active = current.filter((row) => data(row).active === true);
+    if (options) {
+      const revision = active.map(row => row.id).sort((a, b) => a - b);
+      const expected = [...options.expectedGroupIds].sort((a, b) => a - b);
+      if (JSON.stringify(revision) !== JSON.stringify(expected)) {
+        throw new PartnersError("Pairings changed while you were editing. Refresh before saving so nobody's pair is lost.");
+      }
+      const removals = new Set(options.removedGroupIds);
+      for (const row of active) {
+        if (removals.has(row.id) || groups.some(group => key(group) === key(ids(data(row).members)))) continue;
+        if (ids(data(row).members).some(id => seen.has(id))) {
+          throw new PartnersError("Someone is already paired. Explicitly remove their old pair before moving them.");
+        }
+      }
+    }
     const wanted = new Map(groups.map((members) => [key(members), members]));
     let kept = 0;
     let ended = 0;
@@ -270,6 +288,10 @@ export async function savePairings(
       const rowKey = key(ids(data(row).members));
       if (wanted.has(rowKey)) {
         wanted.delete(rowKey);
+        kept += 1;
+        continue;
+      }
+      if (options && !options.removedGroupIds.includes(row.id)) {
         kept += 1;
         continue;
       }

@@ -8,6 +8,10 @@
     "node": ">=20"
   },
   "scripts": {
+    "tacons:generate": "node scripts/generate-tacon-extensions.mjs",
+    "predev": "npm run tacons:generate",
+    "prebuild": "npm run tacons:generate",
+    "precheck": "npm run tacons:generate",
     "dev": "NODE_ENV=development tsx watch server/index.ts",
     "build": "vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/index.js",
     "start": "NODE_ENV=production node dist/index.js",

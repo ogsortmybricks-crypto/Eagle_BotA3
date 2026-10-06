@@ -1,7 +1,8 @@
 /** Authenticated mutation routes for built-in TacScript markets. */
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { positionAudience, type Manifest, type PageDef, type PanelDef, type PositionDef } from "@shared/tacons";
+import type { Manifest } from "@shared/tacons";
+import { findWidget as findMarketWidget, validLocation as marketLocation, locationShape as marketLocationShape } from "../tacons/locations";
 import { requirePermission } from "../auth";
 import { loadInstall } from "../tacons/registry";
 import { audienceAllows, buildRuntime } from "../tacons/runtime";
@@ -17,36 +18,6 @@ import {
 
 export const taconMarketRouter = Router();
 
-export function marketLocation(location: { page?: string; panel?: string; position?: string }) {
-  return Number(Boolean(location.page)) + Number(Boolean(location.panel)) + Number(Boolean(location.position)) === 1;
-}
-
-function ownerAudience(owner: PageDef | PanelDef | PositionDef): string[] {
-  return "showTo" in owner ? owner.showTo : [positionAudience(owner.name)];
-}
-
-export function findMarketWidget(
-  manifest: Manifest,
-  location: { page?: string; panel?: string; position?: string },
-  index: number,
-) {
-  if (!marketLocation(location)) return null;
-  let owners: (PageDef | PanelDef | PositionDef)[];
-  if (location.page) owners = manifest.pages.filter((owner) => owner.name === location.page);
-  else if (location.position) owners = manifest.positions.filter((owner) => owner.name === location.position);
-  else owners = manifest.panels.filter((owner) => owner.host === location.panel);
-  // Panels are addressed by host, so ambiguous owners fail closed.
-  if (owners.length !== 1) return null;
-  const owner = owners[0];
-  const widget = owner.widgets[index];
-  return widget ? { widget, audience: ownerAudience(owner) } : null;
-}
-
-export const marketLocationShape = z.object({
-  page: z.string().max(60).optional(),
-  panel: z.string().max(60).optional(),
-  position: z.string().max(60).optional(),
-});
 const marketTargetShape = marketLocationShape.extend({
   index: z.number().int().min(0).max(200),
 });

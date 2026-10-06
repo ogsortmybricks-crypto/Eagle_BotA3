@@ -59,11 +59,11 @@ import {
   marketRequiresAcademyInstall,
 } from "../tacons/market";
 import { taconMarketRouter } from "./tacon-market";
-import { taconPartnersRouter } from "./tacon-partners";
+import { registerExtensionRoutes } from "../tacons/extensions";
 
 export const taconsRouter = Router();
 taconsRouter.use(taconMarketRouter);
-taconsRouter.use(taconPartnersRouter);
+registerExtensionRoutes(taconsRouter);
 
 /* -------------------------------------------------------------------------- */
 /*  What this academy is running                                               */

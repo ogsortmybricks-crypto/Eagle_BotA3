@@ -22,6 +22,7 @@ import { TaconPage } from "@/pages/TaconPage";
 import { DevMenu } from "@/pages/DevMenu";
 import { DevProfile } from "@/pages/DevProfile";
 import { DevPortal } from "@/pages/DevPortal";
+import { usePublicExtensionPage } from "@/tacons/Extensions";
 
 type SetupStatus = {
   needsSetup: boolean;
@@ -35,6 +36,7 @@ export function App() {
   const [portalRoute] = useRoute("/dev-portal");
   const [portalInviteRoute, portalInviteParams] = useRoute("/dev-portal/invite/:token");
   const [, navigate] = useLocation();
+  const publicExtensionPage = usePublicExtensionPage();
 
   useEffect(() => {
     apiGet<SetupStatus>("/setup/status")
@@ -72,6 +74,7 @@ export function App() {
     return <DevPortal inviteToken={portalInviteParams.token} />;
   }
   if (portalRoute) return <DevPortal />;
+  if (publicExtensionPage) return publicExtensionPage;
 
   // The invite flow has to work while signed out and before anything else.
   if (inviteRoute && inviteParams?.token) {

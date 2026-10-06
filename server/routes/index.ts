@@ -13,8 +13,11 @@ import { adminRouter } from "./admin";
 import { profilesRouter } from "./profiles";
 import { taconsRouter } from "./tacons";
 import { portalRouter } from "./portal";
+import { registerPublicExtensionRoutes } from "../tacons/extensions";
 
 export const apiRouter = Router();
+
+registerPublicExtensionRoutes(apiRouter);
 
 // Resolving the studio needs a signed-in user, so it runs on everything and
 // no-ops when there isn't one. `/auth/me` reads it, which is why it sits here

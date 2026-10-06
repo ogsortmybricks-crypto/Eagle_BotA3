@@ -1,8 +1,10 @@
-# Requires Eagle Bot's built-in accountability-partners extension.
+# The package owns its compiler, server routes, storage rules and client screens.
+# Eagle Bot loads checked-in Tac-On extensions through its generic registry.
 # Partners check in on each other at least 3 days a week, one of them Friday.
 tacon accountability-partners {
   name "Accountability Partners"
-  version 1.0.0
+  version 1.2.0
+  extension accountability-partners
   about "Pair learners up, keep a record of every AP check-in, and see who's really holding who accountable."
   icon users
   category tracking

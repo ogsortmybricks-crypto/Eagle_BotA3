@@ -3,3 +3,4 @@
 - [Eagle Buck wallet scope](eagle-buck-wallet-scope.md) — use one academy-wide wallet so studio switching cannot bypass the learner's 10-Buck limit.
 - [Tac-On portal imports](tacon-portal-imports.md) — folder upload is the primary publishing path; verify live compiler compatibility rather than bypassing errors.
 - [Browser testing fallback](browser-testing-fallback.md) — when the testing subagent is unavailable, existing Chromium plus CDP can verify protected UI without app auth bypasses.
+- [AP workspace rules](ap-workspace-rules.md) — package-owned AP features, core account codes, learner-admin planning, preserved history, and explicit attendance.

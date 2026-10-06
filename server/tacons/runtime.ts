@@ -68,7 +68,7 @@ import type { LoadedInstall } from "./registry";
 import { resolveUses } from "./registry";
 import { heldNames, positionFacts, type PositionFacts } from "./positions";
 import { renderMarket } from "./market";
-import { renderPartners } from "./partners";
+import { renderExtensionWidget } from "./extensions";
 
 /**
  * How many rows one store contributes to a `sum` or a filtered list.
@@ -764,9 +764,11 @@ async function renderWidget(runtime: Runtime, widget: Widget, index: number): Pr
     case "market":
       return renderMarket(runtime, widget, index);
 
-    case "partners":
-      return renderPartners(runtime, widget, index);
+    case "extension":
+      return renderExtensionWidget(runtime, widget, index);
   }
+  // Old persisted widgets are interpreted by their owning package.
+  return renderExtensionWidget(runtime, widget, index);
 }
 
 /** Loads every store the page's widgets and values will need, once. */

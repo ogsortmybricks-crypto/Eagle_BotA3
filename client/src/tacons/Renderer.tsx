@@ -15,7 +15,7 @@ import { apiDelete, apiPost } from "@/lib/api";
 import { useDateFormat } from "@/lib/session";
 import { Banner, Spinner } from "@/components/ui";
 import { MarketView } from "./MarketView";
-import { PartnersView } from "./PartnersView";
+import { ExtensionView } from "./Extensions";
 import type {
   TaconView,
   ViewForm,
@@ -102,8 +102,8 @@ function WidgetView({
     case "market":
       return <MarketView market={widget} target={target} />;
 
-    case "partners":
-      return <PartnersView view={widget} target={target} />;
+    case "extension":
+      return <ExtensionView {...widget} target={target} />;
   }
 }
 

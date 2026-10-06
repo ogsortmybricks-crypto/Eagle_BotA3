@@ -39,6 +39,7 @@ import {
 } from "@/components/ui";
 import { StudioPicker } from "@/components/StudioPicker";
 import { audiencePosition, type Manifest } from "@shared/tacons";
+import { describeExtensions } from "@shared/tacons/extension-registry";
 
 type Listing = {
   id: number;
@@ -380,11 +381,9 @@ export function TaconDetail({ slug }: { slug: string }) {
                     happens
                   </li>
                 ))}
-                {(manifest.partners ?? []).map((partners) => (
-                  <li key={`partners-${partners.name}`}>
-                    <span className="font-medium text-gray-800">{partners.title}</span> — accountability
-                    pairings set by {audienceLabel(partners.managers, manifest)}, with check-ins and
-                    screenshots its members and their guides can see
+                {describeExtensions(manifest).map((description, index) => (
+                  <li key={`extension-${index}`}>
+                    <span className="font-medium text-gray-800">{description.title}</span> — {description.description}
                   </li>
                 ))}
                 {manifest.stores.map((store) => (

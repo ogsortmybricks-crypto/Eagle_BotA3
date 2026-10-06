@@ -420,7 +420,7 @@ function PeopleAdmin() {
                   {person.role === "admin" && (
                     <label
                       className="mt-1.5 flex items-center gap-1.5 whitespace-nowrap text-xs text-gray-600"
-                      title="A learner given the job of running Eagle Bot. Same powers as any admin, but still a learner where that matters, like being an AP."
+                      title="A learner given the job of running Eagle Bot. Same powers as any admin, but still a learner where that matters."
                     >
                       <input
                         type="checkbox"

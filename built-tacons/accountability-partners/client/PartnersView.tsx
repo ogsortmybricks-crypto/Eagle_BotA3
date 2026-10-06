@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { apiPost, getApiStudio } from "@/lib/api";
 import { Banner, Chip, Spinner, type ChipTone } from "@/components/ui";
+import { AdminCodeReset, ApWorkspace } from "./ApWorkspace";
 import {
   ON_TRACK,
   ON_TRACK_LABELS,
@@ -37,14 +38,14 @@ import {
   weekStart,
   type OnTrack,
   type WeekStatus,
-} from "@shared/tacons/partners";
+} from "../shared/partners";
 import type {
   PartnerCheckin,
   PartnerGroup,
   PartnerPerson,
   ViewPartners,
-} from "@shared/tacons/view";
-import type { RenderTarget } from "./Renderer";
+} from "../shared/view";
+import type { RenderTarget } from "@/tacons/Renderer";
 
 type Props = { view: ViewPartners; target: RenderTarget };
 type Notice = { tone: "success" | "error"; text: string } | null;
@@ -110,6 +111,7 @@ export function PartnersView({ view, target }: Props) {
 
   const tabs: Tab[] = [];
   if (view.group) tabs.push({ key: "mine", label: "My AP dashboard" });
+  tabs.push({ key: "workspace", label: "Learning workspace" });
   if (manager) {
     tabs.push({ key: "overview", label: "This week" });
     tabs.push({ key: "pairings", label: "Pairings" });
@@ -153,6 +155,8 @@ export function PartnersView({ view, target }: Props) {
           <Pairings view={view} target={target} />
         ) : tab === "overview" && manager ? (
           <Overview view={view} target={target} today={today} />
+        ) : tab === "workspace" ? (
+          <ApWorkspace view={view} target={target} />
         ) : view.group && view.me ? (
           <MemberDashboard view={view} target={target} me={view.me} group={view.group} today={today} />
         ) : (
@@ -793,10 +797,18 @@ function Pairings({ view, target }: Props) {
   const width = view.trios ? 3 : 2;
   const savedDraft = useMemo(() => draftFrom(manage.groups, view.trios), [manage.groups, view.trios]);
   const [rows, setRows] = useState<Draft>(savedDraft);
+  const [savedBaseline, setSavedBaseline] = useState<Draft>(savedDraft);
+  const [savedGroups, setSavedGroups] = useState(manage.groups);
+  const [revision, setRevision] = useState(manage.revision);
   const [notice, setNotice] = useState<Notice>(null);
   // Keyed on content, so a background refetch doesn't wipe an edit in progress.
-  const savedKey = JSON.stringify(savedDraft);
-  useEffect(() => setRows(savedDraft), [savedKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const savedKey = JSON.stringify(savedBaseline);
+  useEffect(() => {
+    setRows(savedDraft);
+    setSavedBaseline(savedDraft);
+    setSavedGroups(manage.groups);
+    setRevision(manage.revision);
+  }, [JSON.stringify(savedDraft), JSON.stringify(manage.revision)]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const names = new Map(manage.candidates.map((person) => [person.id, person]));
   for (const group of manage.groups) for (const member of group.members) {
@@ -825,10 +837,23 @@ function Pairings({ view, target }: Props) {
       const groups = rows.map((row) => row.filter(Boolean)).filter((row) => row.length > 0);
       const lonely = groups.find((row) => row.length < 2);
       if (lonely) throw new Error(`${names.get(lonely[0])?.name ?? "Someone"} needs a partner, or remove that row.`);
-      return apiPost<{ kept: number; started: number; ended: number }>(`${api.base}/pairings`, api.body({ groups }));
+      const submitted = groups.map((row) => [...row].sort((a, b) => a - b));
+      const sameMembers = (members: number[]) => submitted.some((row) => JSON.stringify(row) === JSON.stringify([...members].sort((a, b) => a - b)));
+      const removedGroupIds = savedGroups
+        .filter((group) => group.active && !sameMembers(group.members.map((member) => member.id)))
+        .map((group) => group.id);
+      return apiPost<{ kept: number; started: number; ended: number; groups: PartnerGroup[]; revision: number[] }>(
+        `${api.base}/pairings`,
+        api.body({ groups, mode: "merge", removedGroupIds, expectedGroupIds: revision }),
+      );
     },
     onSuccess: (result) => {
       setNotice({ tone: "success", text: `Pairings saved: ${result.started} new, ${result.kept} unchanged, ${result.ended} ended. Past check-ins are kept.` });
+      const next = draftFrom(result.groups.filter((group) => group.active), view.trios);
+      setRows(next);
+      setSavedBaseline(next);
+      setSavedGroups(result.groups);
+      setRevision(result.revision);
       api.refresh();
     },
     onError: (error: Error) => setNotice({ tone: "error", text: error.message }),
@@ -850,6 +875,7 @@ function Pairings({ view, target }: Props) {
       </div>
 
       {notice && <Banner tone={notice.tone}>{notice.text}</Banner>}
+      <AdminCodeReset view={view} target={target} />
 
       <div className="scroll-x">
         <table className="w-full min-w-[480px] text-sm">
@@ -868,7 +894,7 @@ function Pairings({ view, target }: Props) {
                 <td className="py-1.5 pr-2 pt-3.5 text-xs tabular-nums text-gray-400">{rowIndex + 1}</td>
                 {row.map((value, column) => (
                   <td key={column} className="py-1.5 pr-2">
-                    <select className="input" value={value} aria-label={`Row ${rowIndex + 1}, AP ${column + 1}`}
+                    <select disabled={save.isPending} className="input" value={value} aria-label={`Row ${rowIndex + 1}, AP ${column + 1}`}
                       onChange={(event) => set(rowIndex, column, Number(event.target.value))}>
                       <option value={0}>{column === 2 ? "— none —" : "Choose…"}</option>
                       {value !== 0 && !manage.candidates.some((person) => person.id === value) && (
@@ -885,7 +911,7 @@ function Pairings({ view, target }: Props) {
                   </td>
                 ))}
                 <td className="py-1.5">
-                  <button type="button" className="btn-ghost p-2" aria-label={`Remove row ${rowIndex + 1}`}
+                  <button disabled={save.isPending} type="button" className="btn-ghost p-2" aria-label={`Remove row ${rowIndex + 1}`}
                     onClick={() => setRows(rows.length === 1 ? [Array(width).fill(0)] : rows.filter((_, index) => index !== rowIndex))}>
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -897,18 +923,18 @@ function Pairings({ view, target }: Props) {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn-secondary" onClick={() => setRows([...rows, Array(width).fill(0)])}>
+        <button disabled={save.isPending} type="button" className="btn-secondary" onClick={() => setRows([...rows, Array(width).fill(0)])}>
           <Plus className="h-4 w-4" /> Add a row
         </button>
         {unpaired.some((person) => person.role === "learner") && (
-          <button type="button" className="btn-secondary" onClick={pairTheRest}>
+          <button disabled={save.isPending} type="button" className="btn-secondary" onClick={pairTheRest}>
             <Shuffle className="h-4 w-4" /> Pair the rest randomly
           </button>
         )}
         <button type="button" className="btn-primary" disabled={!dirty || save.isPending} onClick={() => { setNotice(null); save.mutate(); }}>
           {save.isPending && <Spinner />} Save pairings
         </button>
-        {dirty && <button type="button" className="btn-ghost" onClick={() => setRows(savedDraft)}>Undo changes</button>}
+        {dirty && <button disabled={save.isPending} type="button" className="btn-ghost" onClick={() => setRows(savedBaseline)}>Undo changes</button>}
       </div>
 
       <div className="rounded-lg bg-gray-50 p-3 text-sm">

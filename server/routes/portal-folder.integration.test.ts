@@ -41,7 +41,7 @@ test("portal validates uploaded source using the server compiler without publish
       });
       return { status: res.status, body: await res.json() };
     };
-    const source = readFileSync(new URL("../../tacons/eagle-buck-market/eagle-buck-market.tacon", import.meta.url), "utf8");
+    const source = readFileSync(new URL("../../built-tacons/eagle-buck-market/eagle-buck-market.tacon", import.meta.url), "utf8");
     assert.equal((await post({ source })).status, 401);
     authenticated = true;
     const valid = await post({ source });

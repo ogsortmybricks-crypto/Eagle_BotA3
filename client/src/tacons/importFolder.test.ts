@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { compile } from "@shared/tacons";
 import { importTaconFolder, type PackageFile } from "./importFolder";
 
-const source = readFileSync(new URL("../../../tacons/eagle-buck-market/eagle-buck-market.tacon", import.meta.url), "utf8");
+const source = readFileSync(new URL("../../../built-tacons/eagle-buck-market/eagle-buck-market.tacon", import.meta.url), "utf8");
 function file(path: string, text = source): PackageFile {
   return {
     name: path.split("/").at(-1)!,
