@@ -67,7 +67,6 @@ import { scoped, studioFilter, type StudioScope } from "../studio";
 import type { LoadedInstall } from "./registry";
 import { resolveUses } from "./registry";
 import { heldNames, positionFacts, type PositionFacts } from "./positions";
-import { renderMarket } from "./market";
 import { renderExtensionWidget } from "./extensions";
 
 /**
@@ -760,9 +759,6 @@ async function renderWidget(runtime: Runtime, widget: Widget, index: number): Pr
         confirm: widget.confirm,
         allowed: audienceAllows(widget.allow, runtime.user, runtime.held),
       };
-
-    case "market":
-      return renderMarket(runtime, widget, index);
 
     case "extension":
       return renderExtensionWidget(runtime, widget, index);

@@ -18,7 +18,8 @@
     "check": "tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "postinstall": "node scripts/generate-tacon-extensions.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.125.0",

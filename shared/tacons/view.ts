@@ -64,56 +64,6 @@ export type ViewButton = {
   allowed: boolean;
 };
 
-export type MarketProduct = {
-  id: number;
-  name: string;
-  description: string;
-  pricePoints: number;
-  active: boolean;
-};
-export type MarketEntry = {
-  id: number;
-  learnerId: number;
-  learnerName: string;
-  points: number;
-  reason: string;
-  kind: "earn" | "purchase";
-  createdAt: string;
-  actorName: string;
-};
-export type MarketPurchase = {
-  id: number;
-  learnerId: number;
-  learnerName: string;
-  productName: string;
-  pricePoints: number;
-  status: "pending" | "fulfilled";
-  createdAt: string;
-  fulfilledAt: string | null;
-};
-export type ViewMarket = {
-  kind: "market";
-  index: number;
-  market: string;
-  title: string;
-  rate: number;
-  cap: number;
-  balancePoints: number;
-  overdraft: boolean;
-  canPurchase: boolean;
-  canLogPoints: boolean;
-  canAwardPoints: boolean;
-  canManage: boolean;
-  canViewLogs: boolean;
-  products: MarketProduct[];
-  entries: MarketEntry[];
-  purchases: MarketPurchase[];
-  /** Personal history is windowed independently from the management logs. */
-  ownEntries: MarketEntry[];
-  ownPurchases: MarketPurchase[];
-  learners: { id: number; name: string; balancePoints: number }[];
-};
-
 export type ViewWidget =
   | ViewNote
   | ViewHeading
@@ -122,7 +72,6 @@ export type ViewWidget =
   | ViewList
   | ViewForm
   | ViewButton
-  | ViewMarket
   | ViewExtension;
 
 export type ViewPerson = { id: number; name: string };

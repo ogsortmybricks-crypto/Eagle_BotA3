@@ -194,21 +194,6 @@ export type ButtonWidget = {
   does: Action[];
 };
 
-/** Built-in, transaction-backed points market. No arbitrary executable code. */
-export type MarketDef = {
-  name: string;
-  title: string;
-  rate: number;
-  cap: number;
-  keeper: string;
-  /** Academy scope requires a single shared, academy-wide install. */
-  scope?: "academy" | "install";
-  /** Whether spending may take the wallet below zero. */
-  overdraft?: boolean;
-};
-
-export type MarketWidget = { kind: "market"; market: string };
-
 export type Widget =
   | NoteWidget
   | HeadingWidget
@@ -217,7 +202,6 @@ export type Widget =
   | ListWidget
   | FormWidget
   | ButtonWidget
-  | MarketWidget
   | import("./extensions").ExtensionWidget;
 
 /* -------------------------------------------------------------------------- */
@@ -358,8 +342,6 @@ export type Manifest = {
   positions: PositionDef[];
   hooks: HookDef[];
   computes: ComputeDef[];
-  /** Absent on older manifests. */
-  markets?: MarketDef[];
   /** Absent on older manifests. */
   /** Package-owned configuration, compiled by trusted extensions. */
   extensions?: Record<string, unknown>;

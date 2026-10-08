@@ -26,8 +26,8 @@ indentation is only for your own eyes.
 ## The outline
 
 ```
-tacon hero-bucks {          # lowercase letters, numbers and hyphens
-  name "Hero Bucks"          # what people see
+tacon points-ledger {          # lowercase letters, numbers and hyphens
+  name "Points Ledger"          # what people see
   version 1.0.0              # bump this every time you publish
   about "One sentence."      # shown in the market
   icon coins
@@ -39,12 +39,10 @@ tacon hero-bucks {          # lowercase letters, numbers and hyphens
   page ...                   # pages in the sidebar
   panel ...                  # cards on Eagle Bot's own pages
   position ...               # positions on the Positions page, and their holder's desk
-  market ...                 # built-in points ledger, catalog and safe purchases
-  partners ...               # built-in accountability partners and check-ins
   when ...                   # things that happen by themselves
 
   provides entry, balance    # what other Tac-Ons may read
-  use hero-bucks as bucks    # what you read from them
+  use points-ledger as points    # what you read from them
 }
 ```
 
@@ -95,7 +93,7 @@ sets, and uninstalling deletes them.
 
 ```
 setting election_award {
-  label "Bucks for winning an election"
+  label "Points for winning an election"
   type number          # text | number | boolean | choice
   default 10
   hint "Set it to 0 to turn the award off."
@@ -117,7 +115,7 @@ Named values are worked out per viewer, so `me.*` inside one means *the person
 looking at the page*. Read them back as `my.balance` — including inside text:
 
 ```
-note "You're holding {my.balance} bucks."
+note "You're holding {my.balance} points."
 ```
 
 A value may be written in terms of another one. List it under `provides` and
@@ -128,8 +126,8 @@ other Tac-Ons can read it as `youralias.balance`.
 ## `page` — a page in the sidebar
 
 ```
-page bucks {
-  title "Hero Bucks"
+page points {
+  title "Points Ledger"
   icon coins
   nav true                        # false hides it from the sidebar
   subtitle "The studio's ledger."
@@ -199,7 +197,7 @@ sees what they were already allowed to see, and nothing else.
 **`form`** — how records get in.
 
 ```
-form "Log some bucks" {
+form "Log some points" {
   into entry
   ask hero "Who?"          # the quoted bit renames the field on this form
   ask amount
@@ -220,111 +218,6 @@ button "Close the week" {
   notify "Week closed."
 }
 ```
-
----
-
-## `market` — a points economy with enforced balances
-
-Declare a built-in market at the top level, then show it on a page or position desk:
-
-```
-market wallet {
-  title "Eagle Buck Market"
-  rate 100                 # points per Buck
-  cap 1000                 # maximum points a learner may hold
-  keeper shopkeeper        # must be a position declared by this Tac-On
-  scope academy            # requires an academy-wide install and one shared wallet
-}
-
-page market {
-  title "Eagle Buck Market"
-  market wallet
-}
-
-position shopkeeper {
-  title "Shopkeeper"
-  seats 1
-  elected true
-  market wallet
-}
-```
-
-`scope install` (the default) gives separate wallets per install. `scope academy`
-requires an academy-wide install, so a learner does not get separate wallets by
-switching studios. Markets in different Tac-Ons or academies remain separate.
-
-The widget includes the role-appropriate operations:
-
-- **Learners:** report their own earned points with a required source/reason, buy
-  active catalog items, and see their own balance, ledger, and purchases.
-- **Admins:** add/edit/archive/reactivate catalog items, award points to learners,
-  see learner balances and the recent ledger/purchases, and fulfill purchases.
-- **Current keeper:** award points to learners, inspect the recent ledger and
-  purchase log, and mark purchases fulfilled. Keeper access follows the actual
-  position holder and ends with the term.
-
-This is a self-reporting points ledger, not an earning-approval system. Catalog
-prices and earnings use positive **whole points**. Purchases can only be made by
-learners and use the server's current price; only admins manage products.
-
-The server rejects earnings that would exceed the cap and purchases with
-insufficient funds. Purchases atomically save the debit and an item/price
-snapshot. Repeat submissions are idempotent, concurrent operations are
-serialized, and archived items cannot be purchased. Fulfillment does not charge
-again. Market financial stores are private to the built-in engine; ordinary
-forms, actions, or delete-list permissions cannot alter them.
-
-Balances use the entire ledger, not the generic store read window. The widget
-shows the latest 200 history records; older history remains stored and included
-in balances. As with all Tac-Ons, removing an install deletes its records;
-turning it off preserves them.
-
-This syntax needs the updated Eagle Bot market engine. It cannot compile on
-older versions.
-
----
-
-## `partners` — accountability partners
-
-Declare the partners at the top level, then show them on a page:
-
-```
-partners ap {
-  title "Accountability Partners"
-  core "Math", "Reading"                              # goal + progress at each check-in
-  evidence "Writers' Workshop", "Civilization", "Quest"   # screenshots + notes
-  required 3          # distinct days a week to check in on each partner (1-7)
-  due friday          # one of them must be this day; `due none` for no rule
-  trios true          # allow groups of three
-  managers admin, guide   # who sets the pairings; roles or your own positions
-}
-
-page partners {
-  title "My AP"
-  partners ap
-}
-```
-
-The widget shows each person what fits them:
-
-- **Managers** get a *Pairings* screen — columns AP 1, AP 2 (and AP 3 for
-  trios), a dropdown per seat, and *Pair the rest randomly* — plus a *This week*
-  overview of every group's check-ins, with the screenshots. A group's standing
-  is its weakest link. Pairings can change at any time; ending a pairing keeps
-  its history. Until there are pairings, managers land on the Pairings screen.
-- **Admins** also decide whether admins and guides can be paired. Off by default.
-- **Partners** get a dashboard with a *You* tab — this week's calendar of their
-  check-ins on each partner, their own weekly goals, and what their partner
-  recorded about them — and a tab per partner holding the check-in form.
-
-A check-in is recorded by the partner doing the checking, for today only.
-Checking in again the same day updates it, so it still counts once. Only your
-current partner can be checked on, only your own uploads can be attached, and
-screenshots are visible to the group and its managers, nobody else. Weeks run
-Monday to Sunday on the viewer's own calendar.
-
-Like `market`, the records are private to the built-in engine: ordinary forms,
-lists and reactions can't read or change them.
 
 ---
 
@@ -430,7 +323,7 @@ when election.certified {
     kind: "earn"
     reason: "Elected"
   }
-  notify "Awarded bucks for a certified election."
+  notify "Awarded points for a certified election."
 }
 ```
 
@@ -476,7 +369,7 @@ quietly.
 | `event.winner` | Inside a `when` only |
 | `position.treasurer` | Who holds one of your positions |
 | `entry.amount` | A field of the row being tested |
-| `bucks.balance` | Another Tac-On's, via `use` |
+| `points.balance` | Another Tac-On's, via `use` |
 
 **Totals**
 
@@ -511,7 +404,7 @@ sum of entry.amount minus sum of spend.amount
 **Text**, with `{...}` for anything above:
 
 ```
-note "You have {my.balance} bucks, {me.name}."
+note "You have {my.balance} points, {me.name}."
 ```
 
 ---
@@ -519,14 +412,14 @@ note "You have {my.balance} bucks, {me.name}."
 ## `provides` and `use`
 
 ```
-# in hero-bucks
+# in points-ledger
 provides ledger, balance
 
 # in your Tac-On
-use hero-bucks as bucks
+use points-ledger as points
 
-note "You have {bucks.balance} bucks."
-list bucks.ledger { columns hero, amount }
+note "You have {points.balance} points."
+list points.ledger { columns hero, amount }
 ```
 
 Reading only, same academy only, and only what the other Tac-On listed. If it is

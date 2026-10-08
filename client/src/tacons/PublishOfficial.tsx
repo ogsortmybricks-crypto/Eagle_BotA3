@@ -276,7 +276,7 @@ export default function PublishOfficial({ onClose, onDone }: Props) {
               <Info className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
                 Tac-Ons are declarative packages, not executable plugins. This flow never sends
-                arbitrary folder code or assets. Server validation is required; if a newer market
+                arbitrary folder code or assets. Server validation is required; if a newer language
                 construct is rejected by the server compiler, update the server rather than
                 bypassing validation.
               </p>
@@ -319,12 +319,6 @@ export default function PublishOfficial({ onClose, onDone }: Props) {
                   <Meta label="Name" value={serverForCurrentSource.manifest.name} />
                   <Meta label="Slug" value={serverForCurrentSource.manifest.slug} mono />
                   <Meta label="Version" value={serverForCurrentSource.manifest.version} mono />
-                  {serverForCurrentSource.manifest.academyWide && (
-                    <p className="sm:col-span-3 text-xs leading-5 text-emerald-900">
-                      Academy-wide: this Tac-On is designed to be available across each academy
-                      that installs it.
-                    </p>
-                  )}
                 </div>
               )}
 

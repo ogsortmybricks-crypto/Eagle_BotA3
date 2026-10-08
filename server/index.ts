@@ -9,7 +9,6 @@ import { pool } from "./db";
 import { attachUser } from "./auth";
 import { apiRouter } from "./routes";
 import { recoverStuckJobs } from "./ai/jobs";
-import { seedStarters } from "./tacons/starters";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -73,13 +72,6 @@ async function main() {
 
   await recoverStuckJobs().catch((error) =>
     console.error("[boot] couldn't clean up interrupted jobs", error),
-  );
-
-  // An empty Tac-Ons market teaches nobody anything, so the official ones are
-  // published on boot - and the ones that no longer ship are deleted on the
-  // same pass. Failing here is never worth refusing to start.
-  await seedStarters().catch((error) =>
-    console.error("[boot] couldn't seed the Tac-Ons market", error),
   );
 
   app.listen(env.port, "0.0.0.0", () => {

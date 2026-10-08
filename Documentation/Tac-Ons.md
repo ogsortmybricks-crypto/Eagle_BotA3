@@ -77,23 +77,10 @@ An installed Tac-On's pages appear in the sidebar under a **Tac-Ons** heading,
 kept separate from Eagle Bot's own pages on purpose. Panels appear at the bottom
 of whichever page they attach to, each labelled with the Tac-On it came from.
 
-Transaction-backed points markets are supported by the built-in TacScript
-`market` declaration. See [`tacons/eagle-buck-market`](../tacons/eagle-buck-market/)
-for a source package using 100 points per Eagle Buck and a maximum balance of
-10 Eagle Bucks, with learner purchases and a Shopkeeper log. The package is not
-automatically published or installed.
-
-Accountability partners are supported by the built-in `partners` declaration.
-See [`built-tacons/accountability-partners`](../built-tacons/accountability-partners/)
-for a package where guides pair learners (or make trios), and partners check in
-at least three days a week, Friday included, with goals for Math and Reading and
-screenshots for Writers' Workshop, Civilization and Quest. It is not
-automatically published or installed either.
-
 ### Positions a Tac-On adds
 
-Some Tac-Ons add a position. A points-economy Tac-On, for example, might add a
-**Shopkeeper**.
+Some Tac-Ons add a position. A points-ledger Tac-On, for example, might add a
+**Treasurer**.
 The details page lists these under *What it adds*. Installing puts the position
 on the **Positions** page, in the studio you installed into, with a purple tag
 naming the Tac-On. From then on it is an ordinary position: the studio elects or
@@ -102,11 +89,11 @@ appoints someone to it, and its history is kept like any other.
 The difference is that the Tac-On decides what the holder sees:
 
 - **Their desk.** At the top of the Positions page, the holder sees a *Your desk*
-  card with whatever the Tac-On gives them — for the Shopkeeper, the points
+  card with whatever the Tac-On gives them — for the Treasurer, the points
   waiting to be exchanged, the requests on the table, and a form to post to the
   ledger. Nobody else sees it, including admins who don't hold the seat.
 - **What they can open and do.** A Tac-On can open a page, panel, form or button
-  to a position's holder. A ledger form can work for the Shopkeeper, the Admin
+  to a position's holder. A ledger form can work for the Treasurer, the Admin
   and the Secretary, and be read-only for everyone else.
 
 When the term ends, all of that passes to whoever holds the position next.
@@ -159,10 +146,10 @@ The language is called **TacScript**. Its full reference is in
 [TacScript.md](TacScript.md). The short version:
 
 ```
-tacon hero-bucks {
-  name "Hero Bucks"
+tacon points-ledger {
+  name "Points Ledger"
   version 1.0.0
-  about "Every buck earned and spent, in one place."
+  about "Every point earned and spent, in one place."
 
   store entry {
     field hero person required
@@ -172,14 +159,14 @@ tacon hero-bucks {
 
   ask balance sum of entry.amount where entry.hero is me.id
 
-  page bucks {
-    title "Hero Bucks"
+  page points {
+    title "Points Ledger"
     nav true
 
-    note "You're holding {my.balance} bucks."
+    note "You're holding {my.balance} points."
     stat "In circulation" sum of entry.amount
 
-    form "Log some bucks" {
+    form "Log some points" {
       into entry
       ask hero
       ask amount
@@ -229,10 +216,10 @@ reached anybody yet.
 A Tac-On can list what another one publishes:
 
 ```
-use hero-bucks as bucks
+use points-ledger as points
 ...
-note "You have {bucks.balance} bucks."
-list bucks.ledger { columns hero, amount }
+note "You have {points.balance} points."
+list points.ledger { columns hero, amount }
 ```
 
 This only works for things the other Tac-On listed under `provides`, only inside
@@ -283,7 +270,7 @@ would own the market.
 
 In **Tac-Ons → Publish official**, click **Choose folder** and select the Tac-On's
 folder on your computer. It must contain exactly one `.tacon` source file.
-For example, select the `eagle-buck-market` package folder. A single `.tacon` file
+A single `.tacon` file
 can also be selected if your browser doesn't support folders.
 
 The portal loads the source, shows its file name and package metadata, and
@@ -293,27 +280,8 @@ remains available as an advanced option.
 
 Fix any file/line diagnostics before publishing. This does not bypass the
 compiler or install a Tac-On automatically. If the live app reports that
-`market` is unknown, publish the latest Eagle Bot engine first, then reload the
+a keyword is unknown, publish the latest Eagle Bot engine first, then reload the
 portal. Changing the import method cannot add language features to an older server.
-
----
-
-## What ships with Eagle Bot
-
-No official Tac-Ons ship right now. `STARTERS` in
-[`server/tacons/starters.ts`](../server/tacons/starters.ts) is where one would
-go; the server publishes whatever is listed there when it starts.
-
-### Tac-Ons that used to ship
-
-Hero Bucks, Quest Board, Gratitude Wall, Buck Shop and Eagle Bucks were
-published by earlier versions and are not published any more. A server that
-seeded the first four deletes them on the next start, along with their installs and everything those installs
-recorded, and logs how much went. Eagle Bucks is not on that list: a server
-that already published it keeps the listing, its installs and their records,
-and simply stops publishing new versions. `RETIRED_STARTER_SLUGS` in
-[`server/tacons/starters.ts`](../server/tacons/starters.ts) is the list, and
-anything added to it is removed the same way.
 
 ---
 

@@ -4,7 +4,7 @@
 
 Plenty of Actons hand the job of running Eagle Bot to a learner. That learner
 needs admin powers: settings, invites, the roster. But they are still a
-learner. They have an AP, they sit in Town Hall as a learner, and nobody
+learner. They sit in Town Hall as a learner, and nobody
 should mistake them for a guide.
 
 A **learner admin** is how you tell Eagle Bot that.
@@ -29,28 +29,8 @@ tell them apart from staff.
 ## What it changes
 
 A learner admin has exactly the same powers as any other admin. The flag
-only matters where being a learner matters:
-
-| | Learner admin | Other admins |
-| --- | --- | --- |
-| **Admin powers** | All of them | All of them |
-| **Accountability Partners Tac-On** | Can be an AP | Can't |
-
----
-
-## Who can be an AP
-
-The Accountability Partners Tac-On pairs learners, so only these people show
-up in its pairing dropdowns:
-
-- **Learners**
-- **Secretaries**, because the secretary is almost always a learner
-- **Learner admins**
-
-Guides and other admins can't be APs. The old *Admins and guides can be
-partners* switch is gone. If a guide or staff admin is still in a pairing from
-before, saving the pairings shows an error naming them. Take them out of that
-row and save again. Their past check-ins are kept.
+marks them as a learner: their profile says **learner admin**, and anything
+that treats learners differently from staff can tell them apart.
 
 ---
 

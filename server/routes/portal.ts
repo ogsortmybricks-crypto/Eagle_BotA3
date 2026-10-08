@@ -417,7 +417,6 @@ portalRouter.post("/tacons/validate", requirePortal, (req, res) => {
       slug: result.manifest.slug,
       name: result.manifest.name,
       version: result.manifest.version,
-      academyWide: Boolean(result.manifest.markets?.some((market) => market.scope === "academy")),
     } : null,
   });
 });

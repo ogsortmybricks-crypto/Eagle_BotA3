@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { test } from "node:test";
 import express from "express";
@@ -41,16 +40,28 @@ test("portal validates uploaded source using the server compiler without publish
       });
       return { status: res.status, body: await res.json() };
     };
-    const source = readFileSync(new URL("../../built-tacons/eagle-buck-market/eagle-buck-market.tacon", import.meta.url), "utf8");
+    const source = `tacon sample-notes {
+      name "Sample Notes"
+      version 1.0.0
+      about "A test Tac-On."
+      store note { field text text required }
+      page notes {
+        title "Notes"
+        form "Add a note" { into note
+          ask text }
+        list note { columns text, created }
+      }
+    }
+    `;
     assert.equal((await post({ source })).status, 401);
     authenticated = true;
     const valid = await post({ source });
     assert.equal(valid.status, 200);
     assert.equal(valid.body.ok, true);
     assert.deepEqual(valid.body.manifest, {
-      slug: "eagle-buck-market", name: "Eagle Buck Market", version: "1.1.0", academyWide: true,
+      slug: "sample-notes", name: "Sample Notes", version: "1.0.0",
     });
-    const invalid = await post({ source: source.replace("keeper shopkeeper", "keeper missing") });
+    const invalid = await post({ source: source.replace("into note", "into missing") });
     assert.equal(invalid.status, 200);
     assert.equal(invalid.body.ok, false);
     assert.equal(invalid.body.manifest, null);

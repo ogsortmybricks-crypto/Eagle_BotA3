@@ -37,7 +37,6 @@ import {
   type HookDef,
   type HookEvent,
   type Manifest,
-  type MarketDef,
   type PageDef,
   type PanelDef,
   type PanelHost,
@@ -63,7 +62,6 @@ type Ctx = {
   needs: Set<string>;
   /** Position names, collected up front so any `allow` can name one. */
   positions: Set<string>;
-  markets: Map<string, MarketDef>;
   extensionConfigurations: Map<string, unknown>;
 };
 
@@ -339,64 +337,6 @@ function compileActions(ctx: Ctx, nodes: Node[]): Action[] {
 /*  Widgets                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function compileMarket(ctx: Ctx, node: Node): MarketDef | null {
-  const name = text(node.args[0]);
-  if (!IDENTIFIER.test(name) || name.length > 48) {
-    error(ctx, node, "A market needs a one-word name, like `market wallet { ... }` (up to 48 characters).");
-    return null;
-  }
-  if (ctx.markets.has(name)) {
-    error(ctx, node, `There's already a market called "${name}".`);
-    return null;
-  }
-  const market: MarketDef = {
-    name,
-    title: titleCase(name),
-    rate: 100,
-    cap: 1000,
-    keeper: "",
-    scope: "install",
-    overdraft: false,
-  };
-  const seen = new Set<string>();
-  for (const child of node.children) {
-    const keyword = child.keyword.toLowerCase();
-    if (seen.has(keyword)) error(ctx, child, `"${keyword}" is already set for this market.`);
-    seen.add(keyword);
-    if (keyword === "title") market.title = joined(child.args) || market.title;
-    else if (keyword === "keeper") market.keeper = text(child.args[0]);
-    else if (keyword === "scope") {
-      const scope = joined(child.args).toLowerCase();
-      if (scope !== "academy" && scope !== "install") {
-        error(ctx, child, "Market scope must be academy (one shared wallet) or install (separate wallets).");
-      } else market.scope = scope;
-    }
-    else if (keyword === "overdraft") {
-      if (child.children.length > 0) {
-        error(ctx, child, "Market overdraft takes one value and cannot have child lines.");
-      }
-      const value = child.args.length === 1 && child.args[0].kind === "word"
-        ? child.args[0].value.toLowerCase()
-        : "";
-      if (value !== "true" && value !== "false") {
-        error(ctx, child, "Market overdraft must be exactly true or false.");
-      } else market.overdraft = value === "true";
-    }
-    else if (keyword === "rate" || keyword === "cap") {
-      const number = Number(joined(child.args));
-      if (!Number.isSafeInteger(number) || number < 1 || number > 1_000_000_000) {
-        error(ctx, child, `Market ${keyword} must be a positive whole number, up to 1,000,000,000.`);
-      } else market[keyword] = number;
-    } else {
-      error(ctx, child, `"${child.keyword}" doesn't belong in a market. Use title, rate, cap, keeper, scope or overdraft.`);
-    }
-  }
-  if (!market.keeper) error(ctx, node, "A market needs `keeper <position>` for its purchase log.");
-  if (market.cap < market.rate) error(ctx, node, "A market cap must allow at least one Buck (cap must be at least rate).");
-  ctx.markets.set(name, market);
-  return market;
-}
-
 function compileWidget(ctx: Ctx, node: Node): Widget | null {
   const keyword = node.keyword.toLowerCase();
 
@@ -461,17 +401,6 @@ function compileWidget(ctx: Ctx, node: Node): Widget | null {
     case "button":
       return compileButton(ctx, node);
 
-    case "market": {
-      const market = text(node.args[0]);
-      if (!ctx.markets.has(market)) {
-        error(ctx, node, `There's no market called "${market}". Declare it at the top level first.`);
-        return null;
-      }
-      if (node.children.length > 0 || node.args.length !== 1) {
-        error(ctx, node, "Show a market with `market <name>`; configure it in the top-level market block.");
-      }
-      return { kind: "market", market };
-    }
 
 
     default:
@@ -485,7 +414,7 @@ function compileWidget(ctx: Ctx, node: Node): Widget | null {
       error(
         ctx,
         node,
-        `"${node.keyword}" isn't something a page can show. Use note, heading, stat, list, form, button, market, divider or a registered extension widget.`,
+        `"${node.keyword}" isn't something a page can show. Use note, heading, stat, list, form, button, divider or a registered extension widget.`,
       );
       return null;
   }
@@ -930,7 +859,6 @@ export function compile(source: string): CompileResult {
     uses: new Map(),
     needs: new Set(),
     positions: new Set(),
-    markets: new Map(),
     extensionConfigurations: new Map(),
   };
 
@@ -959,7 +887,7 @@ export function compile(source: string): CompileResult {
     error(
       ctx,
       root,
-      'A Tac-On needs a name like `tacon hero-bucks` - lowercase letters, numbers and hyphens.',
+      'A Tac-On needs a name like `tacon my-tac-on` - lowercase letters, numbers and hyphens.',
     );
   }
 
@@ -981,7 +909,6 @@ export function compile(source: string): CompileResult {
     positions: [],
     hooks: [],
     computes: [],
-    markets: [],
     extensions: {},
   };
 
@@ -996,7 +923,7 @@ export function compile(source: string): CompileResult {
       const target = text(node.args[0]).toLowerCase();
       const alias = words(node.args).filter((word) => word.toLowerCase() !== "as")[1] ?? target;
       if (!SLUG.test(target)) {
-        error(ctx, node, '`use` takes the name of another Tac-On, like `use hero-bucks as bucks`.');
+        error(ctx, node, '`use` takes the name of another Tac-On, like `use points-ledger as points`.');
         continue;
       }
       if (target === slug) {
@@ -1020,15 +947,6 @@ export function compile(source: string): CompileResult {
       } else {
         ctx.positions.add(name);
       }
-    } else if (keyword === "market") {
-      const market = compileMarket(ctx, node);
-      if (market) manifest.markets!.push(market);
-    }
-  }
-
-  for (const market of manifest.markets ?? []) {
-    if (!ctx.positions.has(market.keeper)) {
-      error(ctx, root, `Market "${market.name}" needs a declared position called "${market.keeper}".`);
     }
   }
 
@@ -1049,7 +967,6 @@ export function compile(source: string): CompileResult {
       case "store":
       case "use":
       case "setting":
-      case "market":
         break;
       case "extension":
         if (!compilerExtensions.some(extension => extension.id === value)) {
@@ -1147,7 +1064,7 @@ export function compile(source: string): CompileResult {
         error(
           ctx,
           node,
-          `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, market, extension, page, panel, position, when, ask, needs, provides, use or a registered extension definition.`,
+          `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, extension, page, panel, position, when, ask, needs, provides, use or a registered extension definition.`,
         );
     }
   }

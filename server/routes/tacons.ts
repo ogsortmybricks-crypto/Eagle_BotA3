@@ -54,15 +54,9 @@ import {
   runActions,
 } from "../tacons/runtime";
 import { heldNames, heldPositions, setPositionsArchived, syncPositions } from "../tacons/positions";
-import {
-  isReservedMarketStore,
-  marketRequiresAcademyInstall,
-} from "../tacons/market";
-import { taconMarketRouter } from "./tacon-market";
 import { registerExtensionRoutes } from "../tacons/extensions";
 
 export const taconsRouter = Router();
-taconsRouter.use(taconMarketRouter);
 registerExtensionRoutes(taconsRouter);
 
 /* -------------------------------------------------------------------------- */
@@ -334,10 +328,6 @@ taconsRouter.delete(
       )
       .limit(1);
     if (!record) return res.status(404).json({ error: "That row is already gone." });
-    if (isReservedMarketStore(record.store)) {
-      return res.status(403).json({ error: "Built-in records can only be changed through their own widget." });
-    }
-
     // Removal is only ever offered by a list that said who may remove, so the
     // permission question is "does any such list exist, for this person?".
     const held = await heldNames(req.user!.id, entry.install.id);
@@ -500,15 +490,7 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
     }
     throw error;
   }
-  const hasAcademyWallet = Boolean(manifest?.markets?.some(marketRequiresAcademyInstall));
-  if (hasAcademyWallet && studioId !== null) {
-    return res.status(409).json({ error: "This Tac-On's market requires one academy-wide install." });
-  }
-
   const result = await db.transaction(async (tx) => {
-    if (hasAcademyWallet) {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`tacon-market-install:${academyId}:${tacon.id}`}, 0))`);
-    }
     const [existing] = await tx
       .select()
       .from(taconInstalls)
@@ -612,12 +594,6 @@ taconsRouter.post("/installs/:id/update", requirePermission("tacons.install"), a
     .limit(1);
   if (!version) return res.status(409).json({ error: "There's no newer version to move to." });
   const nextManifest = readManifest(version);
-  if (
-    entry.install.studioId !== null &&
-    nextManifest?.markets?.some(marketRequiresAcademyInstall)
-  ) {
-    return res.status(409).json({ error: "This version's market requires an academy-wide install." });
-  }
 
   const [updated] = await db
     .update(taconInstalls)

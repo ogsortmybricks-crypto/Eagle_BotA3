@@ -15,13 +15,17 @@ not only the separate developer portal.
 **How to apply:** Include the academy learner dev menu when changing folder
 upload and editing flows.
 
-**Why:** The copied Eagle Buck source failed in the live portal because the
-published bundle did not yet contain the market engine that existed in the
-workspace. Importing a folder alone cannot add language features to an old
-published engine.
+**Why:** Copied source once failed in the live portal because the published
+bundle didn't yet contain a language feature that existed in the workspace.
+Importing a folder alone cannot add language features to an old published
+engine.
 
 **How to apply:** Keep folder selection as the primary portal publishing path.
 Accept one declarative TacScript source, not arbitrary executable folder code.
 Keep server compilation authoritative. When new syntax fails only on the live
 site, compare the published compiler with the workspace before weakening
 validation or rewriting a valid package.
+
+No Tac-On is checked in to this repository, seeded on boot, or named in the
+engine. Tac-Ons exist only as listings published through the app (Dev menu or
+dev portal).

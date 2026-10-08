@@ -4,5 +4,5 @@ import type { Diagnostic } from "./types";
 export type TaconValidation = {
   ok: boolean;
   diagnostics: Diagnostic[];
-  manifest: { slug: string; name: string; version: string; academyWide: boolean } | null;
+  manifest: { slug: string; name: string; version: string } | null;
 };
