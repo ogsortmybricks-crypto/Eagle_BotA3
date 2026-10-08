@@ -107,7 +107,7 @@ case "$command" in
     start_db
     push_schema
     start_server
-    engine_tsx "$here/sandbox-db.ts" seed
+    engine_tsx "$here/sandbox-db.mts" seed
     echo "Sandbox is up at http://localhost:$PORT (engine: $ENGINE, commit $(git -C "$ENGINE" rev-parse --short HEAD 2>/dev/null || echo unknown))."
     ;;
   down) stop_server; echo "Sandbox server stopped." ;;
@@ -116,7 +116,7 @@ case "$command" in
       echo "Up at http://localhost:$PORT (pid $(cat "$PIDFILE"), engine $ENGINE)."
     else echo "Down. Start it with: testing/sandbox up"; fi
     ;;
-  seed|reset|fire|records) start_db; engine_tsx "$here/sandbox-db.ts" "$command" "$@" ;;
+  seed|reset|fire|records) start_db; engine_tsx "$here/sandbox-db.mts" "$command" "$@" ;;
   logs) tail -n "${1:-80}" "$LOG" ;;
   *) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//' ;;
 esac

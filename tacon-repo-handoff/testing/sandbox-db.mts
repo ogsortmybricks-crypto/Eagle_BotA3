@@ -19,7 +19,8 @@ import { PERSONAS, SANDBOX_ACADEMY, SANDBOX_DOMAIN, STUDIOS, personaEmail } from
 const engine = process.env.EAGLE_BOT_ENGINE;
 if (!engine) throw new Error("Set EAGLE_BOT_ENGINE to the Eagle Bot checkout (testing/sandbox does this).");
 const load = (file: string) => import(pathToFileURL(path.join(engine, file)).href);
-const { and, eq, inArray } = await import("drizzle-orm");
+// The engine's own copy, so query helpers match the tables it defines.
+const { and, eq, inArray } = await load("node_modules/drizzle-orm/index.js");
 const { db, pool } = await load("server/db.ts");
 const { hashPassword } = await load("server/auth.ts");
 const { activityLog, academies, studios, taconInstalls, taconRecords, tacons, users } = await load("shared/schema.ts");
