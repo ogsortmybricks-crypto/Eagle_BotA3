@@ -1,6 +1,0 @@
-{
-  "id": "accountability-partners",
-  "compiler": "extension.compiler.ts",
-  "server": "extension.server.ts",
-  "client": "extension.client.tsx"
-}
