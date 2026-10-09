@@ -1,4 +1,9 @@
-# TacScript
+# TacScript reference
+
+> **Snapshot of Eagle Bot's TacScript reference, October 2026.** The live
+> Dev menu's compiler is the authority. If it disagrees with this page, trust
+> it and note the difference in `ENGINE-REQUESTS.md`. Known quirks are listed
+> in [05-limits-and-workarounds.md](05-limits-and-workarounds.md).
 
 *The language Tac-Ons are written in. For learners with dev status.*
 
@@ -29,7 +34,7 @@ indentation is only for your own eyes.
 tacon points-ledger {          # lowercase letters, numbers and hyphens
   name "Points Ledger"          # what people see
   version 1.0.0              # bump this every time you publish
-  about "One sentence."      # shown in the market
+  about "One sentence."      # shown in the Tac-On Market
   icon coins
   category tracking          # general | governance | quests | community | tracking | fun
 

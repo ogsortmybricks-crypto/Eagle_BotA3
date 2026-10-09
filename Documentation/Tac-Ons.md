@@ -181,7 +181,11 @@ tacon points-ledger {
   }
 
   when election.certified {
-    add entry { hero: event.winner, amount: 10, reason: "Elected" }
+    add entry {
+      hero: event.winner
+      amount: 10
+      reason: "Elected"
+    }
   }
 }
 ```

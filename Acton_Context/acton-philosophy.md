@@ -34,6 +34,10 @@ Instead of a unit on ancient Rome followed by a worksheet, students undertake "Q
 
 Studios run themselves through a form of self-government. Students write and vote on their own contracts, essentially constitutions, that govern behavior, consequences, and community norms. When conflicts arise, students bring them to a peer-run process rather than an adult authority. The adults deliberately withhold the urge to swoop in and fix things, because the discomfort of self-governance is exactly where the growth happens.
 
+## Exellence
+
+At Actons: Exellence is defined as work done to the very best of your abilites, putting you as the only person who can judge if something was done with 100% exellence. The idea is that the first few times you attempt something, it should be done with the highest level of exellence you are capable of, with each interation incrementing the level of exellence. Eventually, the work should be comparable to a world-class example.
+
 ## The Hero's Journey
 
 Acton borrows heavily from the language of myth. Every child is framed as the hero of their own story, complete with a call to adventure, mentors, trials, and an eventual "gift to give the world." This isn't just branding; it reframes struggle. A hard math concept or a bruised ego after a failed Quest isn't a problem to be smoothed over. It's Act Two of the hero's journey, exactly where it's supposed to be difficult.
