@@ -20,6 +20,7 @@ import {
   AUDIENCES,
   BASE_COLUMNS,
   BASE_SOURCES,
+  CALENDAR_FEED_KINDS,
   FIELD_TYPES,
   HOOK_EVENTS,
   PANEL_HOSTS,
@@ -28,6 +29,8 @@ import {
   type Action,
   type Audience,
   type BaseSource,
+  type CalendarFeedDef,
+  type CalendarFeedKind,
   type CompileResult,
   type ComputeDef,
   type Condition,
@@ -741,6 +744,132 @@ function compilePanel(ctx: Ctx, node: Node): PanelDef | null {
   return panel;
 }
 
+/**
+ * `calendar <store> { ... }` - a Tac-On's records, as entries on the studio
+ * calendar. Checked hard because a wrong field name here would otherwise just
+ * mean an empty calendar and no idea why.
+ */
+function compileCalendar(ctx: Ctx, node: Node): CalendarFeedDef | null {
+  const first = text(node.args[0]);
+  const parts = first.split(".").filter(Boolean);
+  let fields: StoreField[] | null = null;
+  if (parts.length === 1) {
+    const store = ctx.stores.get(parts[0]);
+    if (!store) {
+      error(ctx, node, `There's no store called "${first}". A calendar shows a store: \`calendar trip { ... }\`.`);
+      return null;
+    }
+    fields = store.fields;
+  } else if (parts.length === 2) {
+    if (!ctx.uses.has(parts[0])) {
+      error(ctx, node, `To show "${first}" you first need \`use <tac-on> as ${parts[0]}\`.`);
+      return null;
+    }
+  } else {
+    error(ctx, node, "A calendar shows one store: `calendar trip { ... }`.");
+    return null;
+  }
+
+  const storeName = parts[parts.length - 1];
+  const feed: CalendarFeedDef = {
+    store: parts,
+    title: { kind: "literal", value: titleCase(storeName) },
+    on: "",
+    until: null,
+    at: null,
+    kind: "event",
+    color: null,
+    where: null,
+    showTo: [],
+    open: null,
+  };
+  let titled = false;
+
+  /** `trip.day` or `day` -> "day", checked against the store when we can see it. */
+  const fieldOf = (child: Node, wantDate: boolean): string | null => {
+    const raw = text(child.args[0]);
+    const name = raw.startsWith(`${storeName}.`) ? raw.slice(storeName.length + 1) : raw;
+    if (!name) {
+      error(ctx, child, `"${child.keyword}" needs a field, like \`${child.keyword} ${storeName}.day\`.`);
+      return null;
+    }
+    if (name === "created" && wantDate) return name;
+    if (fields) {
+      const field = fields.find((entry) => entry.name === name);
+      if (!field) {
+        error(ctx, child, `"${storeName}" has no field called "${name}".`);
+        return null;
+      }
+      if (wantDate && field.type !== "date") {
+        error(ctx, child, `"${name}" is a ${field.type} field. \`${child.keyword}\` needs a date field.`);
+        return null;
+      }
+    }
+    return name;
+  };
+
+  for (const child of node.children) {
+    const keyword = child.keyword.toLowerCase();
+    switch (keyword) {
+      case "title": {
+        const raw = child.args[0];
+        feed.title =
+          raw?.kind === "string"
+            ? parseTemplate(raw.value, child.line, ctx.diagnostics)
+            : (parseExpr(child.args, child.line, ctx.diagnostics) ?? feed.title);
+        titled = true;
+        break;
+      }
+      case "on":
+      case "from":
+        feed.on = fieldOf(child, true) ?? "";
+        break;
+      case "until":
+      case "to":
+        feed.until = fieldOf(child, true);
+        break;
+      case "at":
+        feed.at = fieldOf(child, false);
+        break;
+      case "kind": {
+        const value = text(child.args[0]).toLowerCase().replace(/-/g, "_");
+        if ((CALENDAR_FEED_KINDS as readonly string[]).includes(value)) feed.kind = value as CalendarFeedKind;
+        else error(ctx, child, `A Tac-On's entries can be: ${CALENDAR_FEED_KINDS.join(", ")}.`);
+        break;
+      }
+      case "color":
+      case "colour": {
+        const value = text(child.args[0]);
+        if (/^#[0-9a-f]{6}$/i.test(value)) feed.color = value;
+        else error(ctx, child, 'A colour is a hex code in quotes, like `color "#10b981"`.');
+        break;
+      }
+      case "where":
+        feed.where = conditionOf(ctx, child.args, child.line);
+        break;
+      case "show":
+        if (text(child.args[0]).toLowerCase() === "to") feed.showTo = audiences(ctx, child);
+        else error(ctx, child, "Use `show to everyone` (or a role) to say who sees these entries.");
+        break;
+      case "open":
+        feed.open = text(child.args[0]) || null;
+        break;
+      default:
+        error(ctx, child, `"${child.keyword}" doesn't belong in a calendar. Use title, on, until, at, kind, color, where, show to or open.`);
+    }
+  }
+
+  if (!feed.on) {
+    error(ctx, node, `Say which date each entry is on: \`on ${storeName}.<date field>\`.`);
+    return null;
+  }
+  if (!titled && fields) {
+    const firstText = fields.find((field) => field.type === "text");
+    if (firstText) feed.title = { kind: "path", parts: ["row", firstText.name] };
+  }
+  return feed;
+}
+
 /** The lines that describe a position rather than draw on its holder's desk. */
 const POSITION_KEYS = ["title", "about", "description", "duties", "duty", "seats", "term", "elected", "appointed"];
 
@@ -909,6 +1038,7 @@ export function compile(source: string): CompileResult {
     positions: [],
     hooks: [],
     computes: [],
+    calendars: [],
     extensions: {},
   };
 
@@ -1035,6 +1165,12 @@ export function compile(source: string): CompileResult {
         break;
       }
 
+      case "calendar": {
+        const feed = compileCalendar(ctx, node);
+        if (feed) manifest.calendars!.push(feed);
+        break;
+      }
+
       case "when": {
         const hook = compileHook(ctx, node);
         if (hook) manifest.hooks.push(hook);
@@ -1064,12 +1200,18 @@ export function compile(source: string): CompileResult {
         error(
           ctx,
           node,
-          `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, extension, page, panel, position, when, ask, needs, provides, use or a registered extension definition.`,
+          `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, extension, page, panel, position, calendar, when, ask, needs, provides, use or a registered extension definition.`,
         );
     }
   }
 
   manifest.needs = [...ctx.needs].sort();
+
+  for (const feed of manifest.calendars ?? []) {
+    if (feed.open && !manifest.pages.some((page) => page.name === feed.open)) {
+      error(ctx, root, `A calendar opens "${feed.open}", but there's no page by that name.`);
+    }
+  }
 
   // `provides` has to name something that exists, or another Tac-On will break
   // in a way its author can do nothing about.
@@ -1087,9 +1229,10 @@ export function compile(source: string): CompileResult {
     manifest.pages.length === 0 &&
     manifest.panels.length === 0 &&
     manifest.positions.length === 0 &&
-    manifest.hooks.length === 0
+    manifest.hooks.length === 0 &&
+    (manifest.calendars ?? []).length === 0
   ) {
-    error(ctx, root, "This Tac-On doesn't add anything: give it a page, a panel, a position or a `when`.");
+    error(ctx, root, "This Tac-On doesn't add anything: give it a page, a panel, a position, a calendar or a `when`.");
   }
 
   const failed = ctx.diagnostics.some((entry) => entry.severity === "error");

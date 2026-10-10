@@ -15,6 +15,8 @@ Check for these every time. The compiler won't stop you.
 | **Filtering a `list from` Eagle Bot source by a made-up name**: `where rule.section contains "ROE"` | Matches nothing. Base-source rows are called `row`. | `where row.section contains "ROE"`, or just `where section contains "ROE"` |
 | **Comparing dates**: `where entry.created above "2026-01-01"` | Dates are treated as 0, so the test is meaningless. | Stamp records with a session or week label (see below). |
 | **`event.*` outside a `when`** | Empty. Buttons and forms have no event. | Use `me.*`, `setting.*` or literal text. |
+| **Filtering `list from calendar` by kind code**: `where row.kind is "field_trip"` | Matches nothing. The `kind` column holds the word people see. | `where row.kind is "Field trip"`. (`event.kind` inside a `when` *is* the code, `field_trip`.) |
+| **A time in a `date` field for `at`** | `at` needs a `text` field holding `HH:MM`. Anything else, or an entry spanning several days, shows as all day. | `field leaves text` with a label like "Leaves at (e.g. 09:30)". |
 | **A typo in a store name inside `ask` or `stat`**: `count of entires` | Not checked. It reads as 0. | Check every total shows a non-zero number once there's data. |
 
 ## Missing features, and how to build around them
@@ -41,9 +43,18 @@ ask waiting_count count of entry where entry.status is "waiting"
 ask still_to_do my.open_count plus my.waiting_count
 ```
 
-### No dates, weeks or "today"
+### No date arithmetic
 
-There's no date arithmetic, no "this week", and dates can't be compared.
+Dates can't be compared or added to, and there's no "this week" in a `where`.
+What the engine *does* do with dates:
+
+- **Put them on the calendar.** A `calendar` block draws each record on its
+  date, so people see "when" without any filtering.
+- **Read what's coming up.** `list from calendar` only ever lists entries still
+  on today or later, and `list from calendar.sessions` gives each session's
+  `status` as `done`, `running` or `upcoming`, which you *can* filter on.
+
+For your own records:
 
 - **Session or week label.** Add a `setting` like `current_session`
   (default `"Session 1"`) and a `field session text` on your store. Stamp it in
@@ -71,8 +82,10 @@ anything, including a `person` field set to someone else.
 `election.vote.cast`, `election.closed`, `election.certified`, `wiki.built`,
 `wiki.rule.created`, `wiki.rule.amended`, `wiki.rule.repealed`,
 `position.created`, `position.appointed`, `position.term_ended`,
-`document.uploaded`, `invite.accepted`, `auth.login`. There's nothing like
-"every Friday" and no reminders.
+`document.uploaded`, `invite.accepted`, `auth.login`,
+`calendar.event.created`, `calendar.event.updated`, `calendar.event.removed`.
+There's nothing like "every Friday" and no reminders: a calendar entry's date
+arriving doesn't fire anything.
 
 - Use `townhall.processed` or `townhall.created` as the studio's natural
   rhythm.
@@ -94,10 +107,14 @@ it a different shape, such as one record per week instead of one per action.
 ### Fixed things you can read
 
 - **Eagle Bot sources:** `wiki.rules`, `wiki.sections`, `positions`,
-  `elections`, `meetings`, `people`, `activity`, with only the columns listed in
-  the reference. Read-only.
+  `elections`, `meetings`, `people`, `activity`, `calendar`,
+  `calendar.sessions`, with only the columns listed in the reference.
+  Read-only.
 - **Panel hosts:** `wiki`, `town-hall`, `elections`, `positions`, `people`,
-  `admin`.
+  `admin`, `calendar`.
+- **The calendar:** a Tac-On can read it and draw its own records on it, but
+  can't add, move or remove the guides' entries, and can't mark sessions or
+  breaks. Its entries can't repeat; one record is one entry.
 - **Viewer:** `me.id`, `me.name`, `me.role`, `me.studioId`.
 - **Positions:** only your own Tac-On's.
 - **Other Tac-Ons:** only what they `provides`, read-only, same academy.

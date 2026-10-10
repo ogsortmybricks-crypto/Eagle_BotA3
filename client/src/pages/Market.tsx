@@ -39,6 +39,7 @@ import {
 } from "@/components/ui";
 import { StudioPicker } from "@/components/StudioPicker";
 import { audiencePosition, type Manifest } from "@shared/tacons";
+import { KIND_LABELS } from "@shared/calendar";
 import { describeExtensions } from "@shared/tacons/extension-registry";
 
 type Listing = {
@@ -219,6 +220,7 @@ const NEEDS_WORDS: Record<string, string> = {
   "meetings.read": "Read Town Hall meetings",
   "elections.read": "Read elections and their results",
   "activity.read": "Read the activity log",
+  "calendar.read": "Read the studio calendar: what's coming up, and the sessions and their Quests",
 };
 
 /** `["admin", "position:treasurer"]` as "admin, Treasurer". */
@@ -373,6 +375,13 @@ export function TaconDetail({ slug }: { slug: string }) {
                     <span className="font-medium text-gray-800">{panel.title}</span> — a panel on the{" "}
                     {panel.host} page
                     {panel.showTo.length > 0 && ` (${audienceLabel(panel.showTo, manifest)} only)`}
+                  </li>
+                ))}
+                {(manifest.calendars ?? []).map((feed, index) => (
+                  <li key={`calendar-${index}`}>
+                    Puts its <span className="font-medium text-gray-800">{feed.store.join(".")}</span> records on the
+                    studio calendar, as {KIND_LABELS[feed.kind].toLowerCase()}s
+                    {feed.showTo.length > 0 && ` (${audienceLabel(feed.showTo, manifest)} only)`}
                   </li>
                 ))}
                 {manifest.hooks.map((hook, index) => (

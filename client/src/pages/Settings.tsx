@@ -18,11 +18,13 @@ import {
   Save,
   Scale,
   Unlink,
+  UserPlus,
   Vote,
+  X,
 } from "lucide-react";
 import { apiDelete, apiGet, apiPatch, apiPost, fileToDataUrl } from "@/lib/api";
 import { applyPalette, useSession, type Palette as PaletteType } from "@/lib/session";
-import { Banner, Chip, LoadingPage, Modal, PageHeader, Spinner } from "@/components/ui";
+import { Avatar, Banner, Chip, LoadingPage, Modal, PageHeader, Spinner } from "@/components/ui";
 import {
   FieldRow,
   NumberInput,
@@ -31,6 +33,7 @@ import {
   ToggleRow,
 } from "@/components/SettingControls";
 import type { AcademySettings, StudioOverrides } from "@shared/settings";
+import { MyAttendance } from "@/components/MyAttendance";
 
 /** `perm` opens a tab to anyone holding it, admin or not. */
 const TABS: readonly { id: string; label: string; icon: typeof Layers; admin: boolean; perm?: string }[] = [
@@ -381,6 +384,7 @@ function StudiosTab() {
   const query = useQuery<{
     studios: StudioRow[];
     shared: { rules: number; members: number; positions: number; meetings: number };
+    guides: GuideRow[];
   }>({
     queryKey: ["studios"],
     queryFn: () => apiGet("/studios"),
@@ -399,6 +403,7 @@ function StudiosTab() {
   if (query.isLoading) return <LoadingPage />;
   const studios = query.data?.studios ?? [];
   const shared = query.data?.shared;
+  const guides = query.data?.guides ?? [];
 
   return (
     <div className="space-y-5">
@@ -443,6 +448,7 @@ function StudiosTab() {
                   <span>{studio.counts.positions} positions</span>
                   <span>{studio.counts.meetings} Town Halls</span>
                 </div>
+                <GuideAssignments target={{ studioId: studio.id }} guides={guides} />
               </div>
               <div className="flex shrink-0 gap-1">
                 <button onClick={() => setEditing(studio)} className="btn-secondary btn-sm">
@@ -496,6 +502,115 @@ function StudiosTab() {
   );
 }
 
+/* --------------------------------- guides ---------------------------------- */
+
+type GuideRow = {
+  id: number;
+  userId: number;
+  studioId: number | null;
+  groupId: number | null;
+  name: string;
+  avatarUrl: string | null;
+};
+
+/**
+ * The guides of one studio or one group. These are who the studio lists as
+ * its guides - on People, on the calendar - not a limit on where a guide can
+ * go: a guide still opens any studio the academy lets guides see.
+ */
+function GuideAssignments({
+  target,
+  guides,
+}: {
+  target: { studioId: number } | { groupId: number };
+  guides: GuideRow[];
+}) {
+  const queryClient = useQueryClient();
+  const { can } = useSession();
+  const canAssign = can("guides.assign");
+  const [picking, setPicking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const mine = guides.filter((guide) =>
+    "studioId" in target ? guide.studioId === target.studioId : guide.groupId === target.groupId,
+  );
+
+  const people = useQuery<{ people: { id: number; name: string; role: string }[] }>({
+    queryKey: ["people-all"],
+    queryFn: () => apiGet("/profiles"),
+    enabled: picking,
+  });
+  const candidates = (people.data?.people ?? []).filter(
+    (person) => (person.role === "guide" || person.role === "admin") && !mine.some((guide) => guide.userId === person.id),
+  );
+
+  const refresh = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["studios"] });
+    await queryClient.invalidateQueries({ queryKey: ["people-all"] });
+  };
+  const assign = useMutation({
+    mutationFn: (userId: number) => apiPost("/studios/guides", { userId, ...target }),
+    onSuccess: async () => {
+      setPicking(false);
+      setError(null);
+      await refresh();
+    },
+    onError: (assignError: Error) => setError(assignError.message),
+  });
+  const unassign = useMutation({
+    mutationFn: (id: number) => apiDelete(`/studios/guides/${id}`),
+    onSuccess: refresh,
+    onError: (unassignError: Error) => setError(unassignError.message),
+  });
+
+  if (!canAssign && mine.length === 0) return null;
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+      <span className="text-xs font-medium text-gray-500">Guides:</span>
+      {mine.length === 0 && <span className="text-xs text-gray-400">none yet</span>}
+      {mine.map((guide) => (
+        <span key={guide.id} className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 py-0.5 pl-0.5 pr-2 text-xs text-gray-700">
+          <Avatar name={guide.name} src={guide.avatarUrl} size={18} />
+          {guide.name}
+          {canAssign && (
+            <button
+              onClick={() => unassign.mutate(guide.id)}
+              className="text-gray-400 hover:text-red-600"
+              aria-label={`Remove ${guide.name}`}
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </span>
+      ))}
+      {canAssign &&
+        (picking ? (
+          <select
+            autoFocus
+            className="input w-auto py-1 text-xs"
+            defaultValue=""
+            onChange={(event) => event.target.value && assign.mutate(Number(event.target.value))}
+            onBlur={() => !assign.isPending && setPicking(false)}
+          >
+            <option value="">{people.isLoading ? "Loading..." : candidates.length ? "Pick a guide" : "No guides to add"}</option>
+            {candidates.map((person) => (
+              <option key={person.id} value={person.id}>
+                {person.name}
+                {person.role === "admin" ? " (admin)" : ""}
+              </option>
+            ))}
+          </select>
+        ) : (
+          <button onClick={() => setPicking(true)} className="btn-ghost btn-sm px-2 py-1 text-xs">
+            <UserPlus className="h-3.5 w-3.5" /> Assign
+          </button>
+        ))}
+      {error && <span className="w-full text-xs text-red-600">{error}</span>}
+    </div>
+  );
+}
+
 /* ------------------------------ studio groups ------------------------------ */
 
 type GroupRow = {
@@ -508,6 +623,7 @@ type GroupRow = {
 type GroupsResponse = {
   studios: (StudioRow & { groupId: number | null })[];
   groups: GroupRow[];
+  guides: GuideRow[];
 };
 
 /**
@@ -595,6 +711,7 @@ function GroupsTab() {
                     );
                   })}
                 </div>
+                <GuideAssignments target={{ groupId: group.id }} guides={query.data?.guides ?? []} />
               </div>
               <div className="flex shrink-0 gap-1">
                 <button onClick={() => setEditing(group)} className="btn-secondary btn-sm">
@@ -1514,6 +1631,7 @@ function DisplayTab() {
               { value: "elections", label: "Elections" },
               { value: "positions", label: "Positions" },
               { value: "people", label: "People" },
+              { value: "calendar", label: "Calendar" },
             ]}
           />
         </FieldRow>
@@ -1574,6 +1692,8 @@ function AccountTab() {
           {studio ? ` as a ${learnerNoun === "Hero" ? "member" : learnerNoun} of ${studio.name}` : ""}.
         </div>
       </SettingCard>
+
+      {user?.role === "learner" && <MyAttendance />}
 
       {passwordOpen && <PasswordModal onClose={() => setPasswordOpen(false)} />}
     </div>

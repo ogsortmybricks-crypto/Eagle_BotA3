@@ -114,6 +114,8 @@ export const BASE_SOURCES = [
   "meetings",
   "people",
   "activity",
+  "calendar",
+  "calendar.sessions",
 ] as const;
 export type BaseSource = (typeof BASE_SOURCES)[number];
 
@@ -130,6 +132,8 @@ export const BASE_COLUMNS: Record<BaseSource, string[]> = {
   meetings: ["title", "date", "status", "items", "secretary", "studio"],
   people: ["name", "role", "studio", "nga", "positions"],
   activity: ["action", "summary", "actor", "when", "studio"],
+  calendar: ["title", "kind", "starts", "ends", "time", "location", "quest", "description", "studio"],
+  "calendar.sessions": ["title", "quest", "starts", "ends", "weeks", "status", "studio"],
 };
 
 /** Which base permission a source needs before a Tac-On may read it. */
@@ -141,6 +145,8 @@ export const SOURCE_PERMISSIONS: Record<BaseSource, string> = {
   meetings: "meetings.read",
   people: "wiki.read",
   activity: "activity.read",
+  calendar: "calendar.read",
+  "calendar.sessions": "calendar.read",
 };
 
 export type ListSource =
@@ -221,7 +227,7 @@ export type PageDef = {
 };
 
 /** Base pages a Tac-On can attach a small card to. */
-export const PANEL_HOSTS = ["wiki", "town-hall", "elections", "positions", "people", "admin"] as const;
+export const PANEL_HOSTS = ["wiki", "town-hall", "elections", "positions", "people", "admin", "calendar"] as const;
 export type PanelHost = (typeof PANEL_HOSTS)[number];
 
 export type PanelDef = {
@@ -290,6 +296,9 @@ export const HOOK_EVENTS = [
   "document.uploaded",
   "invite.accepted",
   "auth.login",
+  "calendar.event.created",
+  "calendar.event.updated",
+  "calendar.event.removed",
 ] as const;
 export type HookEvent = (typeof HOOK_EVENTS)[number];
 
@@ -321,6 +330,45 @@ export type ComputeDef = {
 
 export type UseDef = { slug: string; alias: string };
 
+/**
+ * What kind a Tac-On's calendar entries are drawn as. Sessions and breaks are
+ * left out: those pace the whole studio, and only guides set them.
+ */
+export const CALENDAR_FEED_KINDS = ["event", "field_trip", "exhibition", "launch", "deadline"] as const;
+export type CalendarFeedKind = (typeof CALENDAR_FEED_KINDS)[number];
+
+/**
+ * A Tac-On putting its own records on the studio calendar.
+ *
+ *     calendar trip {
+ *       title "{trip.place}"
+ *       on trip.day
+ *       until trip.back
+ *       kind field_trip
+ *     }
+ *
+ * Each row with a date becomes an entry. The entries are read-only on the
+ * calendar - they belong to the Tac-On - and open the Tac-On's page if it
+ * names one with `open`.
+ */
+export type CalendarFeedDef = {
+  /** `["trip"]` for our own store, `["alias", "store"]` for a `use`d one. */
+  store: string[];
+  title: Expr;
+  /** The date field each entry starts on. `created` works too. */
+  on: string;
+  /** An optional date field it ends on, inclusive. */
+  until: string | null;
+  /** An optional text field holding a start time, "HH:MM". */
+  at: string | null;
+  kind: CalendarFeedKind;
+  color: string | null;
+  where: Condition | null;
+  showTo: string[];
+  /** A page of this Tac-On to open when the entry is clicked. */
+  open: string | null;
+};
+
 export type Manifest = {
   slug: string;
   name: string;
@@ -342,6 +390,8 @@ export type Manifest = {
   positions: PositionDef[];
   hooks: HookDef[];
   computes: ComputeDef[];
+  /** Absent on manifests published before the calendar existed. */
+  calendars?: CalendarFeedDef[];
   /** Absent on older manifests. */
   /** Package-owned configuration, compiled by trusted extensions. */
   extensions?: Record<string, unknown>;

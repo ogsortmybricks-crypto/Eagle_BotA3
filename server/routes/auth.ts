@@ -32,7 +32,9 @@ authRouter.post("/login", async (req, res) => {
 
   req.session.userId = user.id;
   // Open on their own studio unless they've deliberately switched before.
-  if (req.session.studioId === undefined) req.session.studioId = user.studioId;
+  // Someone with no home studio is left unpinned, so the scope can open them
+  // on the first studio they guide instead of on every studio at once.
+  if (req.session.studioId === undefined && user.studioId !== null) req.session.studioId = user.studioId;
   await db.update(users).set({ lastLoginAt: new Date() }).where(eq(users.id, user.id));
 
   await logActivity({
@@ -64,12 +66,11 @@ authRouter.get("/me", async (req, res) => {
 
   const settings = resolveSettings(academy?.settings);
   const all = await listStudios(req.user.academyId);
-  const { allowed, canSeeAll } = visibleStudios(
-    req.user.role,
-    req.user.studioId,
-    all,
-    settings,
-  );
+  // The scope already worked this out, assigned guides included; recompute
+  // only if it failed to resolve.
+  const { allowed, canSeeAll } = req.scope
+    ? { allowed: req.scope.allowed, canSeeAll: req.scope.canSeeAll }
+    : visibleStudios(req.user.role, req.user.studioId, all, settings);
 
   const scope = req.scope;
   const selectedStudioId = scope?.studioId ?? null;
@@ -271,7 +272,7 @@ authRouter.post("/invite/:token", async (req, res) => {
 
   await db.update(invites).set({ acceptedAt: new Date() }).where(eq(invites.id, invite.id));
   req.session.userId = user.id;
-  req.session.studioId = user.studioId;
+  if (user.studioId !== null) req.session.studioId = user.studioId;
 
   await logActivity({
     academyId: user.academyId,

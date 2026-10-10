@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
+  CalendarDays,
   Code2,
   Gavel,
   LayoutDashboard,
@@ -27,6 +28,7 @@ const NAV = [
   { href: "/town-hall", label: "Town Hall", icon: Gavel, permission: "meetings.read" },
   { href: "/elections", label: "Elections", icon: Vote, permission: "elections.read" },
   { href: "/positions", label: "Positions", icon: Shield, permission: "positions.read" },
+  { href: "/calendar", label: "Calendar", icon: CalendarDays, permission: "calendar.read" },
   { href: "/people", label: "People", icon: Users, permission: "wiki.read" },
   { href: "/admin", label: "Admin", icon: LayoutDashboard, permission: "status.read" },
   // Everyone gets Settings; the admin-only tabs inside it hide themselves.

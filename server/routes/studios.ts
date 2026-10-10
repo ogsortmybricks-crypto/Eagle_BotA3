@@ -7,6 +7,7 @@ import {
   meetings,
   positions,
   studioGroups,
+  studioGuides,
   studios,
   taconInstalls,
   tacons,
@@ -85,7 +86,136 @@ studiosRouter.get("/", requireAuth, async (req, res) => {
     selectedStudioId: scope.studioId,
     canSeeAll: scope.canSeeAll,
     groups: await groupsFor(academyId, scope),
+    guides: await guidesFor(academyId),
   });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  Guide assignments                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Who guides which studio or group. Everyone can read it - knowing who your
+ * studio's guides are is not a secret - and an admin edits it.
+ */
+export async function guidesFor(academyId: number) {
+  return db
+    .select({
+      id: studioGuides.id,
+      userId: studioGuides.userId,
+      studioId: studioGuides.studioId,
+      groupId: studioGuides.groupId,
+      name: users.name,
+      avatarUrl: users.avatarUrl,
+    })
+    .from(studioGuides)
+    .innerJoin(users, eq(users.id, studioGuides.userId))
+    .where(and(eq(studioGuides.academyId, academyId), eq(users.active, true)))
+    .orderBy(users.name);
+}
+
+const assignSchema = z
+  .object({
+    userId: z.number().int(),
+    studioId: z.number().int().nullable().optional(),
+    groupId: z.number().int().nullable().optional(),
+  })
+  .refine((body) => (body.studioId != null) !== (body.groupId != null), {
+    message: "Pick a studio or a group to guide.",
+  });
+
+studiosRouter.post("/guides", requirePermission("guides.assign"), async (req, res) => {
+  const parsed = assignSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the form." });
+  }
+  const academyId = req.user!.academyId;
+  const { userId } = parsed.data;
+  const studioId = parsed.data.studioId ?? null;
+  const groupId = parsed.data.groupId ?? null;
+
+  const [person] = await db
+    .select()
+    .from(users)
+    .where(and(eq(users.id, userId), eq(users.academyId, academyId), eq(users.active, true)))
+    .limit(1);
+  if (!person) return res.status(404).json({ error: "That person isn't in this academy." });
+  // Admins guide too at plenty of small Actons; a learner never does.
+  if (person.role !== "guide" && person.role !== "admin") {
+    return res.status(400).json({ error: `${person.name} is a ${person.role}. Only guides and admins can be assigned.` });
+  }
+
+  let label: string;
+  if (studioId !== null) {
+    const [studio] = await db
+      .select()
+      .from(studios)
+      .where(and(eq(studios.id, studioId), eq(studios.academyId, academyId)))
+      .limit(1);
+    if (!studio || studio.archived) return res.status(404).json({ error: "That studio doesn't exist." });
+    label = studio.name;
+  } else {
+    const [group] = await db
+      .select()
+      .from(studioGroups)
+      .where(and(eq(studioGroups.id, groupId!), eq(studioGroups.academyId, academyId)))
+      .limit(1);
+    if (!group) return res.status(404).json({ error: "That group doesn't exist." });
+    label = `the "${group.name}" group`;
+  }
+
+  const [existing] = await db
+    .select()
+    .from(studioGuides)
+    .where(
+      and(
+        eq(studioGuides.userId, userId),
+        studioId !== null ? eq(studioGuides.studioId, studioId) : eq(studioGuides.groupId, groupId!),
+      ),
+    )
+    .limit(1);
+  if (existing) return res.json({ assignment: existing });
+
+  const [assignment] = await db
+    .insert(studioGuides)
+    .values({ academyId, userId, studioId, groupId, assignedBy: req.user!.id })
+    .returning();
+
+  await logActivity({
+    academyId,
+    studioId,
+    actorUserId: req.user!.id,
+    action: "studio.guide.assigned",
+    entityType: "user",
+    entityId: userId,
+    summary: `${req.user!.name} made ${person.name} a guide of ${label}.`,
+    metadata: { studioId, groupId },
+  });
+
+  res.status(201).json({ assignment });
+});
+
+studiosRouter.delete("/guides/:id", requirePermission("guides.assign"), async (req, res) => {
+  const academyId = req.user!.academyId;
+  const [removed] = await db
+    .delete(studioGuides)
+    .where(and(eq(studioGuides.id, Number(req.params.id)), eq(studioGuides.academyId, academyId)))
+    .returning();
+  if (!removed) return res.status(404).json({ error: "That assignment doesn't exist." });
+
+  const [person] = await db.select({ name: users.name }).from(users).where(eq(users.id, removed.userId));
+  await logActivity({
+    academyId,
+    studioId: removed.studioId,
+    actorUserId: req.user!.id,
+    action: "studio.guide.unassigned",
+    entityType: "user",
+    entityId: removed.userId,
+    summary: `${req.user!.name} took ${person?.name ?? "a guide"} off ${
+      removed.studioId !== null ? await studioNames([removed.studioId]) : "a studio group"
+    }.`,
+  });
+  res.json({ ok: true });
 });
 
 /* -------------------------------------------------------------------------- */

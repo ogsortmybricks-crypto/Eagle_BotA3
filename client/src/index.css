@@ -80,6 +80,12 @@ body {
   }
 }
 
+/* While a calendar entry is being dragged, everything drawn on top of the day
+   cells lets the drop through to the day underneath. */
+.cal-dragging .cal-fg {
+  pointer-events: none !important;
+}
+
 /* Markdown rendered from the wiki and AI summaries. */
 .prose-wiki {
   @apply text-[15px] leading-relaxed text-gray-700;

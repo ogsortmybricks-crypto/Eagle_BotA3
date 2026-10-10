@@ -87,7 +87,7 @@ export const accessSchema = z.object({
 
 export const displaySchema = z.object({
   dateFormat: z.enum(["local", "iso", "us", "uk"]).default("local"),
-  startPage: z.enum(["wiki", "town-hall", "elections", "positions", "people"]).default("wiki"),
+  startPage: z.enum(["wiki", "town-hall", "elections", "positions", "people", "calendar"]).default("wiki"),
   density: z.enum(["comfortable", "compact"]).default("comfortable"),
 });
 

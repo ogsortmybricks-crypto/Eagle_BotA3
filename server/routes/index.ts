@@ -15,6 +15,7 @@ import { taconsRouter } from "./tacons";
 import { portalRouter } from "./portal";
 import { registerPublicExtensionRoutes } from "../tacons/extensions";
 import { meRouter } from "./me";
+import { calendarRouter } from "./calendar";
 
 export const apiRouter = Router();
 
@@ -41,6 +42,7 @@ apiRouter.use("/wiki", requireAuth, wikiRouter);
 apiRouter.use("/town-hall", requireAuth, townHallRouter);
 apiRouter.use("/elections", requireAuth, electionsRouter);
 apiRouter.use("/positions", requireAuth, positionsRouter);
+apiRouter.use("/calendar", requireAuth, calendarRouter);
 apiRouter.use("/profiles", requireAuth, profilesRouter);
 apiRouter.use("/admin", requireAuth, adminRouter);
 apiRouter.use("/tacons", requireAuth, taconsRouter);

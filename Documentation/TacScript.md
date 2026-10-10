@@ -38,6 +38,7 @@ tacon points-ledger {          # lowercase letters, numbers and hyphens
   ask ...                    # numbers worked out from those tables
   page ...                   # pages in the sidebar
   panel ...                  # cards on Eagle Bot's own pages
+  calendar ...               # your dated records, on the studio calendar
   position ...               # positions on the Positions page, and their holder's desk
   when ...                   # things that happen by themselves
 
@@ -46,8 +47,8 @@ tacon points-ledger {          # lowercase letters, numbers and hyphens
 }
 ```
 
-Only `name`, `version` and one of `page` / `panel` / `position` / `when` are
-required. The compiler will tell you if something is missing.
+Only `name`, `version` and one of `page` / `panel` / `position` / `calendar` /
+`when` are required. The compiler will tell you if something is missing.
 
 ---
 
@@ -189,6 +190,31 @@ Things you can list from Eagle Bot, and the columns each one gives you:
 | `meetings` | title, date, status, items, secretary, studio |
 | `people` | name, role, studio, nga, positions |
 | `activity` | action, summary, actor, when, studio |
+| `calendar` | title, kind, starts, ends, time, location, quest, description, studio |
+| `calendar.sessions` | title, quest, starts, ends, weeks, status, studio |
+
+`calendar` is what's coming up: everything on the studio calendar that is still
+on today or starts in the next six months, soonest first. A session that started
+last month and is still running counts. `kind` holds the word people see
+(`Field trip`, `Session`, `Break`, `Exhibition`, `Launch`, `Deadline`, `Event`),
+`time` is `All day` or `09:00–13:00`, and `studio` is whose calendar it's on
+(a studio, a group, or `Whole academy`).
+
+`calendar.sessions` is the sessions from a year back to a year ahead, oldest
+first. `weeks` is how long each runs, and `status` is `done`, `running` or
+`upcoming`. It's the way to show "this session's Quest":
+
+```
+list from calendar.sessions {
+  title "Our Quest"
+  columns quest, ends
+  where row.status is "running"
+}
+```
+
+Both read the calendar of the studio being looked at (with its group's and the
+academy's entries), or everything the viewer can see when no studio is picked.
+Tac-Ons' own `calendar` entries aren't in either list.
 
 Listing any of these adds a line to what your Tac-On declares it reads, which
 the admin sees before installing. It never grants access: whoever is looking
@@ -234,8 +260,91 @@ panel on town-hall {
 }
 ```
 
-Panels can attach to `wiki`, `town-hall`, `elections`, `positions`, `people` and
-`admin`, and hold the same widgets a page does.
+Panels can attach to `wiki`, `town-hall`, `elections`, `positions`, `people`,
+`admin` and `calendar`, and hold the same widgets a page does. A
+`panel on calendar` sits under the studio calendar, which makes it a good place
+for a `list from calendar.sessions` or a count of what's due.
+
+---
+
+## `calendar` — your records on the studio calendar
+
+Every Eagle Bot academy has a studio calendar that guides keep: sessions and
+their Quests, breaks, field trips, Exhibitions. A `calendar` block puts your
+own records on it too, as entries next to theirs. Each row with a date becomes
+one entry.
+
+```
+store outing {
+  field place text required
+  field day date required
+  field back date
+  field leaves text
+  field kind choice local, overnight
+}
+
+page outings {
+  form "Plan an outing" { ... }
+}
+
+calendar outing {
+  title "Outing: {outing.place}"
+  on outing.day               # required: the date field it starts on
+  until outing.back           # optional: the date field it ends on
+  at outing.leaves            # optional: a text field holding "HH:MM"
+  kind field_trip
+  color "#0ea5e9"
+  where outing.kind is "overnight"
+  show to everyone
+  open outings                # clicking the entry opens this page
+}
+```
+
+| Line | What it does |
+| --- | --- |
+| `title` | What the entry says. A quoted line with `{...}`, or an expression. Leave it out and the store's first `text` field is used. |
+| `on` | **Required.** The `date` field each entry starts on. `created` works too. Writing `on day` and `on outing.day` mean the same. |
+| `until` | A `date` field it ends on, so a three-day camp shows across three days. Empty or earlier than `on` means one day. |
+| `at` | A `text` field holding a start time like `09:30`. Only used for one-day entries; anything that isn't a time shows as all day. |
+| `kind` | How it's drawn: `event` (the default), `field_trip`, `exhibition`, `launch` or `deadline`. Sessions and breaks are left to guides. |
+| `color` | A hex code in quotes. Leave it out to use the kind's colour. |
+| `where` | Which rows go on the calendar. One test per line, like a list. |
+| `show to` | Who sees these entries. Everyone, if you leave it out. |
+| `open` | One of your own pages, opened when someone clicks the entry. |
+
+You can write more than one `calendar` block, for example the same store shown
+two ways to two audiences:
+
+```
+calendar outing {
+  on day
+  kind deadline
+  title "Permission slips due: {outing.place}"
+  show to guide, admin
+}
+```
+
+To show another Tac-On's store, `use` it and name it with its alias. After
+`use some-tacon as other`, write `calendar other.entry` with `on created` (or
+one of its date fields) inside. It has to be in that Tac-On's
+`provides`, and its field names aren't checked until the calendar draws.
+
+**How it looks to people.** Your entries show in every calendar view (day,
+week, month, year and schedule) with the Tac-On's name on them, and each
+person can hide them under **From Tac-Ons** in the calendar's sidebar. They
+are read-only on the calendar: nobody can drag, edit or delete them there.
+They change when your records change. Clicking one shows its date and the
+Tac-On's name, and an **Open** button if you set `open`.
+
+**Who sees what.** The same rules as your pages: an install in one studio
+shows its entries on that studio's calendar (and its group's); an academy-wide
+install shows them everywhere. `show to` narrows it further. Entries don't go
+into the simple view, the calendar's .ics export, or attendance (only a
+guide's break stops attendance).
+
+**Checked when you compile.** The store has to exist, `on` and `until` have to
+name `date` fields, `kind` has to be one of the five, `open` has to name one of
+your pages, and every line has to be one of the ones above.
 
 ---
 
@@ -335,7 +444,12 @@ Things that happen:
 `election.nomination`, `election.vote.cast`, `election.closed`,
 `election.certified`, `wiki.built`, `wiki.rule.created`, `wiki.rule.amended`,
 `wiki.rule.repealed`, `position.created`, `position.appointed`,
-`position.term_ended`, `document.uploaded`, `invite.accepted`, `auth.login`.
+`position.term_ended`, `document.uploaded`, `invite.accepted`, `auth.login`,
+`calendar.event.created`, `calendar.event.updated`, `calendar.event.removed`.
+
+The three `calendar.*` events fire when a guide or admin adds, changes or
+removes something on the studio calendar. Your own `calendar` entries never
+fire them.
 
 What a reaction knows about, as `event.*`:
 
@@ -349,6 +463,25 @@ What a reaction knows about, as `event.*`:
 | `event.votes` | How many votes they got |
 | `event.entityId` | Which thing it happened to |
 | `event.studioId` | Which studio it happened in |
+| `event.title` | On a calendar event: the entry's title |
+| `event.kind` | On a calendar event: `event`, `session`, `break`, `field_trip`, `exhibition`, `launch` or `deadline` |
+| `event.starts`, `event.ends` | On a calendar event: its first and last day, as `2026-10-14` |
+| `event.quest` | On a calendar event: a session's Quest, or empty |
+
+```
+when calendar.event.created {
+  only if event.kind is "session"
+  add quest_log {
+    quest: event.quest
+    starts: event.starts
+  }
+  notify "Logged the Quest for {event.title}."
+}
+```
+
+Removing one day of a repeating entry gives that day as both `event.starts`
+and `event.ends`. Changing one day (or the rest) of a repeating entry fires
+`calendar.event.updated` for the new entry it splits off.
 
 `event.actor` and `event.winner` are different people: the first certified the
 election, the second won it.
@@ -444,7 +577,7 @@ holds it right now*. Leaving the line out means everyone who can open the page.
 - A new `version` every time you publish. Versions already published are frozen.
 - Lists, forms and reactions have to name a store that exists.
 - `provides` has to name a store or value that exists.
-- A Tac-On has to add something: a page, a panel, a position or a `when`.
+- A Tac-On has to add something: a page, a panel, a position, a calendar or a `when`.
 - A position needs its own name — not a role's, and not another position's.
 
 The editor checks all of this as you type, with the line number. If it says

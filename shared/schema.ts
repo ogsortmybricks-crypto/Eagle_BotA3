@@ -253,6 +253,107 @@ export const absences = pgTable("absences", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 }, t => ({ personDayIdx: uniqueIndex("absences_user_day_idx").on(t.userId, t.day) }));
 
+/**
+ * A guide assigned to a studio, or to a whole studio group.
+ *
+ * This is who the studio's guides *are*, not what they can open: a guide can
+ * still jump to any studio the academy lets guides see. It is what the People
+ * page, the calendar and the studio switcher list as "this studio's guides",
+ * and it guarantees an assigned guide can open the studio even when guides
+ * don't see every studio. Exactly one of `studioId` and `groupId` is set.
+ */
+export const studioGuides = pgTable(
+  "studio_guides",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "cascade" }),
+    groupId: integer("group_id").references(() => studioGroups.id, { onDelete: "cascade" }),
+    assignedBy: integer("assigned_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    academyIdx: index("studio_guides_academy_idx").on(t.academyId),
+    userIdx: index("studio_guides_user_idx").on(t.userId),
+  }),
+);
+
+/* -------------------------------------------------------------------------- */
+/*  The studio calendar                                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What can go on the calendar. `session` and `break` are special: a session is
+ * a run of weeks with a Quest, and a break is days nobody is expected in, so
+ * attendance skips them.
+ */
+export const CALENDAR_KINDS = [
+  "event",
+  "session",
+  "break",
+  "field_trip",
+  "exhibition",
+  "launch",
+  "deadline",
+] as const;
+export type CalendarKind = (typeof CALENDAR_KINDS)[number];
+
+export type CalendarRecurrence = {
+  freq: "daily" | "weekly" | "monthly";
+  /** Every n days / weeks / months. */
+  interval: number;
+  /** For weekly: 0 = Sunday ... 6 = Saturday. Empty means the start's weekday. */
+  weekdays: number[];
+  /** Last day an occurrence may start on, inclusive. */
+  until: string | null;
+  /** Or stop after this many occurrences. */
+  count: number | null;
+};
+
+/**
+ * One thing on the calendar.
+ *
+ * Who it belongs to works like everything else: a studio, a studio group, or -
+ * with both null - the whole academy. Days are stored as YYYY-MM-DD strings
+ * because a field trip is on the 14th wherever the person reading it is; only
+ * timed events carry a clock time, also as plain text.
+ */
+export const calendarEvents = pgTable(
+  "calendar_events",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "cascade" }),
+    groupId: integer("group_id").references(() => studioGroups.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<CalendarKind>().notNull().default("event"),
+    title: text("title").notNull(),
+    /** Markdown. */
+    description: text("description").notNull().default(""),
+    location: text("location"),
+    /** For a session: the Quest the studio runs during it. */
+    quest: text("quest"),
+    startDate: varchar("start_date", { length: 10 }).notNull(),
+    /** Inclusive. Equal to startDate for a one-day thing. */
+    endDate: varchar("end_date", { length: 10 }).notNull(),
+    /** "HH:MM", null for all-day. */
+    startTime: varchar("start_time", { length: 5 }),
+    endTime: varchar("end_time", { length: 5 }),
+    /** Overrides the studio's colour. */
+    color: text("color"),
+    recurrence: jsonb("recurrence").$type<CalendarRecurrence | null>(),
+    /** Occurrence start days removed from a recurring series. */
+    exceptions: jsonb("exceptions").$type<string[]>().notNull().default([]),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    academyIdx: index("calendar_events_academy_idx").on(t.academyId),
+    rangeIdx: index("calendar_events_range_idx").on(t.academyId, t.startDate, t.endDate),
+  }),
+);
+
 export const invites = pgTable(
   "invites",
   {
@@ -1070,3 +1171,5 @@ export type TaconRecord = typeof taconRecords.$inferSelect;
 export type PortalDev = typeof portalDevs.$inferSelect;
 export type PortalInvite = typeof portalInvites.$inferSelect;
 export type PortalNotice = typeof portalNotices.$inferSelect;
+export type StudioGuide = typeof studioGuides.$inferSelect;
+export type CalendarEvent = typeof calendarEvents.$inferSelect;

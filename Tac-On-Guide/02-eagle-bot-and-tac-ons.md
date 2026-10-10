@@ -11,7 +11,13 @@ Eagle Bot is where a studio's self-government lives:
 - **Elections.** Nominations, votes and certified results.
 - **Positions.** Jobs the studio fills by election or appointment, with terms
   and history.
-- **People.** The academy's roster, by role and studio.
+- **People.** The academy's roster, by role and studio. Each studio lists
+  its assigned guides.
+- **Calendar.** The studio's year: sessions (runs of weeks, each with a
+  Quest), breaks, field trips, Exhibitions, Launches and deadlines. Guides and
+  admins keep it; everyone reads it. It can be viewed for one studio, a studio
+  group or the whole academy, and it also shows Town Halls and election
+  deadlines.
 - **Activity log.** A record of everything that happened.
 
 An **academy** has several **studios** (Spark, Middle Studio, Launchpad and so
@@ -28,14 +34,16 @@ can add:
 | It can add | Where it shows up |
 | --- | --- |
 | **Pages** | The sidebar, under a separate *Tac-Ons* heading |
-| **Panels** | Cards at the bottom of Eagle Bot's own pages: `wiki`, `town-hall`, `elections`, `positions`, `people`, `admin` |
+| **Panels** | Cards at the bottom of Eagle Bot's own pages: `wiki`, `town-hall`, `elections`, `positions`, `people`, `admin`, `calendar` |
+| **Calendar entries** (`calendar`) | Its own dated records, drawn on the studio calendar next to the guides' field trips and sessions |
 | **Positions** | Real positions on the Positions page, elected or appointed like any other, each with a private **desk** for whoever holds it |
 | **Reactions** (`when`) | Run by themselves when something happens, such as an election being certified |
 | **Stores** | Its own tables of records |
 | **Settings** | Questions the installing admin answers, such as a number or a choice |
 
 It can **read** Eagle Bot's wiki rules and sections, positions, elections,
-meetings, people and activity log. It can **write** only to its own stores and
+meetings, people, activity log and studio calendar (what's coming up, and the
+sessions with their Quests). It can **write** only to its own stores and
 to the activity log.
 
 ## The safety model
@@ -50,7 +58,9 @@ depends on getting around one.
   studio of the person looking, not the author's or the installer's. A learner
   who can't see the activity log gets an empty list with a note saying why.
 - **Writes are limited to its own records.** A Tac-On can't edit the wiki,
-  create elections, change people, send email or reach another academy.
+  create elections, change people, add to or change the studio calendar, send
+  email or reach another academy. Its `calendar` entries are its own records,
+  drawn on the calendar read-only.
 - **Reach is declared.** Every Eagle Bot source a Tac-On lists is shown to the
   admin before they install it.
 - **Failures are quiet.** A broken reaction fails silently and never breaks

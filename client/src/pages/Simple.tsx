@@ -3,6 +3,7 @@ import { Link, Redirect, Route, Switch, useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
+  CalendarDays,
   Check,
   CheckCircle2,
   ChevronLeft,
@@ -14,6 +15,7 @@ import {
 import { apiGet, apiPost } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { Avatar, LoadingPage, Markdown, Spinner } from "@/components/ui";
+import { addDays, localToday, sessionWeek } from "@shared/calendar";
 
 /**
  * The simple view.
@@ -24,7 +26,7 @@ import { Avatar, LoadingPage, Markdown, Spinner } from "@/components/ui";
  * history, findings, the activity log, settings - is noise to them, and noise
  * is what stops a young Hero reading the Contract at all.
  *
- * So this is not the normal app with things hidden. It's three screens, big
+ * So this is not the normal app with things hidden. It's four screens, big
  * type, and one action per screen. An admin turns it on per studio in
  * Settings, and it follows the learner rather than the studio they're looking
  * at, because their reading level doesn't change when they open another tab.
@@ -34,6 +36,7 @@ const NAV = [
   { href: "/wiki", label: "Our rules", icon: BookOpen },
   { href: "/elections", label: "Voting", icon: Vote },
   { href: "/positions", label: "Jobs", icon: Shield },
+  { href: "/calendar", label: "Coming up", icon: CalendarDays },
 ] as const;
 
 export function SimpleApp() {
@@ -81,11 +84,12 @@ export function SimpleApp() {
             {(params) => <SimpleBallot id={Number(params.id)} />}
           </Route>
           <Route path="/positions" component={SimpleJobs} />
+          <Route path="/calendar" component={SimpleCalendar} />
           <Route>{() => <Redirect to="/wiki" />}</Route>
         </Switch>
       </main>
 
-      {/* A fixed bar of three big targets. Nothing else to get lost in. */}
+      {/* A fixed bar of four big targets. Nothing else to get lost in. */}
       <nav className="fixed inset-x-0 bottom-0 border-t border-gray-200 bg-white">
         <div className="mx-auto flex max-w-3xl">
           {NAV.map((item) => {
@@ -105,6 +109,96 @@ export function SimpleApp() {
           })}
         </div>
       </nav>
+    </div>
+  );
+}
+
+/* -------------------------------- calendar -------------------------------- */
+
+type SimpleItem = {
+  key: string;
+  kind: string;
+  title: string;
+  quest: string | null;
+  location: string | null;
+  startTime: string | null;
+  occurrenceStart: string;
+  occurrenceEnd: string;
+};
+
+const SIMPLE_KIND: Record<string, { label: string; emoji: string }> = {
+  event: { label: "Event", emoji: "📌" },
+  session: { label: "Session", emoji: "🗺️" },
+  break: { label: "No studio", emoji: "🏖️" },
+  field_trip: { label: "Field trip", emoji: "🚌" },
+  exhibition: { label: "Exhibition", emoji: "🎤" },
+  launch: { label: "Launch", emoji: "🚀" },
+  deadline: { label: "Due", emoji: "⏰" },
+};
+
+/**
+ * "What's coming up?" for a six-year-old: the Quest we're on, and the next
+ * few things, one big card each. No grid - a month view is a lot of boxes to
+ * read when you're still learning the days of the week.
+ */
+function SimpleCalendar() {
+  const { studioId } = useSession();
+  const today = localToday();
+  const to = addDays(today, 45);
+  const query = useQuery<{ items: SimpleItem[] }>({
+    queryKey: ["calendar", "simple", studioId, today],
+    queryFn: () => apiGet(`/calendar?from=${today}&to=${to}&view=studio`),
+  });
+
+  if (query.isLoading) return <LoadingPage label="Looking ahead..." />;
+  const items = query.data?.items ?? [];
+  const session = items.find((item) => item.kind === "session" && item.occurrenceStart <= today && item.occurrenceEnd >= today);
+  const upcoming = items.filter((item) => item.kind !== "session").slice(0, 12);
+  const dayName = (day: string) =>
+    day === today
+      ? "Today"
+      : day === addDays(today, 1)
+        ? "Tomorrow"
+        : new Date(`${day}T12:00:00Z`).toLocaleDateString(undefined, { timeZone: "UTC", weekday: "long", month: "long", day: "numeric" });
+
+  return (
+    <div className="space-y-4">
+      {session && (
+        <div className="rounded-2xl bg-purple-50 p-5">
+          <div className="text-sm font-semibold uppercase tracking-wide text-purple-600">
+            {session.title} · Week {sessionWeek(session.occurrenceStart, today)}
+          </div>
+          {session.quest && <div className="mt-1 text-2xl font-bold text-purple-950">Our Quest: {session.quest}</div>}
+        </div>
+      )}
+      {upcoming.length === 0 ? (
+        <div className="rounded-2xl bg-gray-50 px-6 py-14 text-center">
+          <CalendarDays className="mx-auto h-10 w-10 text-gray-300" />
+          <p className="mt-4 text-lg font-semibold text-gray-700">Nothing coming up yet.</p>
+        </div>
+      ) : (
+        upcoming.map((item) => {
+          const kind = SIMPLE_KIND[item.kind] ?? SIMPLE_KIND.event;
+          return (
+            <div key={item.key} className="flex items-center gap-4 rounded-2xl border-2 border-gray-100 p-5">
+              <span className="text-4xl" aria-hidden="true">
+                {kind.emoji}
+              </span>
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-gray-500">
+                  {dayName(item.occurrenceStart)}
+                  {item.occurrenceEnd !== item.occurrenceStart && ` to ${dayName(item.occurrenceEnd)}`}
+                </div>
+                <div className="text-xl font-bold text-gray-900">{item.title}</div>
+                <div className="text-base text-gray-600">
+                  {kind.label}
+                  {item.location && ` · ${item.location}`}
+                </div>
+              </div>
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }

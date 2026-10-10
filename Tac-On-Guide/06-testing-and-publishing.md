@@ -50,7 +50,13 @@ Then:
 - **Add real records** through every form. Check every `stat` and `ask` shows
   the number you expect. A typo reads as 0.
 - **Trigger every `when`.** Certify a small test election, or hold a Town
-  Hall, then check the reaction's record appeared.
+  Hall, then check the reaction's record appeared. For a `calendar.*`
+  reaction, ask a guide or admin to add, change and remove a test entry.
+- **Check every `calendar` block.** Save a record with a date this month and
+  open **Calendar**: it should be on the right day, in the right colour, with
+  the title you meant. Try one with an end date and one without, check the
+  `where` leaves out what it should, sign in as someone outside `show to` to
+  make sure they don't see it, and click it to check `open` goes to your page.
 - **Try the update path.** With records saved, bump the version, publish,
   press **Update** on the install, and check the old records still display
   correctly.

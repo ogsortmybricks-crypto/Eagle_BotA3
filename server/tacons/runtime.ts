@@ -64,6 +64,8 @@ import type {
 } from "@shared/tacons/view";
 import { logActivity } from "../activity";
 import { scoped, studioFilter, type StudioScope } from "../studio";
+import { eventsInRange, expand, resolveLens } from "../calendar";
+import { addDays, daysBetween, KIND_LABELS, localToday } from "@shared/calendar";
 import type { LoadedInstall } from "./registry";
 import { resolveUses } from "./registry";
 import { heldNames, positionFacts, type PositionFacts } from "./positions";
@@ -592,6 +594,58 @@ async function baseRows(runtime: Runtime, source: BaseSource, limit: number): Pr
       };
     }
 
+    case "calendar":
+    case "calendar.sessions": {
+      // The studio being looked at, its group and the academy - or, with no
+      // studio selected, everything the viewer can read.
+      const lens = await resolveLens(
+        academyId,
+        scope ?? ({ studioId: null, canSeeAll: true, readableIds: [] } as unknown as StudioScope),
+        scope?.studioId != null ? "studio" : "academy",
+        null,
+      );
+      const today = localToday();
+      if (source === "calendar") {
+        // What's coming up: today onwards, soonest first.
+        const to = addDays(today, 180);
+        const items = expand(await eventsInRange(academyId, lens, today, to), lens, today, to);
+        return {
+          rows: items.slice(0, limit).map((item) => ({
+            id: item.key,
+            title: item.title,
+            kind: KIND_LABELS[item.kind] ?? item.kind,
+            starts: item.occurrenceStart,
+            ends: item.occurrenceEnd,
+            time: item.startTime ? `${item.startTime}–${item.endTime}` : "All day",
+            location: item.location ?? "",
+            quest: item.quest ?? "",
+            description: item.description,
+            studio: item.ownerLabel,
+          })),
+          problem: null,
+        };
+      }
+      // Sessions across this school year and the next, in order.
+      const from = addDays(today, -366);
+      const to = addDays(today, 366);
+      const sessions = (await eventsInRange(academyId, lens, from, to)).filter((event) => event.kind === "session");
+      return {
+        rows: expand(sessions, lens, from, to)
+          .slice(0, limit)
+          .map((item) => ({
+            id: item.key,
+            title: item.title,
+            quest: item.quest ?? "",
+            starts: item.occurrenceStart,
+            ends: item.occurrenceEnd,
+            weeks: Math.ceil((daysBetween(item.occurrenceStart, item.occurrenceEnd) + 1) / 7),
+            status: item.occurrenceEnd < today ? "done" : item.occurrenceStart > today ? "upcoming" : "running",
+            studio: item.ownerLabel,
+          })),
+        problem: null,
+      };
+    }
+
     case "activity": {
       const rows = await db
         .select({ entry: activityLog, actor: users.name })
@@ -810,6 +864,69 @@ export async function renderPage(runtime: Runtime, page: PageDef): Promise<Tacon
     widgets,
     people: peopleList(runtime),
   };
+}
+
+/** One record of a Tac-On, as an entry on the studio calendar. */
+export type TaconCalendarEntry = {
+  key: string;
+  title: string;
+  start: string;
+  end: string;
+  startTime: string | null;
+  kind: string;
+  color: string | null;
+  installId: number;
+  taconName: string;
+  /** The Tac-On page to open, when its `calendar` block names one. */
+  href: string | null;
+};
+
+const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * Everything this install's `calendar` blocks put between `from` and `to`,
+ * for the person looking. Same audience rules and same records as its pages,
+ * so a calendar can never show what the Tac-On's own page wouldn't.
+ */
+export async function calendarFeed(runtime: Runtime, from: string, to: string): Promise<TaconCalendarEntry[]> {
+  const feeds = runtime.install.manifest.calendars ?? [];
+  const out: TaconCalendarEntry[] = [];
+  const day = (value: unknown) => {
+    const text = String(value ?? "").trim();
+    if (!text) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+  };
+
+  for (const [index, feed] of feeds.entries()) {
+    if (!audienceAllows(feed.showTo, runtime.user, runtime.held)) continue;
+    const rows = await loadRows(runtime, feed.store);
+    const aliases = [feed.store[feed.store.length - 1], "row", "it"];
+    for (const row of rows) {
+      const context = { ...contextFor(runtime), row, rowAliases: aliases };
+      if (feed.where && !matches(feed.where, context)) continue;
+      const start = day(row[feed.on]);
+      if (!start) continue;
+      let end = feed.until ? (day(row[feed.until]) ?? start) : start;
+      if (end < start) end = start;
+      if (end < from || start > to) continue;
+      const time = feed.at ? String(row[feed.at] ?? "").trim() : "";
+      out.push({
+        key: `tacon-${runtime.install.install.id}-${index}-${String(row.id)}`,
+        title: display(evaluate(feed.title, context)) || runtime.install.tacon.name,
+        start,
+        end,
+        startTime: TIME.test(time) && start === end ? time : null,
+        kind: feed.kind,
+        color: feed.color,
+        installId: runtime.install.install.id,
+        taconName: runtime.install.tacon.name,
+        href: feed.open ? `/t/${runtime.install.install.id}/${feed.open}` : null,
+      });
+    }
+  }
+  return out;
 }
 
 export async function renderPanel(runtime: Runtime, panel: PanelDef): Promise<TaconPanelView> {

@@ -3,7 +3,7 @@
 You're building **Tac-Ons**: add-ons for **Eagle Bot**, a web app that helps
 learners at Acton Academies run their own studio. That means their Contract
 (rules), Town Halls, elections and positions. A Tac-On adds pages, panels,
-positions and automatic reactions to Eagle Bot. It's written in a small,
+positions, calendar entries and automatic reactions to Eagle Bot. It's written in a small,
 safe language called **TacScript**.
 
 ## Your job

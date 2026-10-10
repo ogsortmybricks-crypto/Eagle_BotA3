@@ -2,7 +2,7 @@ import type { NextFunction, Request, Response } from "express";
 import { and, asc, eq, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { db } from "./db";
-import { studios, type Studio } from "@shared/schema";
+import { studioGuides, studios, type Studio } from "@shared/schema";
 import {
   effectiveFor,
   resolveOverrides,
@@ -110,6 +110,8 @@ export function visibleStudios(
   homeStudioId: number | null,
   all: Studio[],
   settings: { governance: { guidesSeeAllStudios: boolean; learnersSeeAllStudios: boolean } },
+  /** Studios this person is assigned to guide. Always openable, whatever the settings say. */
+  guidedIds: number[] = [],
 ): { allowed: Studio[]; canSeeAll: boolean } {
   if (role === "admin") return { allowed: all, canSeeAll: true };
   if (role === "guide" && settings.governance.guidesSeeAllStudios) {
@@ -118,9 +120,32 @@ export function visibleStudios(
   if (settings.governance.learnersSeeAllStudios) return { allowed: all, canSeeAll: true };
 
   // A secretary may be taking notes for more than one studio, but until an
-  // academy asks for that the home studio is the honest default.
-  const home = all.filter((studio) => studio.id === homeStudioId);
+  // academy asks for that the home studio is the honest default. A guide also
+  // gets every studio they've been assigned to.
+  const home = all.filter(
+    (studio) => studio.id === homeStudioId || (role === "guide" && guidedIds.includes(studio.id)),
+  );
   return { allowed: home, canSeeAll: home.length === all.length && all.length > 0 };
+}
+
+/**
+ * The studios a person is assigned to guide: the ones named directly, plus
+ * every studio in a group they guide. `all` should include archived studios
+ * so the caller can decide what to drop.
+ */
+export async function guidedStudioIds(userId: number, all: Studio[]): Promise<number[]> {
+  const rows = await db
+    .select({ studioId: studioGuides.studioId, groupId: studioGuides.groupId })
+    .from(studioGuides)
+    .where(eq(studioGuides.userId, userId));
+  const ids = new Set<number>();
+  for (const row of rows) {
+    if (row.studioId !== null) ids.add(row.studioId);
+    if (row.groupId !== null) {
+      for (const studio of all) if (studio.groupId === row.groupId) ids.add(studio.id);
+    }
+  }
+  return [...ids];
 }
 
 /**
@@ -135,11 +160,13 @@ export async function attachStudioScope(req: Request, _res: Response, next: Next
   try {
     const everything = await listStudios(req.user.academyId, true);
     const all = everything.filter((studio) => !studio.archived);
+    const guidedIds = req.user.role === "guide" ? await guidedStudioIds(req.user.id, everything) : [];
     const { allowed, canSeeAll } = visibleStudios(
       req.user.role,
       req.user.studioId,
       all,
       req.settings,
+      guidedIds,
     );
 
     const header = req.header("x-studio-id") ?? (req.query.studioId as string | undefined);
@@ -152,7 +179,8 @@ export async function attachStudioScope(req: Request, _res: Response, next: Next
     } else if (req.session.studioId !== undefined) {
       studioId = req.session.studioId;
     } else {
-      studioId = req.user.studioId;
+      // A guide placed in no studio opens on the first one they guide.
+      studioId = req.user.studioId ?? guidedIds.find((id) => all.some((studio) => studio.id === id)) ?? null;
     }
 
     const studio = allowed.find((entry) => entry.id === studioId) ?? null;

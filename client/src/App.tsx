@@ -16,6 +16,7 @@ import { Positions } from "@/pages/Positions";
 import { People, Profile } from "@/pages/People";
 import { Admin } from "@/pages/Admin";
 import { Settings } from "@/pages/Settings";
+import { Calendar } from "@/pages/Calendar";
 import { SimpleApp } from "@/pages/Simple";
 import { Market, TaconDetail } from "@/pages/Market";
 import { TaconPage } from "@/pages/TaconPage";
@@ -107,6 +108,7 @@ export function App() {
         <Route path="/elections" component={Elections} />
         <Route path="/elections/:id">{(params) => <ElectionDetail id={Number(params.id)} />}</Route>
         <Route path="/positions" component={Positions} />
+        <Route path="/calendar" component={Calendar} />
         <Route path="/people" component={People} />
         <Route path="/people/:id">{(params) => <Profile id={Number(params.id)} />}</Route>
         <Route path="/admin" component={Admin} />

@@ -4,8 +4,8 @@
 
 A Tac-On is an add-on for Eagle Bot. If you have used a Chrome extension or a
 Minecraft data pack, you already have the idea: the base app does what it does,
-and a Tac-On adds something on top — a page, a panel, or a rule about what
-happens when the studio does something.
+and a Tac-On adds something on top — a page, a panel, entries on the studio
+calendar, or a rule about what happens when the studio does something.
 
 Two things make Tac-Ons different from a feature request:
 
@@ -26,7 +26,8 @@ what it does in one line, and how many times it has been installed. Click one to
 open its details page, which tells you four things before you commit to
 anything:
 
-1. **What it adds** — every page, panel and reaction, listed plainly.
+1. **What it adds** — every page, panel, set of calendar entries and reaction,
+   listed plainly.
 2. **What it can read** — the parts of Eagle Bot it looks at. See below.
 3. **Who wrote it** — an academy's learner, or the Eagle Bot team (those carry an
    *Official* badge).
@@ -58,6 +59,7 @@ Every Tac-On declares what it reads, and the install screen shows you the list:
 | Read the positions and who holds them | It can list positions |
 | Read Town Hall meetings | It can list meetings |
 | Read elections and their results | It can list elections and vote counts |
+| Read the studio calendar | It can list what's coming up, and the sessions and their Quests |
 | Read the activity log | It can list what has happened in the academy |
 
 **A Tac-On can never show somebody more than they could already see.** The check

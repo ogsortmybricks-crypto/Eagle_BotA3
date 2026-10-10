@@ -36,6 +36,10 @@ export const PERMISSIONS = {
     "elections.vote",
     "activity.read",
     "status.read",
+    "calendar.read",
+    "calendar.manage",
+    "attendance.read",
+    "guides.assign",
     // The market is an admin's shelf: they decide what this academy runs.
     "tacons.use",
     "tacons.market",
@@ -55,6 +59,7 @@ export const PERMISSIONS = {
     "elections.manage",
     "elections.vote",
     "status.read",
+    "calendar.read",
     "tacons.use",
   ],
   guide: [
@@ -67,6 +72,11 @@ export const PERMISSIONS = {
     "elections.read",
     "activity.read",
     "status.read",
+    // The calendar is the room's schedule, which is the guide's job: field
+    // trips, sessions and their Quests, breaks, and who is actually in.
+    "calendar.read",
+    "calendar.manage",
+    "attendance.read",
     "tacons.use",
   ],
   learner: [
@@ -75,6 +85,7 @@ export const PERMISSIONS = {
     "meetings.read",
     "elections.read",
     "elections.vote",
+    "calendar.read",
     "tacons.use",
   ],
 } as const satisfies Record<Role, readonly string[]>;

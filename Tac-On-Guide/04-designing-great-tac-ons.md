@@ -35,6 +35,12 @@ are the most valuable.
   each winner, building a studio history of who served.
 - **Studio visitors / Exhibition sign-up.** A form that collects guests and a
   list for the learner running the event.
+- **Commitments on the calendar.** Anything with a due date (a promise made at
+  Town Hall, a job's next check-in, a committee's report) gets a `calendar`
+  block, so it shows up next to the field trips instead of hiding on a page.
+- **Quest board.** A `panel on calendar` with `list from calendar.sessions`
+  showing the running Quest, and a form where learners log what they're
+  building for it.
 
 ## 2. Design principles
 
@@ -111,10 +117,22 @@ For a record *about* someone, use a `person` field and compare it with
 ask my_points sum of entry.amount where entry.hero is me.id
 ```
 
-### "This session" without dates
+### "This session" without date logic
 
-There's no date logic yet. Put the session in a setting and stamp it on each
-record:
+To *show* the current session and its Quest, read the calendar the guides
+keep:
+
+```
+list from calendar.sessions {
+  title "This session"
+  columns title, quest, ends
+  where row.status is "running"
+}
+```
+
+To *tag your own records* with a session, there's still no date logic: you
+can't compare a record's date to the session's. Put the session in a setting
+and stamp it on each record:
 
 ```
 setting session {

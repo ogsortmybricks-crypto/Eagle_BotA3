@@ -25,6 +25,8 @@ Open any studio in a group and you see everything the whole group owns:
 | **Tac-Ons** | A Tac-On installed in either studio shows for the whole group, with one shared set of records. Its `when` reactions hear about things that happen anywhere in the group. |
 | **Documents and AI** | Building the wiki reads the whole group's documents. When the AI writes rules or processes a Town Hall, it sees the whole group's Contract and positions and writes for all of the group's studios. |
 | **Profiles** | Learners can see the profiles of everyone in the group. |
+| **Calendar** | Entries put on the group's calendar show in every studio in it. Each studio's own entries stay on that studio's calendar; the **Studio group** view shows them all together. See [the calendar](Calendar.md). |
+| **Guides** | A guide assigned to the group is a guide of every studio in it. See [Studio guides](Studio-Guides.md). |
 
 Studios outside the group see none of it. Academy-wide items still show
 everywhere, as they always have.

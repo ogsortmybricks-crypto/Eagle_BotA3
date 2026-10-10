@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "../db";
-import { positionHolders, positions, studios, users } from "@shared/schema";
+import { positionHolders, positions, studioGuides, studios, users } from "@shared/schema";
 import { publicUser, requireAuth } from "../auth";
 import { logActivity } from "../activity";
 import { canReadStudio, requireScope } from "../studio";
@@ -87,6 +87,24 @@ profilesRouter.get("/", requireAuth, async (req, res) => {
     .where(eq(studios.academyId, academyId))
     .orderBy(asc(studios.orderIndex), asc(studios.id));
 
+  // Who guides which studio. A group assignment lists the guide under every
+  // studio in the group, which is what "guide of Upper Studios" means.
+  const guideRows = await db
+    .select()
+    .from(studioGuides)
+    .where(eq(studioGuides.academyId, academyId));
+  const guideOf = (userId: number) => [
+    ...new Set(
+      guideRows
+        .filter((row) => row.userId === userId)
+        .flatMap((row) =>
+          row.studioId !== null
+            ? [row.studioId]
+            : studioRows.filter((studio) => studio.groupId === row.groupId).map((studio) => studio.id),
+        ),
+    ),
+  ];
+
   const visible = onlyMyStudios
     ? rows.filter((person) => canReadStudio(scope, person.studioId))
     : rows;
@@ -97,6 +115,7 @@ profilesRouter.get("/", requireAuth, async (req, res) => {
       // An academy running a Spark studio usually does not want addresses on screen.
       email: settings.access.showEmailsInDirectory ? person.email : null,
       currentPositions: held.filter((h) => h.userId === person.id && !h.endedAt).map((h) => h.title),
+      guideOf: guideOf(person.id),
     })),
     studios: studioRows,
   });

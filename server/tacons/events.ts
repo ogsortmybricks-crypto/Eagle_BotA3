@@ -61,6 +61,12 @@ function eventRow(event: TaconEvent, actorName: string | null): Row {
     winner: winner?.userId ?? null,
     winnerName: winner?.label ?? "",
     votes: winner?.votes ?? 0,
+    // Calendar changes: what was added, moved or removed, and when it runs.
+    kind: typeof metadata.kind === "string" ? metadata.kind : "",
+    title: typeof metadata.title === "string" ? metadata.title : "",
+    starts: typeof metadata.starts === "string" ? metadata.starts : "",
+    ends: typeof metadata.ends === "string" ? metadata.ends : "",
+    quest: typeof metadata.quest === "string" ? metadata.quest : "",
     meta: metadata,
   };
 }

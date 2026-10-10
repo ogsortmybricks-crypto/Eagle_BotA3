@@ -36,6 +36,8 @@ type PersonRow = {
   bio: string | null;
   nga: string | null;
   currentPositions: string[];
+  /** Studios this person is an assigned guide of, directly or through a group. */
+  guideOf: number[];
 };
 
 export function People() {
@@ -53,9 +55,10 @@ export function People() {
 
   // Default to the studio you're in: a Middle Studio learner opening People
   // wants their own roster, not ninety names across four studios.
+  // A studio's assigned guides are listed with it, wherever their own home is.
   const visible = showEveryone
     ? people
-    : people.filter((person) => person.studioId === studioId);
+    : people.filter((person) => person.studioId === studioId || (studioId !== null && person.guideOf.includes(studioId)));
 
   const groups = [
     ...studios
@@ -64,15 +67,18 @@ export function People() {
         key: String(studio.id),
         label: studio.name,
         color: studio.color,
-        people: visible.filter((person) => person.studioId === studio.id),
+        guides: visible.filter((person) => person.guideOf.includes(studio.id)),
+        people: visible.filter((person) => person.studioId === studio.id && !person.guideOf.includes(studio.id)),
       })),
     {
       key: "none",
       label: "Not in a studio",
       color: null as string | null,
-      people: visible.filter((person) => person.studioId === null),
+      guides: [] as PersonRow[],
+      // Someone placed nowhere but guiding a studio is listed there instead.
+      people: visible.filter((person) => person.studioId === null && person.guideOf.length === 0),
     },
-  ].filter((group) => group.people.length > 0);
+  ].filter((group) => group.people.length + group.guides.length > 0);
 
   const currentStudioName = myStudios.find((entry) => entry.id === studioId)?.name;
 
@@ -108,9 +114,24 @@ export function People() {
                 )}
                 {group.label}
                 <span className="font-normal normal-case text-gray-400">
-                  {group.people.length}
+                  {group.people.length + group.guides.length}
                 </span>
               </h2>
+              {group.guides.length > 0 && (
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium text-gray-500">Guides</span>
+                  {group.guides.map((guide) => (
+                    <Link
+                      key={guide.id}
+                      href={`/people/${guide.id}`}
+                      className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white py-1 pl-1 pr-3 text-sm font-medium text-gray-800 transition hover:border-brand-300"
+                    >
+                      <Avatar name={guide.name} src={guide.avatarUrl} size={24} />
+                      {guide.name}
+                    </Link>
+                  ))}
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {group.people.map((person) => (
                   <Link
