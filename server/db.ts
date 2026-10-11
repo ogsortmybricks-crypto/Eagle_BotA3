@@ -12,6 +12,13 @@ export const pool = new Pool({
   ssl: /localhost|127\.0\.0\.1/.test(env.databaseUrl) ? false : { rejectUnauthorized: false },
 });
 
+// Hosted Postgres closes connections that sit idle. The pool notices, drops
+// that connection and opens a fresh one for the next query - but only if
+// something listens for the error. Unheard, it ends the whole process.
+pool.on("error", (error) => {
+  console.error("[db] an idle database connection was closed; the pool will open a new one", error.message);
+});
+
 export const db = drizzle(pool, { schema });
 
 export type Db = typeof db;

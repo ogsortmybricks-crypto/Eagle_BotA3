@@ -1,3 +1,4 @@
+import "./async-errors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import session from "express-session";
 import connectPgSimple from "connect-pg-simple";
@@ -11,6 +12,13 @@ import { apiRouter } from "./routes";
 import { recoverStuckJobs } from "./ai/jobs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+// Work that runs outside a request (a Tac-On reacting to an event, a
+// background job) can still fail without a handler. That is one bug to log,
+// not a reason to take the whole academy's Eagle Bot offline.
+process.on("unhandledRejection", (reason) => {
+  console.error("[server] a background task failed", reason);
+});
 
 async function main() {
   const app = express();
