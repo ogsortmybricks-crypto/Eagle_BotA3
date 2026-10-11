@@ -8,13 +8,13 @@
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "wouter";
-import { PlugZap, Puzzle } from "lucide-react";
+import { Link, useSearch } from "wouter";
+import { ArrowLeft, PlugZap, Puzzle } from "lucide-react";
 import { apiGet } from "@/lib/api";
-import { useSession } from "@/lib/session";
+import { useDateFormat, useSession } from "@/lib/session";
 import { Banner, Chip, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
 import { TaconViewBody, Widgets } from "@/tacons/Renderer";
-import type { TaconDeskView, TaconView } from "@shared/tacons/view";
+import type { TaconDeskView, TaconRecordView, TaconView } from "@shared/tacons/view";
 
 export function TaconPage({ installId, page }: { installId: number; page: string }) {
   const { studioId, can } = useSession();
@@ -70,6 +70,63 @@ export function TaconPage({ installId, page }: { installId: number; page: string
             Details
           </Link>
         )}
+      </div>
+    </>
+  );
+}
+
+/**
+ * One record on its own read-only page, opened from a list's `link` column or
+ * a calendar entry. The query string says which list or calendar block it came
+ * from, because that is what decides whether this person may see it.
+ */
+export function TaconRecordPage({ installId, recordId }: { installId: number; recordId: number }) {
+  const search = useSearch();
+  const { studioId } = useSession();
+  const formatDate = useDateFormat();
+
+  const query = useQuery<{ view: TaconRecordView }>({
+    queryKey: ["tacon-record", installId, recordId, search, studioId],
+    queryFn: () => apiGet(`/tacons/view/${installId}/record/${recordId}?${search}`),
+    retry: false,
+  });
+
+  if (query.isLoading) return <LoadingPage />;
+  if (query.error) {
+    return (
+      <EmptyState icon={Puzzle} title="This record isn't available">
+        {(query.error as Error).message}
+      </EmptyState>
+    );
+  }
+
+  const view = query.data!.view;
+  return (
+    <>
+      {view.back && (
+        <Link href={view.back.href} className="mb-3 inline-flex items-center gap-1 text-sm text-brand-600 hover:underline">
+          <ArrowLeft className="h-4 w-4" /> {view.back.label}
+        </Link>
+      )}
+      <PageHeader title={view.title} subtitle={`A record in ${view.install.name}`}>
+        {view.install.studioName && <Chip tone="brand">{view.install.studioName}</Chip>}
+      </PageHeader>
+      <div className="card divide-y divide-gray-100">
+        {view.fields.map((field) => (
+          <div key={field.key} className="grid gap-1 px-4 py-3 sm:grid-cols-[12rem_1fr] sm:gap-4">
+            <div className="text-sm font-medium text-gray-500">{field.label}</div>
+            <div className="whitespace-pre-wrap break-words text-sm text-gray-900">
+              {field.type === "date" && field.value ? formatDate(field.value, false) : field.value || "—"}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-4 text-xs text-gray-500">
+        <PlugZap className="h-3.5 w-3.5" />
+        <span>
+          Kept by the Tac-On <span className="font-medium text-gray-700">{view.install.name}</span>{" "}
+          {view.install.version} — written by {view.install.authorName}.
+        </span>
       </div>
     </>
   );

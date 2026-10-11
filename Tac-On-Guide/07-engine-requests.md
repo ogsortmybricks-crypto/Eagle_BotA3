@@ -70,6 +70,12 @@ own name in `who` whatever they send.
 
 ## When the user says the engine changed
 
+The October 2026 update shipped ER-001 to ER-017; each entry in
+`ENGINE-REQUESTS.md` says what changed and anything that differs from what was
+asked. Versions published before it keep their old behaviour until you
+republish them.
+
+
 1. The change is only live once Eagle Bot has been published. Ask if you're
    not sure.
 2. For each `shipped` entry, run its **How to verify** steps in the Dev menu.

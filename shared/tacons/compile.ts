@@ -17,16 +17,23 @@ import { joined, parse, text, words, type Node, type Token } from "./parse";
 import { parseCondition, parseExpr, parseTemplate } from "./expr";
 import { compilerExtensions } from "./extension-registry";
 import {
+  AGGREGATES,
   AUDIENCES,
   BASE_COLUMNS,
   BASE_SOURCES,
   CALENDAR_FEED_KINDS,
+  DATE_PARTS,
   FIELD_TYPES,
   HOOK_EVENTS,
+  LINK_COLUMN,
   PANEL_HOSTS,
   SOURCE_PERMISSIONS,
   positionAudience,
+  studioPositionAudience,
   type Action,
+  type DatePart,
+  type FormSet,
+  type GroupLevel,
   type Audience,
   type BaseSource,
   type CalendarFeedDef,
@@ -37,6 +44,8 @@ import {
   type Diagnostic,
   type Expr,
   type FieldType,
+  type FormWidget,
+  type ListWidget,
   type HookDef,
   type HookEvent,
   type Manifest,
@@ -65,8 +74,22 @@ type Ctx = {
   needs: Set<string>;
   /** Position names, collected up front so any `allow` can name one. */
   positions: Set<string>;
+  /** Titles of the studio's own positions named with `show to position "..."`. */
+  studioPositions: Set<string>;
+  /** `choice from` fields, checked once every store is known. */
+  choiceSources: { node: Node; store: StoreDef; field: StoreField }[];
   extensionConfigurations: Map<string, unknown>;
 };
+
+/** Fields every store row has, whatever the store declares. */
+const ROW_FIELDS = ["created", "by", "id", "byId"];
+
+/** Two `where` lines in one block mean both: tests are joined with `and`. */
+function joinConditions(first: Condition | null, second: Condition | null): Condition | null {
+  if (!first) return second;
+  if (!second) return first;
+  return { all: [...first.all, ...second.all] };
+}
 
 function error(ctx: Ctx, node: { line: number; column: number }, message: string) {
   ctx.diagnostics.push({ line: node.line, column: node.column, severity: "error", message });
@@ -80,8 +103,21 @@ function warn(ctx: Ctx, node: { line: number; column: number }, message: string)
 function audiences(ctx: Ctx, node: Node): string[] {
   const list = words(node.args).filter((word) => word.toLowerCase() !== "to");
   const roles: string[] = [];
-  for (const entry of list) {
+  for (let index = 0; index < list.length; index += 1) {
+    const entry = list[index];
     const lower = entry.toLowerCase();
+    // `position "Town Hall Leader"`: a seat the studio already has, by title.
+    if (lower === "position" && !ctx.positions.has(entry)) {
+      const title = list[index + 1]?.trim();
+      if (!title) {
+        error(ctx, node, 'Name the position by its title: `show to position "Town Hall Leader"`.');
+        continue;
+      }
+      index += 1;
+      ctx.studioPositions.add(title);
+      roles.push(studioPositionAudience(title));
+      continue;
+    }
     if (ctx.positions.has(entry)) {
       roles.push(positionAudience(entry));
       continue;
@@ -91,7 +127,7 @@ function audiences(ctx: Ctx, node: Node): string[] {
       error(
         ctx,
         node,
-        `"${entry}" isn't an audience. Use ${[...AUDIENCES, ...own].join(", ")}.`,
+        `"${entry}" isn't an audience. Use ${[...AUDIENCES, ...own].join(", ")}, or position "<a title the studio already has>".`,
       );
       continue;
     }
@@ -177,12 +213,40 @@ function compileStore(ctx: Ctx, node: Node): StoreDef | null {
       continue;
     }
 
-    const rest = words(child.args.slice(2));
-    const required = rest.some((word) => word.toLowerCase() === "required");
-    const options = rest.filter((word) => word.toLowerCase() !== "required");
+    let restTokens = child.args.slice(2);
+    // `required` may come last or straight after the type; either way it isn't an option.
+    const required = restTokens.some((token) => token.kind === "word" && token.value.toLowerCase() === "required");
+    restTokens = restTokens.filter((token) => !(token.kind === "word" && token.value.toLowerCase() === "required"));
+
+    // `field assignment choice from assignment.title where ...`
+    if (typeWord === "choice" && restTokens[0]?.kind === "word" && restTokens[0].value.toLowerCase() === "from") {
+      const path = text(restTokens[1]).split(".").filter(Boolean);
+      if (path.length < 2 || path.length > 3) {
+        error(ctx, child, `Say which store and field the options come from: \`field ${fieldName} choice from assignment.title\`.`);
+        continue;
+      }
+      const whereAt = restTokens.findIndex((token) => token.kind === "word" && token.value.toLowerCase() === "where");
+      const field: StoreField = {
+        name: fieldName,
+        type: "choice",
+        label: labelFor(child, fieldName),
+        options: [],
+        required,
+        from: {
+          store: path.slice(0, -1),
+          field: path[path.length - 1],
+          where: whereAt === -1 ? null : conditionOf(ctx, restTokens.slice(whereAt + 1), child.line),
+        },
+      };
+      ctx.choiceSources.push({ node: child, store, field });
+      store.fields.push(field);
+      continue;
+    }
+
+    const options = words(restTokens);
 
     if (typeWord === "choice" && options.length < 2) {
-      error(ctx, child, `A choice field needs its options: \`field ${fieldName} choice earn, spend\`.`);
+      error(ctx, child, `A choice field needs its options: \`field ${fieldName} choice earn, spend\`, or \`choice from <store>.<field>\`.`);
       continue;
     }
     if (typeWord === "person") ctx.needs.add("wiki.read");
@@ -340,10 +404,108 @@ function compileActions(ctx: Ctx, nodes: Node[]): Action[] {
 /*  Widgets                                                                    */
 /* -------------------------------------------------------------------------- */
 
+/** `show if <test>` inside any widget's block. Only `show to` is something else. */
+function isShowIf(child: Node): boolean {
+  return child.keyword.toLowerCase() === "show" && text(child.args[0]).toLowerCase() === "if";
+}
+
 function compileWidget(ctx: Ctx, node: Node): Widget | null {
+  const showLines = node.children.filter(isShowIf);
+  if (showLines.length === 0) return compileWidgetBody(ctx, node);
+
+  let showIf: Condition | null = null;
+  for (const line of showLines) {
+    showIf = joinConditions(showIf, conditionOf(ctx, line.args.slice(1), line.line));
+  }
+  const widget = compileWidgetBody(ctx, { ...node, children: node.children.filter((child) => !isShowIf(child)) });
+  return widget && showIf ? { ...widget, showIf } : widget;
+}
+
+/** A label that may hold `{...}`: the template, only when there is something to work out. */
+function templateOf(ctx: Ctx, raw: string, line: number): Expr | undefined {
+  if (!raw.includes("{")) return undefined;
+  return parseTemplate(raw, line, ctx.diagnostics);
+}
+
+/**
+ * Where `progress "Label" <value> of <goal>` splits. The `of` in `sum of`,
+ * `max of`, `name of` and friends belongs to its value, so it is skipped.
+ */
+function progressSplit(args: Token[]): number {
+  const owners = new Set<string>([...AGGREGATES, "max", "min", "name"]);
+  for (let index = 0; index < args.length; index += 1) {
+    const token = args[index];
+    if (token.kind !== "word" || token.value.toLowerCase() !== "of") continue;
+    const before = args[index - 1];
+    if (before?.kind === "word" && owners.has(before.value.toLowerCase())) continue;
+    return index;
+  }
+  return -1;
+}
+
+function compileWidgetBody(ctx: Ctx, node: Node): Widget | null {
   const keyword = node.keyword.toLowerCase();
 
   switch (keyword) {
+    case "celebrate": {
+      const raw = node.args[0];
+      if (!raw) {
+        error(ctx, node, 'A celebration needs a message: `celebrate "You did it!"`.');
+        return null;
+      }
+      return {
+        kind: "celebrate",
+        text:
+          raw.kind === "string"
+            ? parseTemplate(raw.value, node.line, ctx.diagnostics)
+            : { kind: "literal", value: joined(node.args) },
+      };
+    }
+
+    case "progress": {
+      const label = text(node.args[0]) || "Progress";
+      let value: Expr | null = null;
+      let goal: Expr | null = null;
+      const inline = node.args.slice(1);
+      if (inline.length > 0) {
+        let split = progressSplit(inline);
+        if (split === -1) {
+          error(ctx, node, 'Write it as `progress "Calls this week" my.days of setting.goal`.');
+          return null;
+        }
+        const valueTokens = inline.slice(0, split);
+        // `2 out of 3` reads as well as `2 of 3`.
+        const last = valueTokens[valueTokens.length - 1];
+        if (last?.kind === "word" && last.value.toLowerCase() === "out") valueTokens.pop();
+        value = parseExpr(valueTokens, node.line, ctx.diagnostics);
+        split += 1;
+        goal = parseExpr(inline.slice(split), node.line, ctx.diagnostics);
+      } else {
+        const valueLine = node.children.find((child) => child.keyword.toLowerCase() === "value");
+        const goalLine = node.children.find((child) => ["goal", "of", "out"].includes(child.keyword.toLowerCase()));
+        if (valueLine) value = parseExpr(valueLine.args, valueLine.line, ctx.diagnostics);
+        if (goalLine) {
+          const args = goalLine.keyword.toLowerCase() === "out" && text(goalLine.args[0]).toLowerCase() === "of"
+            ? goalLine.args.slice(1)
+            : goalLine.args;
+          goal = parseExpr(args, goalLine.line, ctx.diagnostics);
+        }
+      }
+      if (!value || !goal) {
+        error(ctx, node, "A progress bar needs a value and a goal: `progress \"Calls\" my.days of setting.goal`.");
+        return null;
+      }
+      const hintLine = node.children.find((child) => child.keyword.toLowerCase() === "hint");
+      return {
+        kind: "progress",
+        label,
+        labelTemplate: templateOf(ctx, label, node.line),
+        value,
+        goal,
+        hint: hintLine ? parseTemplate(joined(hintLine.args), hintLine.line, ctx.diagnostics) : null,
+      };
+    }
+
     case "note":
     case "text": {
       const raw = node.args[0];
@@ -388,6 +550,7 @@ function compileWidget(ctx: Ctx, node: Node): Widget | null {
       return {
         kind: "stat",
         label,
+        labelTemplate: templateOf(ctx, label, node.line),
         value,
         hint: hintLine
           ? parseTemplate(joined(hintLine.args), hintLine.line, ctx.diagnostics)
@@ -417,7 +580,7 @@ function compileWidget(ctx: Ctx, node: Node): Widget | null {
       error(
         ctx,
         node,
-        `"${node.keyword}" isn't something a page can show. Use note, heading, stat, list, form, button, divider or a registered extension widget.`,
+        `"${node.keyword}" isn't something a page can show. Use note, heading, stat, progress, celebrate, list, form, button, divider or a registered extension widget.`,
       );
       return null;
   }
@@ -472,6 +635,7 @@ function compileList(ctx: Ctx, node: Node): Widget | null {
   const widget = {
     kind: "list" as const,
     title: null as string | null,
+    titleTemplate: undefined as Expr | undefined,
     source,
     columns: [] as string[],
     where: null as Condition | null,
@@ -479,13 +643,21 @@ function compileList(ctx: Ctx, node: Node): Widget | null {
     limit: 25,
     empty: "Nothing here yet.",
     allowRemove: [] as string[],
+    removeOwn: false,
+    groupBy: [] as GroupLevel[],
+    linkAnyone: false,
   };
+  const ownStore = source.kind === "store" && source.store.length === 1;
+  const storeName = source.kind === "store" ? source.store[source.store.length - 1] : null;
+  let groupLine: Node | null = null;
+  let wantsLink = false;
 
   for (const child of node.children) {
     const keyword = child.keyword.toLowerCase();
     switch (keyword) {
       case "title":
         widget.title = joined(child.args);
+        widget.titleTemplate = templateOf(ctx, widget.title, child.line);
         break;
       case "columns":
       case "show": {
@@ -496,13 +668,28 @@ function compileList(ctx: Ctx, node: Node): Widget | null {
           widget.columns = words(child.args);
         } else {
           widget.columns = words(child.args.slice(0, split));
-          widget.where = conditionOf(ctx, child.args.slice(split + 1), child.line);
+          widget.where = joinConditions(widget.where, conditionOf(ctx, child.args.slice(split + 1), child.line));
         }
         break;
       }
       case "where":
-        widget.where = conditionOf(ctx, child.args, child.line);
+        // A second `where` line narrows further, like `and`.
+        widget.where = joinConditions(widget.where, conditionOf(ctx, child.args, child.line));
         break;
+      case "group":
+        groupLine = child;
+        break;
+      case "link": {
+        // `link anyone`: the row's page opens for anyone in the academy.
+        const who = text(child.args[0]).toLowerCase();
+        if (who && who !== "anyone") {
+          error(ctx, child, "Write `link anyone` to let anyone in the academy open a row's link, or put `link` in `columns`.");
+          break;
+        }
+        widget.linkAnyone = who === "anyone";
+        wantsLink = true;
+        break;
+      }
       case "sort": {
         const value = text(child.args[0]).toLowerCase();
         if (value === "newest" || value === "oldest" || value === "az") {
@@ -524,33 +711,118 @@ function compileList(ctx: Ctx, node: Node): Widget | null {
       case "empty":
         widget.empty = joined(child.args) || widget.empty;
         break;
-      case "allow":
+      case "allow": {
         // `allow remove admin` - the only per-row action a list offers.
+        // `own` lets anyone who can see the list remove the rows they saved.
+        const args = child.args.filter((token) => token.value.toLowerCase() !== "remove");
+        widget.removeOwn = args.some((token) => token.value.toLowerCase() === "own");
+        if (widget.removeOwn && !ownStore) {
+          error(ctx, child, "`allow remove own` only works on a list of your own store.");
+        }
+        // `allow remove admin, own`: admins remove any row shown, everyone else their own.
         widget.allowRemove = audiences(ctx, {
           ...child,
-          args: child.args.filter((token) => token.value.toLowerCase() !== "remove"),
+          args: args.filter((token) => token.value.toLowerCase() !== "own"),
         });
         break;
+      }
       default:
         error(ctx, child, `"${child.keyword}" doesn't belong in a list.`);
     }
   }
 
-  if (widget.columns.length === 0) {
-    widget.columns = known.slice(0, 5);
-    if (widget.columns.length === 0) {
+  if (wantsLink && !widget.columns.includes(LINK_COLUMN)) widget.columns.push(LINK_COLUMN);
+
+  // Fields a store row always has: `created`, `by`, `id`, `byId`.
+  const available = source.kind === "store" && known.length > 0 ? [...known, ...ROW_FIELDS] : known;
+
+  if (widget.columns.includes(LINK_COLUMN) && !ownStore) {
+    error(ctx, node, "`link` only works on a list of your own store - those are the rows it can open.");
+  }
+
+  if (widget.columns.filter((column) => column !== LINK_COLUMN).length === 0) {
+    widget.columns = [...known.slice(0, 5), ...widget.columns];
+    if (widget.columns.filter((column) => column !== LINK_COLUMN).length === 0) {
       error(ctx, node, "This list needs a `columns` line saying what to show.");
       return null;
     }
   } else if (known.length > 0) {
     for (const column of widget.columns) {
-      // `created` and `by` are added to every store row by the runtime.
-      if (known.includes(column) || column === "created" || column === "by") continue;
-      error(ctx, node, `There's no "${column}" to show here. Available: ${known.join(", ")}.`);
+      if (available.includes(column) || column === LINK_COLUMN) continue;
+      error(ctx, node, `There's no "${column}" to show here. Available: ${available.join(", ")}.`);
     }
   }
 
-  return widget;
+  if (groupLine) widget.groupBy = groupLevels(ctx, groupLine, available, storeName);
+
+  const compiled: ListWidget = {
+    kind: "list",
+    title: widget.title,
+    source: widget.source,
+    columns: widget.columns,
+    where: widget.where,
+    sort: widget.sort,
+    limit: widget.limit,
+    empty: widget.empty,
+    allowRemove: widget.allowRemove,
+  };
+  // Only what was used goes into the manifest, so older readers see what they always have.
+  if (widget.titleTemplate) compiled.titleTemplate = widget.titleTemplate;
+  if (widget.removeOwn) compiled.removeOwn = true;
+  if (widget.groupBy.length > 0) compiled.groupBy = widget.groupBy;
+  if (widget.linkAnyone) compiled.linkAnyone = true;
+  return compiled;
+}
+
+/**
+ * `group by created.week, day` -> [created by week, created by day]. A bare
+ * `year`, `month`, `week` or `day` that isn't a field reuses the field before it.
+ */
+function groupLevels(ctx: Ctx, node: Node, available: string[], storeName: string | null): GroupLevel[] {
+  const items = words(node.args).filter((word, index) => !(index === 0 && word.toLowerCase() === "by"));
+  if (text(node.args[0]).toLowerCase() !== "by" || items.length === 0) {
+    error(ctx, node, "Write it as `group by <field>`, like `group by created.week, day`.");
+    return [];
+  }
+  const levels: GroupLevel[] = [];
+  for (const item of items) {
+    let path = item.split(".").filter(Boolean);
+    // `call.day` always means the field; a bare `day` after a date level means "by day".
+    const named = Boolean(storeName && path.length > 1 && path[0] === storeName);
+    if (named) path = path.slice(1);
+    const last = path[path.length - 1]?.toLowerCase();
+    const isPart = (DATE_PARTS as readonly string[]).includes(last);
+    const previous = levels[levels.length - 1];
+
+    let level: GroupLevel | null = null;
+    if (path.length === 2 && isPart) level = { field: path[0], part: last as DatePart };
+    else if (path.length === 1 && isPart && !named && previous?.part) level = { field: previous.field, part: last as DatePart };
+    else if (path.length === 1 && (available.length === 0 || available.includes(path[0]))) level = { field: path[0], part: null };
+    else if (path.length === 1 && isPart && previous) level = { field: previous.field, part: last as DatePart };
+
+    if (!level) {
+      error(ctx, node, `"${item}" isn't something to group by. Use a field, or a date field with .year, .month, .week or .day.`);
+      continue;
+    }
+    if (available.length > 0 && !available.includes(level.field)) {
+      error(ctx, node, `There's no "${level.field}" to group by. Available: ${available.join(", ")}.`);
+      continue;
+    }
+    if (level.part && storeName) {
+      const store = ctx.stores.get(storeName);
+      const field = store?.fields.find((entry) => entry.name === level!.field);
+      if (field && field.type !== "date") {
+        error(ctx, node, `"${level.field}" is a ${field.type} field. Only date fields and \`created\` can be grouped by ${level.part}.`);
+        continue;
+      }
+    }
+    levels.push(level);
+  }
+  if (levels.length > 3) {
+    warn(ctx, node, "More than three levels of folders is hard to find your way around. Only the first three are used.");
+    return levels.slice(0, 3);
+  }
+  return levels;
 }
 
 function compileForm(ctx: Ctx, node: Node): Widget | null {
@@ -574,8 +846,11 @@ function compileForm(ctx: Ctx, node: Node): Widget | null {
     title,
     into: storeName,
     fields: [] as { field: string; label: string | null }[],
+    sets: [] as FormSet[],
     allow: [] as string[],
     submitLabel: "Save",
+    confirm: null as string | null,
+    confirmCode: false,
     then: [] as Action[],
   };
 
@@ -584,6 +859,34 @@ function compileForm(ctx: Ctx, node: Node): Widget | null {
     switch (keyword) {
       case "into":
         break;
+      case "confirm": {
+        // `confirm "Sign it?"`, `confirm with code`, or `confirm with code "Sign it?"`.
+        let args = child.args;
+        if (text(args[0]).toLowerCase() === "with" && text(args[1]).toLowerCase() === "code") {
+          widget.confirmCode = true;
+          args = args.slice(2);
+        }
+        if (args.length > 0) widget.confirm = joined(args);
+        else if (!widget.confirmCode) widget.confirm = "Are you sure?";
+        break;
+      }
+      case "set": {
+        // `set day weekday` / `set who: me.id` - filled in on the server, never asked.
+        const fieldName = text(child.args[0]);
+        const field = store.fields.find((entry) => entry.name === fieldName);
+        if (!field) {
+          error(ctx, child, `"${storeName}" has no field called "${fieldName}".`);
+          break;
+        }
+        const rest = child.args[1]?.kind === "colon" ? child.args.slice(2) : child.args.slice(1);
+        const value = rest.length > 0 ? parseExpr(rest, child.line, ctx.diagnostics) : null;
+        if (!value) {
+          error(ctx, child, `Say what to set it to: \`set ${fieldName} me.id\`.`);
+          break;
+        }
+        widget.sets.push({ field: fieldName, value });
+        break;
+      }
       case "ask": {
         const fieldName = text(child.args[0]);
         const field = store.fields.find((entry) => entry.name === fieldName);
@@ -609,13 +912,31 @@ function compileForm(ctx: Ctx, node: Node): Widget | null {
     }
   }
 
-  if (widget.fields.length === 0) {
+  const setNames = new Set(widget.sets.map((entry) => entry.field));
+  if (widget.fields.length === 0 && widget.sets.length === 0) {
     // A form with no questions is almost always a half-finished one.
     widget.fields = store.fields.map((field) => ({ field: field.name, label: null }));
     warn(ctx, node, `This form doesn't ask anything, so it asks for every field in "${storeName}".`);
   }
+  for (const entry of widget.fields) {
+    if (setNames.has(entry.field)) {
+      error(ctx, node, `"${entry.field}" is both asked and set. A form either asks for a field or fills it in.`);
+    }
+  }
 
-  return widget;
+  const compiled: FormWidget = {
+    kind: "form",
+    title: widget.title,
+    into: widget.into,
+    fields: widget.fields,
+    allow: widget.allow,
+    submitLabel: widget.submitLabel,
+    then: widget.then,
+  };
+  if (widget.sets.length > 0) compiled.sets = widget.sets;
+  if (widget.confirm) compiled.confirm = widget.confirm;
+  if (widget.confirmCode) compiled.confirmCode = true;
+  return compiled;
 }
 
 function compileButton(ctx: Ctx, node: Node): Widget | null {
@@ -707,6 +1028,9 @@ function compilePage(ctx: Ctx, node: Node): PageDef | null {
       page.showTo = audiences(ctx, child);
     }
   }
+
+  const titleTemplate = templateOf(ctx, page.title, node.line);
+  if (titleTemplate) page.titleTemplate = titleTemplate;
 
   page.widgets = compileWidgets(ctx, node.children.filter((child) => !isLayoutKey(child)));
 
@@ -845,15 +1169,35 @@ function compileCalendar(ctx: Ctx, node: Node): CalendarFeedDef | null {
         break;
       }
       case "where":
-        feed.where = conditionOf(ctx, child.args, child.line);
+        // A second `where` line narrows further, like `and`.
+        feed.where = joinConditions(feed.where, conditionOf(ctx, child.args, child.line));
         break;
       case "show":
         if (text(child.args[0]).toLowerCase() === "to") feed.showTo = audiences(ctx, child);
         else error(ctx, child, "Use `show to everyone` (or a role) to say who sees these entries.");
         break;
-      case "open":
-        feed.open = text(child.args[0]) || null;
+      case "open": {
+        if (text(child.args[0]).toLowerCase() !== "record") {
+          feed.open = text(child.args[0]) || null;
+          break;
+        }
+        // `open record title, partner, created`: a read-only page for that row.
+        if (!fields) {
+          error(ctx, child, "`open record` only works for your own store - those are the rows it can open.");
+          break;
+        }
+        const shown = words(child.args.slice(1)).map((name) =>
+          name.startsWith(`${storeName}.`) ? name.slice(storeName.length + 1) : name,
+        );
+        const known = [...fields.map((field) => field.name), ...ROW_FIELDS];
+        const unknown = shown.filter((name) => !known.includes(name));
+        if (unknown.length > 0) {
+          error(ctx, child, `"${storeName}" has no ${unknown.map((name) => `"${name}"`).join(", ")}. Available: ${known.join(", ")}.`);
+          break;
+        }
+        feed.openRecord = shown;
         break;
+      }
       default:
         error(ctx, child, `"${child.keyword}" doesn't belong in a calendar. Use title, on, until, at, kind, color, where, show to or open.`);
     }
@@ -863,6 +1207,10 @@ function compileCalendar(ctx: Ctx, node: Node): CalendarFeedDef | null {
     error(ctx, node, `Say which date each entry is on: \`on ${storeName}.<date field>\`.`);
     return null;
   }
+  if (feed.open && feed.openRecord) {
+    error(ctx, node, "An entry opens either a page or its record, not both. Keep one `open` line.");
+  }
+  if (!feed.openRecord) delete feed.openRecord;
   if (!titled && fields) {
     const firstText = fields.find((field) => field.type === "text");
     if (firstText) feed.title = { kind: "path", parts: ["row", firstText.name] };
@@ -988,6 +1336,8 @@ export function compile(source: string): CompileResult {
     uses: new Map(),
     needs: new Set(),
     positions: new Set(),
+    studioPositions: new Set(),
+    choiceSources: [],
     extensionConfigurations: new Map(),
   };
 
@@ -1077,6 +1427,23 @@ export function compile(source: string): CompileResult {
       } else {
         ctx.positions.add(name);
       }
+    }
+  }
+
+  // `choice from` can name a store declared further down, so it's checked now.
+  for (const { node, store, field } of ctx.choiceSources) {
+    const from = field.from!;
+    if (from.store.length === 1) {
+      const source = ctx.stores.get(from.store[0]);
+      if (!source) {
+        error(ctx, node, `There's no store called "${from.store[0]}" for "${field.name}" to choose from.`);
+      } else if (!source.fields.some((entry) => entry.name === from.field) && !ROW_FIELDS.includes(from.field)) {
+        error(ctx, node, `"${source.name}" has no field called "${from.field}" to show as the choices.`);
+      } else if (source.name === store.name) {
+        error(ctx, node, `"${field.name}" can't choose from its own store.`);
+      }
+    } else if (!ctx.uses.has(from.store[0])) {
+      error(ctx, node, `To choose from "${from.store.join(".")}" you first need \`use <tac-on> as ${from.store[0]}\`.`);
     }
   }
 
@@ -1206,6 +1573,11 @@ export function compile(source: string): CompileResult {
   }
 
   manifest.needs = [...ctx.needs].sort();
+  if (ctx.studioPositions.size > 0) {
+    manifest.studioPositions = [...new Map([...ctx.studioPositions].map((title) => [title.toLowerCase(), title])).values()];
+    // Knowing who holds a studio's positions is reading its positions.
+    if (!manifest.needs.includes("positions.read")) manifest.needs = [...manifest.needs, "positions.read"].sort();
+  }
 
   for (const feed of manifest.calendars ?? []) {
     if (feed.open && !manifest.pages.some((page) => page.name === feed.open)) {

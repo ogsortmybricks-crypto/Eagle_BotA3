@@ -100,6 +100,68 @@ export function localToday(): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+/** True for an IANA zone name this runtime understands, like "America/New_York". */
+export function isTimeZone(zone: string | null | undefined): zone is string {
+  if (!zone) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: zone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The day a moment falls on in a time zone. With no (or an unknown) zone it
+ * is the local day of whatever is running this, which is what `localToday`
+ * means too - so the two always agree.
+ */
+export function dayInZone(moment: Date, zone?: string | null): string {
+  if (!isTimeZone(zone)) {
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${moment.getFullYear()}-${pad(moment.getMonth() + 1)}-${pad(moment.getDate())}`;
+  }
+  // en-CA writes dates as YYYY-MM-DD.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: zone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(moment);
+}
+
+/** The moment a day starts (local midnight) in a time zone, as epoch milliseconds. */
+export function startOfDayInZone(day: string, zone?: string | null): number {
+  const [y, m, d] = day.split("-").map(Number);
+  if (!isTimeZone(zone)) return new Date(y, m - 1, d).getTime();
+  // Guess UTC midnight, then shift by the zone's offset at that moment. A
+  // second pass settles days where the offset changes (DST).
+  let guess = Date.UTC(y, m - 1, d);
+  for (let pass = 0; pass < 2; pass += 1) {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+    }).formatToParts(new Date(guess));
+    const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
+    const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+    guess = Date.UTC(y, m - 1, d) - (asUtc - guess);
+  }
+  return guess;
+}
+
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/** "Monday" for a day string. */
+export function weekdayName(day: string): string {
+  return WEEKDAY_NAMES[weekday(day)];
+}
+
 export function minutesOf(time: string): number {
   const [h, m] = time.split(":").map(Number);
   return h * 60 + m;

@@ -81,14 +81,54 @@ Field types:
 | `number` | A number | A number box |
 | `boolean` | Yes or no | A checkbox |
 | `choice a, b, c` | One of the options you list | A dropdown |
+| `choice from store.field` | One row of another of your stores | A dropdown of that store's rows |
 | `person` | Somebody in the academy | A dropdown of names |
 | `date` | A day | A date picker |
 
-Add `required` after the type to insist on it.
+Add `required` after the type to insist on it. A `required` `boolean` has to be
+**ticked** — that's how you make an "I agree" or "I saw the proof" box.
 
-Every row also gets two fields for free: `created` (when it was saved) and `by`
-(who saved it — or the Tac-On's name, if a reaction wrote it). You can use those
-as columns like any other.
+### Choices filled from a store
+
+```
+store assignment {
+  field title text required
+  field week number
+}
+
+store mark {
+  field assignment choice from assignment.title where assignment.week is my.week required
+}
+```
+
+The dropdown lists the `assignment` rows that pass the `where`, worked out
+for the person filling in the form, shown by their `title`. The record saves
+the chosen row's `id`, so it matches that assignment exactly. In lists and on a
+record's page it shows as the title again. Someone filling in the form can
+only save a row the dropdown offered them. The `where` is optional, and the
+store can be declared anywhere in the file (but not be the same store).
+
+### Fields every row has
+
+Every row also gets four fields for free. You can use them in `where`, in
+totals, in `calendar` blocks and as columns, like any other field. They are
+part of the language and won't change.
+
+| Field | What it holds |
+| --- | --- |
+| `created` | When it was saved |
+| `by` | The name of who saved it — or the Tac-On's name, if a reaction wrote it. A display name, not unique. |
+| `byId` | The id of who saved it (empty if a reaction wrote it). **This is the trustworthy "who".** Compare it with `me.id`. As a column it shows the person's name. |
+| `id` | The row's number. Unique within the Tac-On, and it **only ever goes up**, so a newer row always has a bigger `id`. |
+
+```
+ask my_steps sum of core_log.steps where core_log.byId is me.id
+ask week_floor highest of week_start.id
+list ap_call { where ap_call.id above my.week_floor }
+```
+
+`by` and `byId` can't be faked: whatever a form sends, they're filled in from
+who actually pressed the button.
 
 Records belong to one install. Two studios running your Tac-On keep two separate
 sets, and uninstalling deletes them.
@@ -118,7 +158,8 @@ ask running count of quest where quest.status is "running"
 ```
 
 Named values are worked out per viewer, so `me.*` inside one means *the person
-looking at the page*. Read them back as `my.balance` — including inside text:
+looking at the page*. Read them back as `my.balance` — including inside text,
+`notify` lines and `calendar` blocks:
 
 ```
 note "You're holding {my.balance} points."
@@ -143,6 +184,9 @@ page points {
 }
 ```
 
+A page `title` can hold `{...}`, worked out for each person, in the sidebar
+too: `title "Calls with {name of my.my_ap}"`.
+
 ### Widgets
 
 **`note`** — a sentence. `info` or `warning` puts it in a coloured box.
@@ -161,6 +205,33 @@ stat "In circulation" sum of entry.amount
 stat "In circulation" {
   value sum of entry.amount
   hint "Across every entry."
+}
+```
+
+The label can hold `{...}` too: `stat "Week {my.week}" my.days`.
+
+**`progress`** — a bar filling towards a goal.
+
+```
+progress "Calls this week" my.days_called of setting.calls_needed
+
+progress "Calls this week" {
+  value my.days_called
+  goal setting.calls_needed
+  hint "Three days with a call earns Fun Friday."
+}
+```
+
+It shows "2 of 3" and a bar two-thirds full. It turns green when the goal is
+reached and never overflows past full. `out of` reads as well as `of`.
+
+**`celebrate`** — confetti and a message. Each person sees the confetti once
+(per browser); after that the message just stays on the page. Almost always
+used with `show if`:
+
+```
+celebrate "You've both earned Fun Friday!" {
+  show if my.ff_pair above 1
 }
 ```
 
@@ -183,6 +254,66 @@ list from elections {
   limit 5
 }
 ```
+
+- `title` can hold `{...}`: `title "Posted for week {my.week}"`.
+- More than one `where` line means **all** of them: each line narrows the list
+  further, as if joined with `and`.
+- `columns` can use `id`, `byId`, `by` and `created`, and the special column
+  `link` (see below).
+
+**Folders.** `group by` turns a list into collapsible folders, like a file
+explorer. Up to three levels:
+
+```
+list ap_call {
+  columns partner, note, created
+  group by created.week, day      # week folders, with day folders inside
+  limit 200
+}
+
+list topic {
+  group by kind                    # one folder per kind
+}
+```
+
+Group by any field, or cut a `date` field (or `created`) down to `.year`,
+`.month`, `.week` or `.day`. A bare `day`, `week`, `month` or `year` right
+after a date level means that part of the same date; to group by a field
+that happens to be called `day`, write `ap_call.day`. Folders appear in the
+list's sort order, newest first by default. `limit` still counts rows, so
+raise it for a browser of old records.
+
+**Links to one record.** Put `link` in `columns` and each row gets an
+**Open** link to a read-only page for that one record, showing the list's
+columns. Paste it anywhere (Journey Tracker, a message) to point someone at
+it.
+
+```
+list ap_call {
+  columns partner, note, created, link
+  link anyone                      # optional: anyone in the academy may open it
+}
+```
+
+Without `link anyone`, the page only opens for someone who can see that list
+**and** whom the list would show that row to (its `where` and `show if`).
+With `link anyone`, anyone signed in to the academy can open it. It never
+opens for someone who isn't signed in. Only lists of your own stores can have
+links.
+
+**Removing rows.** `allow remove <who>` lets those people remove any row the
+list shows them. `allow remove own` lets anyone who can see the list remove
+**only the rows they saved** (`byId` is them). They combine:
+
+```
+list goal {
+  where goal.byId is me.id
+  allow remove admin, own          # admins: any row shown; everyone else: their own
+}
+```
+
+Removal always checks the row against the list it came from: a row the list
+wouldn't show you can't be removed through it, even by typing its id.
 
 Things you can list from Eagle Bot, and the columns each one gives you:
 
@@ -239,6 +370,24 @@ form "Log some points" {
 }
 ```
 
+Forms can also:
+
+| Line | What it does |
+| --- | --- |
+| `set day weekday` | Fills a field in itself, on the server, instead of asking. Any expression: `set who me.id`, `set week my.week`. Whatever the browser sends for that field is ignored. A field can't be both asked and set. |
+| `confirm "Sign this AP Call?"` | Asks "are you sure?" before saving. |
+| `confirm with code` | The person types **their own six-digit confirmation code** (set under their profile) to save. A wrong code saves nothing; five wrong tries lock it for 15 minutes. Add text after it for an "are you sure?" too: `confirm with code "Sign this?"`. |
+
+```
+form "Sign the AP Call" {
+  into ap_call
+  ask partner "Who did you call?"
+  ask agreed "I saw their work"
+  set day weekday
+  confirm with code
+}
+```
+
 **`button`** — does something when pressed.
 
 ```
@@ -251,6 +400,20 @@ button "Close the week" {
   notify "Week closed."
 }
 ```
+
+**`show if`** — on any widget. It's only drawn while the test passes:
+
+```
+note "Something's wrong: two people hold the seat." warning {
+  show if position.treasurer.holders above 1
+}
+stat "Waiting on you" my.waiting {
+  show if my.waiting above 0
+}
+```
+
+Several `show if` lines all have to pass. A form or button hidden by `show if`
+can't be used, even by someone sending the request by hand.
 
 ---
 
@@ -313,9 +476,16 @@ calendar outing {
 | `at` | A `text` field holding a start time like `09:30`. Only used for one-day entries; anything that isn't a time shows as all day. |
 | `kind` | How it's drawn: `event` (the default), `field_trip`, `exhibition`, `launch` or `deadline`. Sessions and breaks are left to guides. |
 | `color` | A hex code in quotes. Leave it out to use the kind's colour. |
-| `where` | Which rows go on the calendar. One test per line, like a list. |
+| `where` | Which rows go on the calendar. Several `where` lines all have to pass, as if joined with `and`. Can use `my.*` values. |
 | `show to` | Who sees these entries. Everyone, if you leave it out. |
 | `open` | One of your own pages, opened when someone clicks the entry. |
+| `open record` | Instead of a page: a read-only page for that one record, showing the fields you list (`open record partner, note, created`), or every field if you list none. Opens only for people the entry is shown to. |
+
+`on created` puts each record on the day it was saved **in the academy's time
+zone** (an admin sets it under **Settings → Display**), so something saved at
+9pm shows on that day, not the next.
+
+To show a person's name in a title, use `name of`: `title "You called {name of ap_call.partner}"`.
 
 You can write more than one `calendar` block, for example the same store shown
 two ways to two audiences:
@@ -509,7 +679,20 @@ quietly.
 | `event.winner` | Inside a `when` only |
 | `position.treasurer` | Who holds one of your positions |
 | `entry.amount` | A field of the row being tested |
+| `entry.id`, `entry.byId` | The row's number, and who saved it (see *Fields every row has*) |
 | `points.balance` | Another Tac-On's, via `use` |
+
+**The clock**, worked out in the academy's time zone:
+
+| | |
+| --- | --- |
+| `today` | Today, as a day like `2026-10-12` |
+| `this_week_start` | The Sunday this week started on |
+| `session_start` | The first day of the session running today on the studio calendar, or empty between sessions |
+| `weekday` | Today's name: `Monday` ... `Sunday` |
+
+A field of the row being tested wins over these, so a store with a field
+called `weekday` still reads its own field.
 
 **Totals**
 
@@ -521,7 +704,11 @@ highest of entry.amount
 lowest of entry.amount
 ```
 
-Each takes an optional `where`.
+Each takes an optional `where`. One more counts rows but stops at 1:
+
+```
+any of call where call.day is "Monday"    # 1 if there's at least one, else 0
+```
 
 **Tests**, joined with `and`:
 
@@ -533,12 +720,51 @@ where entry.reason contains "quest"
 ```
 
 There is no `or`. Two lists usually read better than one clever condition.
+Each side of a test is one value: to compare with `setting.goal minus 1`, work
+it out in an `ask` first and test against `my.<name>`.
 
-**Arithmetic**, left to right:
+**Dates compare.** `above` and `below` work on dates — a `date` field, a
+`created`, or a clock word. A day means the moment it starts, so:
+
+```
+where call.created above this_week_start    # saved this week
+where call.created above session_start      # saved this session
+where call.created is today                 # saved today
+where trip.day below today                  # a date already past
+```
+
+`is` between `created` and a day means "saved on that day". There's still no
+date *arithmetic*: you can't add days to a date.
+
+**Arithmetic**, strictly left to right, one step at a time:
 
 ```
 setting.rate times 2
 sum of entry.amount minus sum of spend.amount
+10 minus 3 plus 2              # (10 minus 3) plus 2 = 9
+12 divided by 2 times 3        # (12 divided by 2) times 3 = 18
+```
+
+There's no "times before plus" precedence. Dividing by zero gives 0.
+
+**Picking and deciding**:
+
+```
+max of 0 and setting.calls_needed minus my.days     # never below 0
+min of my.points and 100                            # never above 100
+if my.days above 2 then "Fun Friday!" else "Keep going"
+```
+
+Everything after `and` in `max of`/`min of` is the second value, arithmetic
+included. If the first value is a total with its own `where ... and ...`, put
+it in an `ask` first so the `and`s can't get mixed up. An `if` always needs an
+`else`.
+
+**Names.** `name of` turns a person id (a `person` field, `byId`, `me.id`,
+`position.x.holder`) into the person's name:
+
+```
+note "Your AP is {name of my.my_ap}."
 ```
 
 **Text**, with `{...}` for anything above:
@@ -574,6 +800,23 @@ working.
 `learner`, `dev`, plus the names of your own `position`s, which mean *whoever
 holds it right now*. Leaving the line out means everyone who can open the page.
 
+**Positions the studio already has.** `position "<title>"` names a seat the
+studio already elects, by its title, without making a new one:
+
+```
+page appeals {
+  show to position "Town Hall Leader", admin
+  ...
+}
+```
+
+Whoever holds a position with that title (in any capitalisation) in the
+studio the Tac-On is installed in — or a position shared with it, or an
+academy-wide one — is in the audience, and drops out when their term ends.
+If the studio has no position by that title, nobody is. The admin sees the
+titles before installing. It works anywhere an audience does: `show to`,
+`allow`, `allow remove`, a `calendar`'s `show to`.
+
 ---
 
 ## Rules the compiler will hold you to
@@ -582,7 +825,10 @@ holds it right now*. Leaving the line out means everyone who can open the page.
 - A new `version` every time you publish. Versions already published are frozen.
 - Lists, forms and reactions have to name a store that exists.
 - `provides` has to name a store or value that exists.
-- A Tac-On has to add something: a page, a panel, a position or a `when`.
+- A Tac-On has to add something: a page, a panel, a position, a calendar or a `when`.
+- `choice from` has to name a store and field that exist.
+- `group by` on a part of a date only works on a `date` field or `created`.
+- `link`, `allow remove own` and `open record` only work on your own stores.
 - A position needs its own name — not a role's, and not another position's.
 
 The editor checks all of this as you type, with the line number. If it says

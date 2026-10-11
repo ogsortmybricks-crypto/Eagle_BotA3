@@ -89,6 +89,12 @@ export const displaySchema = z.object({
   dateFormat: z.enum(["local", "iso", "us", "uk"]).default("local"),
   startPage: z.enum(["wiki", "town-hall", "elections", "positions", "people", "calendar"]).default("wiki"),
   density: z.enum(["comfortable", "compact"]).default("comfortable"),
+  /**
+   * The academy's IANA time zone, e.g. "America/New_York". Decides which day a
+   * timestamp falls on wherever the server has to say ("saved today", a
+   * Tac-On's `created` on the calendar). Empty means the server's own clock.
+   */
+  timeZone: z.string().max(64).default(""),
 });
 
 /** Every section, keyed the way the settings page and the PATCH route address them. */

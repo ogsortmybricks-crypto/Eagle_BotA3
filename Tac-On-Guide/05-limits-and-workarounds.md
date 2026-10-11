@@ -13,8 +13,10 @@ Check for these every time. The compiler won't stop you.
 | **`or` in a `where`** | Everything from `or` onward is **silently dropped**. `where a is 1 or b is 2` becomes `where a is 1`. | Two lists, or two `ask`s added with `plus`. |
 | **One-line `add` with several fields**: `add entry { hero: x, amount: 10 }` | Only the first field is saved. You get a *warning*, not an error. | One field per line inside the braces. |
 | **Filtering a `list from` Eagle Bot source by a made-up name**: `where rule.section contains "ROE"` | Matches nothing. Base-source rows are called `row`. | `where row.section contains "ROE"`, or just `where section contains "ROE"` |
-| **Comparing dates**: `where entry.created above "2026-01-01"` | Dates are treated as 0, so the test is meaningless. | Stamp records with a session or week label (see below). |
-| **`event.*` outside a `when`** | Empty. Buttons and forms have no event. | Use `me.*`, `setting.*` or literal text. |
+| **A Tac-On published before the October 2026 engine update** | A published version keeps what it was compiled to: `a minus b plus c` still means `a minus (b plus c)`, and of two `where` lines in a list or calendar only the last counts. | Republish (new `version`), then check every total that mixes `minus` or `divided` with another step, and every block with two `where` lines. |
+| **A total inside `max of` / `min of`**: `max of count of x where x.a is 1 and x.b is 2 and 5` | The total's `where` swallows the `and`s, so the second value is lost. | Put the total in its own `ask` and write `max of my.total and 5`. |
+| **A bare `day` in `group by` after a date level**: `group by created.week, day` | Means "by day of `created`", even if the store has a field called `day`. | To group by the field, write `store.day`. |
+| **`event.*` outside a `when`** | Empty. Buttons and forms have no event. | Use `me.*`, `setting.*`, the clock words or literal text. |
 | **Filtering `list from calendar` by kind code**: `where row.kind is "field_trip"` | Matches nothing. The `kind` column holds the word people see. | `where row.kind is "Field trip"`. (`event.kind` inside a `when` *is* the code, `field_trip`.) |
 | **A time in a `date` field for `at`** | `at` needs a `text` field holding `HH:MM`. Anything else, or an entry spanning several days, shows as all day. | `field leaves text` with a label like "Leaves at (e.g. 09:30)". |
 | **A typo in a store name inside `ask` or `stat`**: `count of entires` | Not checked. It reads as 0. | Check every total shows a non-zero number once there's data. |
@@ -29,7 +31,8 @@ to the activity log). No action changes or marks an existing record.
 - **Append instead of edit.** Store the change as a new record: a `decision`
   store next to the `topic` store, a `status` store whose newest row wins.
 - **Clean up by removing.** `allow remove <position>` on a list lets the
-  person who owns the record clear finished rows.
+  person who owns the record clear finished rows, and `allow remove own` lets
+  each person remove (and re-enter) their own typos.
 - **Show the latest first.** `sort newest` with a small `limit`.
 
 ### No `or`
@@ -43,37 +46,35 @@ ask waiting_count count of entry where entry.status is "waiting"
 ask still_to_do my.open_count plus my.waiting_count
 ```
 
-### No date arithmetic
+### Dates compare, but don't add up
 
-Dates can't be compared or added to, and there's no "this week" in a `where`.
-What the engine *does* do with dates:
+`above`, `below` and `is` work on dates, and `today`, `this_week_start`,
+`session_start` and `weekday` read the clock, so "this week", "this session"
+and "saved today" need no button and no setting:
 
-- **Put them on the calendar.** A `calendar` block draws each record on its
-  date, so people see "when" without any filtering.
-- **Read what's coming up.** `list from calendar` only ever lists entries still
-  on today or later, and `list from calendar.sessions` gives each session's
-  `status` as `done`, `running` or `upcoming`, which you *can* filter on.
+```
+ask days count of call where call.byId is me.id and call.created above this_week_start
+```
 
-For your own records:
+What's still missing is date *arithmetic*: no "7 days from now", no "due in 3
+days", no number of days between two dates.
 
-- **Session or week label.** Add a `setting` like `current_session`
-  (default `"Session 1"`) and a `field session text` on your store. Stamp it in
-  forms (ask for it) or in reactions (`session: setting.current_session`).
-  Filter with `where entry.session is setting.current_session`.
-- **Show `created`** as a column so people can see when something happened.
+- **Due soon.** Show upcoming dates on the calendar with a `calendar` block,
+  or list them `sort oldest` with `where entry.due above today`.
+- **Named periods.** For periods that aren't a week or a session (a "sprint",
+  a "launch"), a setting like `current_sprint` stamped on each record still
+  works: `where entry.sprint is setting.current_sprint`.
 
-### Forms can't fill in or lock a value
+### Forms can fill in a value, but not check a range
 
-A form only offers the fields you `ask`. Every asked field can be set to
-anything, including a `person` field set to someone else.
+A form `set`s fields it shouldn't ask about (`set who me.id`,
+`set day weekday`), and `byId` says who saved a row whatever the form sent.
+"Mine" is `where entry.byId is me.id`.
 
-- **Use `by` for "who did this".** Every record gets `by`, the submitter's
-  **name** (or the Tac-On's name if a reaction wrote it). It can't be faked.
-  Filter "mine" with `where entry.by is me.name`.
-- **Put a `person` field on a desk form** when only the position holder should
-  record things about other people.
-- **No ranges or validation.** Only `required` exists. Say the expected range
-  in the label ("Points (1–10)").
+- **No ranges or validation.** Only `required` exists (a required checkbox
+  must be ticked). Say the expected range in the label ("Points (1–10)"),
+  and cap totals with `max of` / `min of`.
+- **No editing a submitted form.** See *Records can't be edited*.
 
 ### Time can't trigger anything
 
@@ -116,14 +117,17 @@ it a different shape, such as one record per week instead of one per action.
   can't add, move or remove the guides' entries, and can't mark sessions or
   breaks. Its entries can't repeat; one record is one entry.
 - **Viewer:** `me.id`, `me.name`, `me.role`, `me.studioId`.
-- **Positions:** only your own Tac-On's.
+- **Positions:** your own Tac-On's can be read (`position.x`); the studio's
+  existing positions can be used as an audience
+  (`show to position "Town Hall Leader"`) but not read.
 - **Other Tac-Ons:** only what they `provides`, read-only, same academy.
 
-### No files, images or links
+### No files or images, and only links to your own records
 
 Fields are text, numbers, yes/no, choices, people and dates. There are no
-uploads or pictures. A `text` field can hold a link as plain text, but it isn't
-clickable.
+uploads or pictures. A list's `link` column and a calendar's `open record`
+give each record its own page to link to, but a `text` field holding a web
+address still isn't clickable.
 
 ### Icons don't show
 

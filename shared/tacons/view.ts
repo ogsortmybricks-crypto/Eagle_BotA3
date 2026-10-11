@@ -10,13 +10,18 @@
 import type { FieldType } from "./types";
 import type { ViewExtension } from "./extensions";
 
-export type ViewColumn = { key: string; label: string; type: FieldType | "text" };
+/** `link` is the "Open" column, pointing at a read-only page for the row. */
+export type ViewColumn = { key: string; label: string; type: FieldType | "text" | "link" };
 
 export type ViewRow = {
   id: number | string;
   cells: Record<string, string>;
-  /** Only true when the list said this person may remove rows. */
+  /** Only true when the list said this person may remove this row. */
   canRemove: boolean;
+  /** The app path of the row's own page, for a `link` column. */
+  link?: string | null;
+  /** The folder names this row sits in, outermost first, for a grouped list. */
+  groups?: string[];
 };
 
 export type ViewNote = { kind: "note"; text: string; tone: "plain" | "info" | "warning" };
@@ -34,7 +39,12 @@ export type ViewList = {
   store: string | null;
   /** Set when a list couldn't be read, e.g. the Tac-On lost a permission. */
   problem: string | null;
+  /** How many levels of folders `rows[].groups` holds. Absent for a flat list. */
+  groupDepth?: number;
 };
+
+/** One option of a `choice from` field: the row's id, shown as one of its fields. */
+export type ViewChoice = { value: string; label: string };
 
 export type ViewFormField = {
   name: string;
@@ -42,6 +52,8 @@ export type ViewFormField = {
   type: FieldType;
   options: string[];
   required: boolean;
+  /** Present for a `choice from` field: the rows to pick from, worked out for this viewer. */
+  choices?: ViewChoice[];
 };
 
 export type ViewForm = {
@@ -54,6 +66,23 @@ export type ViewForm = {
   allowed: boolean;
   /** Why the form is read-only, in words worth showing. */
   deniedReason: string | null;
+  /** Asked before saving, when set. */
+  confirm?: string | null;
+  /** The person types their six-digit confirmation code to save. */
+  confirmCode?: boolean;
+};
+
+/** Confetti and a message. `key` is what "already celebrated" is remembered by. */
+export type ViewCelebrate = { kind: "celebrate"; key: string; text: string };
+
+export type ViewProgress = {
+  kind: "progress";
+  label: string;
+  value: number;
+  goal: number;
+  /** "2 of 3", ready to print. */
+  text: string;
+  hint: string | null;
 };
 
 export type ViewButton = {
@@ -72,6 +101,8 @@ export type ViewWidget =
   | ViewList
   | ViewForm
   | ViewButton
+  | ViewCelebrate
+  | ViewProgress
   | ViewExtension;
 
 export type ViewPerson = { id: number; name: string };
@@ -113,6 +144,18 @@ export type TaconDeskView = {
   title: string;
   widgets: ViewWidget[];
   people: ViewPerson[];
+};
+
+/**
+ * One record on its own read-only page - what a list's `link` column and a
+ * calendar's `open record` open. Only the fields the author chose are sent.
+ */
+export type TaconRecordView = {
+  install: TaconView["install"];
+  title: string;
+  fields: { key: string; label: string; type: FieldType | "text"; value: string }[];
+  /** Where it was opened from, for the "Back" link. Null when that isn't a page. */
+  back: { label: string; href: string } | null;
 };
 
 /** The sidebar entry an installed Tac-On contributes. */

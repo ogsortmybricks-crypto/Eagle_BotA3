@@ -426,6 +426,12 @@ export function TaconDetail({ slug }: { slug: string }) {
                 A Tac-On can never show somebody more than they could already see. These are the
                 parts of Eagle Bot it looks at, for whoever is looking at it.
               </p>
+              {(manifest.studioPositions?.length ?? 0) > 0 && (
+                <p className="mt-2 text-sm text-gray-600">
+                  Gives its own tools to the studio's{" "}
+                  {manifest.studioPositions!.map((title) => `"${title}"`).join(", ")}, matched by title.
+                </p>
+              )}
               {manifest.uses.length > 0 && (
                 <p className="mt-2 text-sm text-gray-600">
                   Reads other Tac-Ons:{" "}
@@ -627,6 +633,14 @@ function InstallModal({
                 <li key={need}>{NEEDS_WORDS[need] ?? need}</li>
               ))}
             </ul>
+          </Banner>
+        )}
+
+        {(manifest.studioPositions?.length ?? 0) > 0 && (
+          <Banner tone="info" title="Gives tools to positions you already have">
+            Whoever holds {manifest.studioPositions!.map((title) => `"${title}"`).join(", ")} in the studio
+            you install it in gets its pages and buttons while they hold the seat. If the studio has no
+            position by that title, nobody does.
           </Banner>
         )}
 

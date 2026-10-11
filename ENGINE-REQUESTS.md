@@ -7,7 +7,7 @@ Each entry was checked against the engine source on `origin/main` at
 
 ## ER-001: Document `id` and `byId` on every record, and keep them stable
 
-- **Status:** open
+- **Status:** shipped — `id` and `byId` are in the reference as permanent row fields; `id` only goes up. Both work as columns (`byId` shows the name).
 - **Kind:** docs
 - **Priority:** blocks a Tac-On (ap-calls depends on both today)
 - **Needed by:** ap-calls, and any Tac-On with "my records" or "this week"
@@ -43,7 +43,7 @@ compile and filter to the viewer's own rows.
 
 ## ER-002: `{my.value}` is always blank inside `notify` and `calendar` blocks
 
-- **Status:** open
+- **Status:** shipped — named values are worked out before every `notify` and before a calendar is drawn.
 - **Kind:** bug
 - **Priority:** workaround exists
 - **Needed by:** ap-calls (any Tac-On that writes useful activity-log lines or filters its calendar by a computed value)
@@ -85,7 +85,7 @@ calendar block shows the partner's calls.
 
 ## ER-003: `plus` / `minus` / `times` / `divided` group right-to-left, not left-to-right
 
-- **Status:** open
+- **Status:** shipped — arithmetic now groups left to right. Already-published versions keep their old grouping until republished.
 - **Kind:** bug (or docs)
 - **Priority:** workaround exists
 - **Needed by:** anyone doing arithmetic
@@ -111,7 +111,7 @@ they say.
 
 ## ER-004: Allow `{...}` in page titles, list titles and stat labels, and show names for person ids
 
-- **Status:** open
+- **Status:** shipped — `{...}` works in page titles (sidebar included), list titles and stat labels; `name of <person id>` gives the name.
 - **Kind:** display
 - **Priority:** nice to have
 - **Needed by:** ap-calls (the spec wants the partner tab named after your AP)
@@ -132,7 +132,7 @@ sidebar.
 
 ## ER-005: Let a Tac-On use the studio's existing positions as an audience
 
-- **Status:** open
+- **Status:** shipped — `show to position "Town Hall Leader"` (any audience line). Matched by title, any case, in the install's studio, plus positions shared with it and academy-wide ones. The admin sees the titles at install. Adds `positions.read` to `needs`.
 - **Kind:** language feature
 - **Priority:** workaround exists
 - **Needed by:** ap-calls (appeals go to the MS Town Hall Leader)
@@ -153,7 +153,7 @@ appointment, and loses it when their term ends.
 
 ## ER-006: Grouped lists (folders)
 
-- **Status:** open
+- **Status:** shipped — `group by` with up to three levels; date fields and `created` take `.year/.month/.week/.day`. A bare `day` after a date level means that part of the same date; write `store.day` for a field called `day`. `limit` still counts rows (max 200).
 - **Kind:** widget
 - **Priority:** nice to have
 - **Needed by:** ap-calls (the CFS should look like a file explorer)
@@ -175,7 +175,7 @@ collapsible week folders with day folders inside.
 
 ## ER-007: Dates you can compare: `today`, `this week`, `created` comparisons
 
-- **Status:** open
+- **Status:** shipped — `today`, `this_week_start` (Sunday), `session_start`, `weekday`; dates compare with `above`/`below`, and `created is today` works. All in the academy time zone (Settings → Display). Also added: `set <field> <expr>` on forms, so a form can record `weekday` itself. No date arithmetic yet.
 - **Kind:** language feature
 - **Priority:** workaround exists (week markers plus `id above`, see ER-001)
 - **Needed by:** ap-calls, and any weekly or per-session Tac-On
@@ -199,7 +199,7 @@ correctly.
 
 ## ER-008: Show widgets conditionally, plus a celebration widget
 
-- **Status:** open
+- **Status:** shipped — `show if` on every widget (also enforced when a hidden form or button is used), and `celebrate`. "Once per viewer" is remembered per browser.
 - **Kind:** widget
 - **Priority:** nice to have
 - **Needed by:** ap-calls (the spec asks for confetti when Fun Friday is earned)
@@ -219,7 +219,7 @@ appears only at 2 of 2.
 
 ## ER-009: `allow remove own`: let people remove only rows they saved
 
-- **Status:** open
+- **Status:** shipped — `allow remove own`, combinable (`allow remove admin, own`). Removal now always checks the row against the list's `where` and `show if`, which closes the hole described.
 - **Kind:** language feature (and a safety note)
 - **Priority:** workaround exists
 - **Needed by:** ap-calls, and any Tac-On where learners fix their own typos
@@ -247,7 +247,7 @@ returns 403.
 
 ## ER-010: Forms with a confirm step, and an optional "confirm with your code"
 
-- **Status:** open
+- **Status:** shipped — `confirm "..."` and `confirm with code` on forms, using the account confirmation code (5 wrong tries lock it for 15 minutes).
 - **Kind:** language feature
 - **Priority:** nice to have
 - **Needed by:** ap-calls (the spec wants a six-digit code to sign each AP Call)
@@ -265,7 +265,7 @@ right code.
 
 ## ER-011: A shareable link to one record
 
-- **Status:** open
+- **Status:** shipped — `link` column (with optional `link anyone`) and `open record [fields]` on calendar blocks. "Anyone with the link" means anyone signed in to the academy; records never open to people who are signed out, since these are learners' records.
 - **Kind:** display
 - **Priority:** nice to have
 - **Needed by:** ap-calls (a verification link for each confirmed piece of work)
@@ -286,7 +286,7 @@ and Journey Tracker.
 
 ## ER-012: Choices filled from a store
 
-- **Status:** open
+- **Status:** shipped — `field x choice from store.field [where ...]`. Saves the row id; lists and record pages show the field. A form only accepts a row it offered that person.
 - **Kind:** language feature
 - **Priority:** nice to have
 - **Needed by:** ap-calls (pick which posted assignment you finished)
@@ -305,7 +305,7 @@ pick-from-a-list form.
 
 ## ER-013: `if`, `min` and `max` in expressions
 
-- **Status:** open
+- **Status:** shipped — `max of a and b`, `min of a and b`, `any of <store> where ...`, and `if <test> then a else b`.
 - **Kind:** language feature
 - **Priority:** workaround exists
 - **Needed by:** ap-calls
@@ -325,7 +325,7 @@ never shows a negative number.
 
 ## ER-014: A `required` checkbox accepts "No"
 
-- **Status:** open
+- **Status:** shipped — a `required` boolean must be ticked (also for `add` actions).
 - **Kind:** bug
 - **Priority:** nice to have
 - **Needed by:** any Tac-On with an "I agree" box
@@ -342,7 +342,7 @@ proof" box can't be enforced.
 
 ## ER-015: A progress-bar widget
 
-- **Status:** open
+- **Status:** shipped — `progress "Label" <value> of <goal>`, or a block with `value`, `goal` and `hint`.
 - **Kind:** widget
 - **Priority:** nice to have
 - **Needed by:** ap-calls (the spec wants a graph of check-ins done and still to go)
@@ -356,7 +356,7 @@ shown as a bar.
 
 ## ER-016: Calendar entries use the UTC date for `created` and timestamps
 
-- **Status:** open
+- **Status:** shipped — timestamps go on the day they fall on in the academy's time zone, a new setting under Settings → Display. Unset, it uses the server's clock, as `localToday` does.
 - **Kind:** bug
 - **Priority:** nice to have
 - **Needed by:** ap-calls (AP Calls drawn `on created`)
@@ -383,7 +383,7 @@ saved.
 
 ## ER-017: Docs: a `calendar` block's `where` is one line, not "one test per line"
 
-- **Status:** open
+- **Status:** shipped — repeated `where` lines in lists and calendar blocks are now joined with `and`, and the reference says so. Already-published versions keep only the last line until republished.
 - **Kind:** docs
 - **Priority:** nice to have
 - **Needed by:** anyone writing a `calendar` block

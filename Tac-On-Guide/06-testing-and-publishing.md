@@ -57,6 +57,18 @@ Then:
   the title you meant. Try one with an end date and one without, check the
   `where` leaves out what it should, sign in as someone outside `show to` to
   make sure they don't see it, and click it to check `open` goes to your page.
+- **Check the clock in the evening.** If you use `created`, `today` or
+  `this_week_start`, make sure the academy's time zone is set
+  (**Settings → Display → Time zone**) and save a record after dinner: it
+  should count as today and show on today's calendar square.
+- **Check what each person may remove and open.** As someone else, try
+  removing a row only its owner should (`allow remove own`), and open a
+  `link` from someone else's list. Both should be refused.
+- **Sign something.** For `confirm with code`, try a wrong code (refused,
+  nothing saved), then the right one. A person who hasn't set a code yet is
+  told where to set it.
+- **Watch `show if` change.** Make the test true and false and check the widget
+  appears and disappears, and that a `celebrate` plays its confetti once.
 - **Try the update path.** With records saved, bump the version, publish,
   press **Update** on the install, and check the old records still display
   correctly.

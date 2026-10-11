@@ -19,7 +19,7 @@ import { Settings } from "@/pages/Settings";
 import { Calendar } from "@/pages/Calendar";
 import { SimpleApp } from "@/pages/Simple";
 import { Market, TaconDetail } from "@/pages/Market";
-import { TaconPage } from "@/pages/TaconPage";
+import { TaconPage, TaconRecordPage } from "@/pages/TaconPage";
 import { DevMenu } from "@/pages/DevMenu";
 import { DevProfile } from "@/pages/DevProfile";
 import { DevPortal } from "@/pages/DevPortal";
@@ -118,6 +118,9 @@ export function App() {
             add. A Tac-On page lives at /t/ so it can never shadow a real one. */}
         <Route path="/tacons" component={Market} />
         <Route path="/tacons/:slug">{(params) => <TaconDetail slug={params.slug} />}</Route>
+        <Route path="/t/:installId/record/:recordId">
+          {(params) => <TaconRecordPage installId={Number(params.installId)} recordId={Number(params.recordId)} />}
+        </Route>
         <Route path="/t/:installId/:page">
           {(params) => <TaconPage installId={Number(params.installId)} page={params.page} />}
         </Route>

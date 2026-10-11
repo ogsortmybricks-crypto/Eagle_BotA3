@@ -29,6 +29,7 @@ import { logActivity } from "../activity";
 import { requireScope, writeStudioId, StudioChoiceError } from "../studio";
 import {
   compile,
+  LINK_COLUMN,
   positionAudience,
   type Manifest,
   type PageDef,
@@ -36,7 +37,13 @@ import {
   type PositionDef,
   type Widget,
 } from "@shared/tacons";
-import type { TaconDeskView, TaconNavEntry, TaconPanelView, TaconView } from "@shared/tacons/view";
+import type {
+  TaconDeskView,
+  TaconNavEntry,
+  TaconPanelView,
+  TaconRecordView,
+  TaconView,
+} from "@shared/tacons/view";
 import {
   loadInstall,
   marketListings,
@@ -48,11 +55,20 @@ import {
   addRecord,
   audienceAllows,
   buildRuntime,
+  feedShowsRow,
+  formValues,
+  listOffersRemove,
+  listShowsRow,
+  pageTitle,
   renderDesk,
   renderPage,
   renderPanel,
+  renderRecord,
+  rowFrom,
   runActions,
+  widgetVisible,
 } from "../tacons/runtime";
+import { checkVerifyCode, VerifyCodeError } from "../personal";
 import { heldNames, heldPositions, setPositionsArchived, syncPositions } from "../tacons/positions";
 import { registerExtensionRoutes } from "../tacons/extensions";
 
@@ -71,13 +87,24 @@ taconsRouter.get("/nav", requirePermission("tacons.use"), async (req, res) => {
 
   for (const entry of installs) {
     const mine = new Set(held.get(entry.install.id)?.keys() ?? []);
+    // A title with `{...}` in it is worked out for this person, which needs
+    // the Tac-On's runtime - so only Tac-Ons that have one pay for it.
+    const runtime = entry.manifest.pages.some((page) => page.nav && page.titleTemplate)
+      ? await buildRuntime({
+          academy: req.academy!,
+          settings: req.settings!,
+          user: req.user!,
+          scope: req.scope,
+          install: entry,
+        })
+      : null;
     for (const page of entry.manifest.pages) {
       if (!page.nav) continue;
       if (!audienceAllows(page.showTo, req.user!, mine)) continue;
       entries.push({
         installId: entry.install.id,
         page: page.name,
-        label: page.title,
+        label: runtime ? await pageTitle(runtime, page) : page.title,
         icon: page.icon,
         taconName: entry.tacon.name,
         studioName: entry.studioName,
@@ -209,6 +236,8 @@ const submitSchema = z.object({
   position: z.string().max(60).optional(),
   index: z.number().int().min(0).max(200),
   values: z.record(z.unknown()).default({}),
+  /** The six-digit confirmation code, for a form with `confirm with code`. */
+  code: z.string().max(20).optional(),
 });
 
 taconsRouter.post("/view/:installId/submit", requirePermission("tacons.use"), async (req, res) => {
@@ -240,11 +269,23 @@ taconsRouter.post("/view/:installId/submit", requirePermission("tacons.use"), as
   ) {
     return res.status(403).json({ error: "Your role can't add to this." });
   }
+  if (!(await widgetVisible(runtime, form))) {
+    return res.status(403).json({ error: "This form isn't open right now." });
+  }
+
+  // `confirm with code`: the person's own six-digit code, checked before anything is written.
+  if (form.confirmCode) {
+    try {
+      await checkVerifyCode(req.user!.id, parsed.data.code ?? "");
+    } catch (error) {
+      if (error instanceof VerifyCodeError) return res.status(400).json({ error: error.message });
+      throw error;
+    }
+  }
 
   // Only the fields the form actually asked for are accepted, whatever the
-  // browser sent. A form is a contract about what gets written.
-  const values: Record<string, unknown> = {};
-  for (const field of form.fields) values[field.field] = parsed.data.values[field.field];
+  // browser sent, plus the ones it fills in itself.
+  const values = await formValues(runtime, form, parsed.data.values);
 
   const result = await addRecord(runtime, form.into, values, {
     type: "user",
@@ -274,7 +315,7 @@ taconsRouter.post("/view/:installId/submit", requirePermission("tacons.use"), as
 });
 
 taconsRouter.post("/view/:installId/run", requirePermission("tacons.use"), async (req, res) => {
-  const parsed = submitSchema.omit({ values: true }).safeParse(req.body);
+  const parsed = submitSchema.omit({ values: true, code: true }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Couldn't read that." });
 
   const entry = await openInstall(req);
@@ -300,6 +341,9 @@ taconsRouter.post("/view/:installId/run", requirePermission("tacons.use"), async
   ) {
     return res.status(403).json({ error: "Your role can't do that." });
   }
+  if (!(await widgetVisible(runtime, found.widget))) {
+    return res.status(403).json({ error: "That button isn't available right now." });
+  }
 
   const result = await runActions(runtime, found.widget.does, {
     actorUserId: req.user!.id,
@@ -310,6 +354,25 @@ taconsRouter.post("/view/:installId/run", requirePermission("tacons.use"), async
   res.json({ ok: true, ...result });
 });
 
+/** One of this install's saved rows, by id, straight from the database. */
+async function storedRecord(installId: number, recordId: number) {
+  if (!Number.isInteger(recordId) || recordId < 1) return null;
+  const [record] = await db
+    .select()
+    .from(taconRecords)
+    .where(and(eq(taconRecords.id, recordId), eq(taconRecords.installId, installId)))
+    .limit(1);
+  return record ?? null;
+}
+
+/** Every list in the Tac-On, with the page, panel or desk it sits in. */
+function listsOf(manifest: Manifest) {
+  const owners: (PageDef | PanelDef | PositionDef)[] = [...manifest.pages, ...manifest.panels, ...manifest.positions];
+  return owners.flatMap((owner) =>
+    owner.widgets.flatMap((widget) => (widget.kind === "list" ? [{ owner, widget }] : [])),
+  );
+}
+
 taconsRouter.delete(
   "/view/:installId/records/:recordId",
   requirePermission("tacons.use"),
@@ -317,37 +380,118 @@ taconsRouter.delete(
     const entry = await openInstall(req);
     if (!entry) return res.status(404).json({ error: "That Tac-On isn't installed here." });
 
-    const [record] = await db
-      .select()
-      .from(taconRecords)
-      .where(
-        and(
-          eq(taconRecords.id, Number(req.params.recordId)),
-          eq(taconRecords.installId, entry.install.id),
-        ),
-      )
-      .limit(1);
+    const record = await storedRecord(entry.install.id, Number(req.params.recordId));
     if (!record) return res.status(404).json({ error: "That row is already gone." });
-    // Removal is only ever offered by a list that said who may remove, so the
-    // permission question is "does any such list exist, for this person?".
-    const held = await heldNames(req.user!.id, entry.install.id);
-    const owners = [...entry.manifest.pages, ...entry.manifest.panels, ...entry.manifest.positions];
-    const allowed = owners.some((owner) =>
-      audienceAllows(ownerAudience(owner), req.user!, held) &&
-      owner.widgets.some(
-        (widget) =>
-          widget.kind === "list" &&
-          widget.source.kind === "store" &&
-          widget.source.store.length === 1 &&
-          widget.source.store[0] === record.store &&
-          widget.allowRemove.length > 0 &&
-          audienceAllows(widget.allowRemove, req.user!, held),
-      ),
-    );
-    if (!allowed) return res.status(403).json({ error: "Your role can't remove this." });
+
+    // Removal is only ever offered by a list, so the question is "is there a
+    // list this person can see, that shows them this very row, and lets them
+    // remove it?" - its `where`, `show if` and `allow remove own` included.
+    const runtime = await buildRuntime({
+      academy: req.academy!,
+      settings: req.settings!,
+      user: req.user!,
+      scope: req.scope,
+      install: entry,
+    });
+    const row = rowFrom(record, runtime);
+    let allowed = false;
+    for (const { owner, widget } of listsOf(entry.manifest)) {
+      if (widget.source.kind !== "store" || widget.source.store.length !== 1) continue;
+      if (widget.source.store[0] !== record.store) continue;
+      if (!audienceAllows(ownerAudience(owner), req.user!, runtime.held)) continue;
+      if (await listOffersRemove(runtime, widget, row)) {
+        allowed = true;
+        break;
+      }
+    }
+    if (!allowed) return res.status(403).json({ error: "You can't remove this row." });
 
     await db.delete(taconRecords).where(eq(taconRecords.id, record.id));
     res.json({ ok: true });
+  },
+);
+
+const recordQuerySchema = z.object({
+  page: z.string().max(60).optional(),
+  panel: z.string().max(60).optional(),
+  position: z.string().max(60).optional(),
+  index: z.coerce.number().int().min(0).max(200).optional(),
+  calendar: z.coerce.number().int().min(0).max(200).optional(),
+});
+
+/**
+ * One row on its own read-only page: what a list's `link` column and a
+ * calendar's `open record` open. Record ids are easy to guess, so the row has
+ * to be one the list (or calendar block) it was opened from would show this
+ * person - unless the list says `link anyone`, which opens it to anyone in
+ * the academy. It never opens to anyone signed out.
+ */
+taconsRouter.get(
+  "/view/:installId/record/:recordId",
+  requirePermission("tacons.use"),
+  async (req, res) => {
+    const parsed = recordQuerySchema.safeParse(req.query);
+    if (!parsed.success) return res.status(400).json({ error: "That link isn't complete." });
+    const query = parsed.data;
+
+    const entry = await openInstall(req);
+    if (!entry || !entry.install.enabled) {
+      return res.status(404).json({ error: "That Tac-On isn't installed here." });
+    }
+    const record = await storedRecord(entry.install.id, Number(req.params.recordId));
+    const missing = () => res.status(404).json({ error: "That record isn't here, or isn't yours to see." });
+    if (!record) return missing();
+
+    const runtime = await buildRuntime({
+      academy: req.academy!,
+      settings: req.settings!,
+      user: req.user!,
+      scope: req.scope,
+      install: entry,
+    });
+    const row = rowFrom(record, runtime);
+    let view: TaconRecordView | null = null;
+
+    if (query.calendar !== undefined) {
+      const feed = entry.manifest.calendars?.[query.calendar];
+      if (!feed?.openRecord || feed.store.length !== 1 || feed.store[0] !== record.store) return missing();
+      if (!(await feedShowsRow(runtime, feed, row))) return missing();
+      view = await renderRecord(runtime, {
+        store: record.store,
+        row,
+        fields: feed.openRecord,
+        title: feed.title,
+        back: { label: "Calendar", href: "/calendar" },
+      });
+    } else {
+      if (query.index === undefined) return missing();
+      const found = findWidget(entry.manifest, query, query.index);
+      if (!found || found.widget.kind !== "list") return missing();
+      const list = found.widget;
+      if (list.source.kind !== "store" || list.source.store.length !== 1 || list.source.store[0] !== record.store) {
+        return missing();
+      }
+      if (!list.columns.includes(LINK_COLUMN)) return missing();
+      if (!list.linkAnyone) {
+        if (!audienceAllows(found.audience, req.user!, runtime.held)) return missing();
+        if (!(await listShowsRow(runtime, list, row))) return missing();
+      }
+      const page = query.page ? entry.manifest.pages.find((candidate) => candidate.name === query.page) : null;
+      view = await renderRecord(runtime, {
+        store: record.store,
+        row,
+        fields: list.columns,
+        title: list.titleTemplate ?? (list.title ? { kind: "literal", value: list.title } : null),
+        back: page
+          ? { label: await pageTitle(runtime, page), href: `/t/${entry.install.id}/${page.name}` }
+          : query.position
+            ? { label: "Positions", href: "/positions" }
+            : null,
+      });
+    }
+
+    if (!view) return missing();
+    res.json({ view });
   },
 );
 

@@ -15,8 +15,8 @@
 
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { db } from "../db";
-import { positionHolders, positions, users, type Position, type TaconInstall } from "@shared/schema";
-import type { Manifest, Row } from "@shared/tacons";
+import { positionHolders, positions, taconInstalls, users, type Position, type TaconInstall } from "@shared/schema";
+import { studioPositionAudience, type Manifest, type Row } from "@shared/tacons";
 import { logActivity } from "../activity";
 
 /** What a Tac-On's expressions read as `position.<name>`. */
@@ -151,6 +151,37 @@ export async function heldPositions(
     const forInstall = held.get(row.installId) ?? new Map();
     forInstall.set(row.name, { positionId: row.positionId, title: row.title });
     held.set(row.installId, forInstall);
+  }
+
+  // The studio's own seats, for `show to position "Town Hall Leader"`. They
+  // go in under their audience key, which can never be a Tac-On position's name.
+  const installs = await db
+    .select({ id: taconInstalls.id, studioId: taconInstalls.studioId })
+    .from(taconInstalls)
+    .where(inArray(taconInstalls.id, installIds));
+  const seats = await db
+    .select({
+      positionId: positions.id,
+      title: positions.title,
+      studioId: positions.studioId,
+      shared: positions.sharedStudioIds,
+    })
+    .from(positionHolders)
+    .innerJoin(positions, eq(positions.id, positionHolders.positionId))
+    .where(and(eq(positionHolders.userId, userId), isNull(positionHolders.endedAt), eq(positions.archived, false)));
+
+  for (const install of installs) {
+    for (const seat of seats) {
+      const inStudio =
+        install.studioId === null ||
+        seat.studioId === null ||
+        seat.studioId === install.studioId ||
+        (seat.shared ?? []).includes(install.studioId);
+      if (!inStudio) continue;
+      const forInstall = held.get(install.id) ?? new Map();
+      forInstall.set(studioPositionAudience(seat.title), { positionId: seat.positionId, title: seat.title });
+      held.set(install.id, forInstall);
+    }
   }
   return held;
 }

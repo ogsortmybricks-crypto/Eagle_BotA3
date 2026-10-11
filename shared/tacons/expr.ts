@@ -14,9 +14,13 @@
  */
 
 import type { Token } from "./parse";
+import { DAY_RE, dayInZone, startOfDayInZone } from "../calendar";
 import {
   AGGREGATES,
+  CLOCK_WORDS,
+  ROW_AGGREGATES,
   type Aggregate,
+  type ClockWord,
   type Comparator,
   type Comparison,
   type Condition,
@@ -107,7 +111,7 @@ function parseAggregate(cursor: Cursor): Expr | null {
   const parts = target.value.split(".").filter(Boolean);
   let source: string[];
   let field: string | null;
-  if (fn === "count") {
+  if (ROW_AGGREGATES.includes(fn)) {
     source = parts;
     field = null;
   } else {
@@ -149,31 +153,97 @@ export function parseExpr(tokens: Token[], line: number, diagnostics: Diagnostic
 }
 
 function parseExprFrom(cursor: Cursor): Expr | null {
-  const token = peek(cursor);
-  if (!token) {
+  if (!peek(cursor)) {
     fail(cursor, "This needs a value.");
     return null;
   }
 
-  let left =
-    token.kind === "word" && (AGGREGATES as readonly string[]).includes(token.value.toLowerCase())
-      ? parseAggregate(cursor)
-      : parseValue(cursor);
+  let left = parseOperand(cursor);
   if (!left) return null;
 
-  // `a plus b times c` reads strictly left to right. Anyone who needs real
-  // precedence is writing something a Tac-On should not be doing.
+  // `a minus b plus c` reads strictly left to right: ((a minus b) plus c).
+  // Each pass takes one operand, never a whole expression, so nothing groups
+  // to the right. Anyone who needs real precedence is writing something a
+  // Tac-On should not be doing.
   while (peek(cursor)?.kind === "word") {
     const op = BINARY_WORDS[peek(cursor)!.value.toLowerCase()];
     if (!op) break;
     take(cursor);
     if (op === "divided" && atWord(cursor, "by")) take(cursor);
-    const right = parseExprFrom(cursor);
+    const right = parseOperand(cursor);
     if (!right) return left;
     left = { kind: "binary", op, left, right };
   }
 
   return left;
+}
+
+/** The word after the one under the cursor, lower-cased. */
+function nextWord(cursor: Cursor): string | null {
+  const token = cursor.tokens[cursor.index + 1];
+  return token?.kind === "word" ? token.value.toLowerCase() : null;
+}
+
+/**
+ * One value with no arithmetic around it: a plain value, a total, or one of
+ * the small forms (`max of`, `min of`, `if ... then ... else`, `name of`).
+ */
+function parseOperand(cursor: Cursor): Expr | null {
+  const token = peek(cursor);
+  if (!token) {
+    fail(cursor, "This needs a value.");
+    return null;
+  }
+  const lower = token.kind === "word" ? token.value.toLowerCase() : "";
+
+  if ((AGGREGATES as readonly string[]).includes(lower)) return parseAggregate(cursor);
+
+  // `max of 0 and setting.goal minus my.done`: everything after `and` is the
+  // second value, arithmetic included.
+  if ((lower === "max" || lower === "min") && nextWord(cursor) === "of") {
+    take(cursor);
+    take(cursor);
+    const left = parseExprFrom(cursor);
+    if (!left) return null;
+    if (!atWord(cursor, "and")) {
+      fail(cursor, `Write it as "${lower} of <value> and <value>".`);
+      return null;
+    }
+    take(cursor);
+    const right = parseExprFrom(cursor);
+    if (!right) return null;
+    return { kind: "pick", fn: lower, left, right };
+  }
+
+  if (lower === "name" && nextWord(cursor) === "of") {
+    take(cursor);
+    take(cursor);
+    const of = parseOperand(cursor);
+    return of ? { kind: "name", of } : null;
+  }
+
+  if (lower === "if" && cursor.index + 1 < cursor.tokens.length) {
+    take(cursor);
+    const when = parseConditionFrom(cursor);
+    if (!when) return null;
+    if (!atWord(cursor, "then")) {
+      fail(cursor, 'Write it as "if <test> then <value> else <value>".');
+      return null;
+    }
+    take(cursor);
+    const then = parseExprFrom(cursor);
+    if (!then) return null;
+    if (!atWord(cursor, "else") && !atWord(cursor, "otherwise")) {
+      fail(cursor, 'An "if" needs an "else", so there is always a value.');
+      return null;
+    }
+    take(cursor);
+    const otherwise = parseExprFrom(cursor);
+    if (!otherwise) return null;
+    return { kind: "if", when, then, otherwise };
+  }
+
+  return parseValue(cursor);
 }
 
 export function parseCondition(
@@ -336,6 +406,12 @@ export type EvalContext = {
    * `position.treasurer` reads the names; `.holder` is the first holder's id.
    */
   positions: Record<string, Row>;
+  /** `today`, `this_week_start`, `session_start`, `weekday`. Absent means blank. */
+  clock?: Partial<Record<ClockWord, string>>;
+  /** The academy's time zone, for comparing a saved moment with a day. */
+  timeZone?: string | null;
+  /** A person's name from their id, for `name of`. */
+  personName?: (id: unknown) => string | undefined;
 };
 
 export function evaluate(expr: Expr | null, ctx: EvalContext): unknown {
@@ -344,6 +420,21 @@ export function evaluate(expr: Expr | null, ctx: EvalContext): unknown {
   switch (expr.kind) {
     case "literal":
       return expr.value;
+
+    case "pick": {
+      const left = toNumber(evaluate(expr.left, ctx));
+      const right = toNumber(evaluate(expr.right, ctx));
+      return expr.fn === "max" ? Math.max(left, right) : Math.min(left, right);
+    }
+
+    case "if":
+      return matches(expr.when, ctx) ? evaluate(expr.then, ctx) : evaluate(expr.otherwise, ctx);
+
+    case "name": {
+      const value = evaluate(expr.of, ctx);
+      if (value === null || value === undefined || value === "") return "";
+      return ctx.personName?.(value) ?? display(value);
+    }
 
     case "template":
       return expr.parts
@@ -377,6 +468,7 @@ export function evaluate(expr: Expr | null, ctx: EvalContext): unknown {
           : true,
       );
       if (expr.fn === "count") return rows.length;
+      if (expr.fn === "any") return rows.length > 0 ? 1 : 0;
 
       const numbers = rows.map((row) => toNumber(row[expr.field!]));
       if (numbers.length === 0) return 0;
@@ -418,6 +510,11 @@ function resolvePath(parts: string[], ctx: EvalContext): unknown {
   // A bare field name inside a row context: `amount` rather than `entry.amount`.
   if (rest.length === 0 && ctx.row && root in ctx.row) return ctx.row[root];
 
+  // The clock comes after a row's own fields, so a field called `weekday` wins.
+  if (rest.length === 0 && (CLOCK_WORDS as readonly string[]).includes(lower)) {
+    return ctx.clock?.[lower as ClockWord] ?? "";
+  }
+
   // Anything left is another Tac-On's published value.
   return ctx.compute(parts);
 }
@@ -439,18 +536,52 @@ export function matches(condition: Condition | null, ctx: EvalContext): boolean 
     const right = evaluate(comparison.right, ctx);
     switch (comparison.op) {
       case "is":
-        return same(left, right);
+        return sameMoment(left, right, ctx) ?? same(left, right);
       case "is not":
-        return !same(left, right);
+        return !(sameMoment(left, right, ctx) ?? same(left, right));
       case "above":
-        return toNumber(left) > toNumber(right);
-      case "below":
-        return toNumber(left) < toNumber(right);
+      case "below": {
+        // Two dates (a day, or a saved moment like `created`) compare in time.
+        // A day means its first moment, so `created above today` is "saved
+        // today" and `due below today` is "due before today".
+        const a = momentOf(left, ctx);
+        const b = momentOf(right, ctx);
+        if (a !== null && b !== null) return comparison.op === "above" ? a > b : a < b;
+        return comparison.op === "above"
+          ? toNumber(left) > toNumber(right)
+          : toNumber(left) < toNumber(right);
+      }
       case "contains":
         return display(left).toLowerCase().includes(display(right).toLowerCase());
     }
     return false;
   });
+}
+
+const MOMENT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+/** Epoch milliseconds for a day or a timestamp string; null for anything else. */
+function momentOf(value: unknown, ctx: EvalContext): number | null {
+  if (typeof value !== "string") return null;
+  if (DAY_RE.test(value)) return startOfDayInZone(value, ctx.timeZone);
+  if (MOMENT_RE.test(value)) {
+    const time = Date.parse(value);
+    return Number.isNaN(time) ? null : time;
+  }
+  return null;
+}
+
+/**
+ * `created is today`: a saved moment is "the same" as a day when it falls on
+ * that day in the academy's time zone. Null when this isn't a day-and-moment
+ * pair, so the ordinary test applies.
+ */
+function sameMoment(left: unknown, right: unknown, ctx: EvalContext): boolean | null {
+  if (typeof left !== "string" || typeof right !== "string") return null;
+  const dayOf = (moment: string) => dayInZone(new Date(moment), ctx.timeZone);
+  if (DAY_RE.test(left) && MOMENT_RE.test(right)) return dayOf(right) === left;
+  if (MOMENT_RE.test(left) && DAY_RE.test(right)) return dayOf(left) === right;
+  return null;
 }
 
 /** Loose equality, because `5` typed into a form and 5 in the store are one thing. */

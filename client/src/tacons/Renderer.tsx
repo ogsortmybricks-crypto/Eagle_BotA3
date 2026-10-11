@@ -8,18 +8,22 @@
  * in the app rather than like a page someone pasted in.
  */
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Trash2 } from "lucide-react";
+import { Link } from "wouter";
+import { ChevronRight, PartyPopper, Trash2 } from "lucide-react";
 import { apiDelete, apiPost } from "@/lib/api";
 import { useDateFormat } from "@/lib/session";
 import { Banner, Spinner } from "@/components/ui";
 import { ExtensionView } from "./Extensions";
 import type {
   TaconView,
+  ViewCelebrate,
   ViewForm,
   ViewList,
   ViewPerson,
+  ViewProgress,
+  ViewRow,
   ViewWidget,
 } from "@shared/tacons/view";
 
@@ -89,6 +93,12 @@ function WidgetView({
         </div>
       );
 
+    case "progress":
+      return <ProgressView progress={widget} compact={compact} />;
+
+    case "celebrate":
+      return <CelebrateView celebrate={widget} />;
+
     case "list":
       return <ListView list={widget} target={target} />;
 
@@ -135,50 +145,236 @@ function ListView({ list, target }: { list: ViewList; target: RenderTarget }) {
           {list.problem}
         </Banner>
       )}
+      {remove.error && (
+        <div className="mb-2">
+          <Banner tone="error">{(remove.error as Error).message}</Banner>
+        </div>
+      )}
       {!list.problem && list.rows.length === 0 ? (
         <p className="card px-4 py-6 text-center text-sm text-gray-500">{list.empty}</p>
       ) : (
-        !list.problem && (
-          <div className="card scroll-x">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-200 bg-gray-50 text-left">
-                  {list.columns.map((column) => (
-                    <th key={column.key} className="px-3 py-2 font-semibold text-gray-700">
-                      {column.label}
-                    </th>
-                  ))}
-                  {list.rows.some((row) => row.canRemove) && <th className="w-10" />}
-                </tr>
-              </thead>
-              <tbody>
-                {list.rows.map((row) => (
-                  <tr key={row.id} className="border-b border-gray-100 last:border-0">
-                    {list.columns.map((column) => (
-                      <td key={column.key} className="px-3 py-2 align-top text-gray-700">
-                        {cell(row.cells[column.key] ?? "", column.type)}
-                      </td>
-                    ))}
-                    {list.rows.some((entry) => entry.canRemove) && (
-                      <td className="px-2 py-2 text-right">
-                        {row.canRemove && (
-                          <button
-                            onClick={() => remove.mutate(row.id)}
-                            className="btn-ghost p-1.5"
-                            aria-label="Remove row"
-                            disabled={remove.isPending}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}
-                      </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        !list.problem &&
+        (list.groupDepth ? (
+          <div className="card divide-y divide-gray-100">
+            {folders(list.rows, 0, list.groupDepth).map((folder) => (
+              <Folder key={folder.name} folder={folder} depth={0}>
+                {(rows) => <RowTable list={list} rows={rows} cell={cell} onRemove={(id) => remove.mutate(id)} removing={remove.isPending} />}
+              </Folder>
+            ))}
           </div>
-        )
+        ) : (
+          <div className="card scroll-x">
+            <RowTable list={list} rows={list.rows} cell={cell} onRemove={(id) => remove.mutate(id)} removing={remove.isPending} />
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
+function RowTable({
+  list,
+  rows,
+  cell,
+  onRemove,
+  removing,
+}: {
+  list: ViewList;
+  rows: ViewRow[];
+  cell: (value: string, type: string) => string;
+  onRemove: (id: number | string) => void;
+  removing: boolean;
+}) {
+  const removable = rows.some((row) => row.canRemove);
+  return (
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="border-b border-gray-200 bg-gray-50 text-left">
+          {list.columns.map((column) => (
+            <th key={column.key} className="px-3 py-2 font-semibold text-gray-700">
+              {column.label}
+            </th>
+          ))}
+          {removable && <th className="w-10" />}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.id} className="border-b border-gray-100 last:border-0">
+            {list.columns.map((column) => (
+              <td key={column.key} className="px-3 py-2 align-top text-gray-700">
+                {column.type === "link" ? (
+                  row.link ? (
+                    <Link href={row.link} className="text-brand-600 underline">
+                      {row.cells[column.key] || "Open"}
+                    </Link>
+                  ) : null
+                ) : (
+                  cell(row.cells[column.key] ?? "", column.type)
+                )}
+              </td>
+            ))}
+            {removable && (
+              <td className="px-2 py-2 text-right">
+                {row.canRemove && (
+                  <button
+                    onClick={() => onRemove(row.id)}
+                    className="btn-ghost p-1.5"
+                    aria-label="Remove row"
+                    disabled={removing}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </td>
+            )}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+type FolderNode = { name: string; rows: ViewRow[]; children: FolderNode[] };
+
+/** Rows into nested folders by `row.groups`, keeping the order rows arrived in. */
+function folders(rows: ViewRow[], level: number, depth: number): FolderNode[] {
+  const byName = new Map<string, ViewRow[]>();
+  for (const row of rows) {
+    const name = row.groups?.[level] ?? "None";
+    byName.set(name, [...(byName.get(name) ?? []), row]);
+  }
+  return [...byName.entries()].map(([name, inside]) => ({
+    name,
+    rows: inside,
+    children: level + 1 < depth ? folders(inside, level + 1, depth) : [],
+  }));
+}
+
+function Folder({
+  folder,
+  depth,
+  children,
+}: {
+  folder: FolderNode;
+  depth: number;
+  children: (rows: ViewRow[]) => ReactNode;
+}) {
+  return (
+    <details open={depth === 0} className="group">
+      <summary
+        className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+        style={{ paddingLeft: `${0.75 + depth * 1.25}rem` }}
+      >
+        <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
+        <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+        <span className="text-xs tabular-nums text-gray-500">{folder.rows.length}</span>
+      </summary>
+      {folder.children.length > 0 ? (
+        <div className="divide-y divide-gray-100">
+          {folder.children.map((child) => (
+            <Folder key={child.name} folder={child} depth={depth + 1}>
+              {children}
+            </Folder>
+          ))}
+        </div>
+      ) : (
+        <div className="scroll-x border-t border-gray-100" style={{ marginLeft: `${depth * 1.25}rem` }}>
+          {children(folder.rows)}
+        </div>
+      )}
+    </details>
+  );
+}
+
+/* ------------------------------- progress --------------------------------- */
+
+function ProgressView({ progress, compact }: { progress: ViewProgress; compact: boolean }) {
+  const share = progress.goal > 0 ? Math.max(0, Math.min(1, progress.value / progress.goal)) : 0;
+  const done = progress.goal > 0 && progress.value >= progress.goal;
+  return (
+    <div className={compact ? "" : "sm:max-w-md"}>
+      <div className="card-pad">
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="text-xs font-medium uppercase tracking-wide text-gray-500">{progress.label}</div>
+          <div className="text-sm font-semibold tabular-nums text-gray-900">{progress.text}</div>
+        </div>
+        <div
+          className="mt-2 h-2.5 overflow-hidden rounded-full bg-gray-100"
+          role="progressbar"
+          aria-label={progress.label}
+          aria-valuemin={0}
+          aria-valuemax={progress.goal}
+          aria-valuenow={progress.value}
+        >
+          <div
+            className={`h-full rounded-full transition-all ${done ? "bg-emerald-500" : "bg-brand-600"}`}
+            style={{ width: `${share * 100}%` }}
+          />
+        </div>
+        {progress.hint && <div className="mt-1.5 text-xs text-gray-500">{progress.hint}</div>}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------ celebrations ------------------------------ */
+
+/** Remembered per browser, so the confetti plays once per person, not every visit. */
+function alreadyCelebrated(key: string): boolean {
+  try {
+    return window.localStorage.getItem(`tacon-celebrated:${key}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markCelebrated(key: string) {
+  try {
+    window.localStorage.setItem(`tacon-celebrated:${key}`, "1");
+  } catch {
+    // Private windows can refuse storage; the confetti may just play again.
+  }
+}
+
+const CONFETTI_COLORS = ["#f59e0b", "#10b981", "#3b82f6", "#ec4899", "#8b5cf6", "#ef4444"];
+
+function CelebrateView({ celebrate }: { celebrate: ViewCelebrate }) {
+  const [burst, setBurst] = useState(false);
+
+  useEffect(() => {
+    if (alreadyCelebrated(celebrate.key)) return;
+    markCelebrated(celebrate.key);
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    setBurst(true);
+    const timer = window.setTimeout(() => setBurst(false), 3200);
+    return () => window.clearTimeout(timer);
+  }, [celebrate.key]);
+
+  return (
+    <div className="card-pad flex items-center gap-3 border-amber-200 bg-amber-50">
+      <PartyPopper className="h-6 w-6 shrink-0 text-amber-600" aria-hidden="true" />
+      <p className="font-semibold text-amber-900">{celebrate.text}</p>
+      {burst && (
+        <div className="pointer-events-none fixed inset-0 z-50 overflow-hidden" aria-hidden="true">
+          <style>{`@keyframes tacon-confetti{0%{transform:translateY(-10vh) rotate(0)}100%{transform:translateY(110vh) rotate(720deg)}}`}</style>
+          {Array.from({ length: 90 }, (_, index) => (
+            <span
+              key={index}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: `${(index * 37) % 100}%`,
+                width: 8,
+                height: 12,
+                background: CONFETTI_COLORS[index % CONFETTI_COLORS.length],
+                borderRadius: 2,
+                animation: `tacon-confetti ${1.8 + ((index * 13) % 12) / 10}s ${((index * 7) % 10) / 10}s linear forwards`,
+                transform: "translateY(-10vh)",
+              }}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
@@ -188,6 +384,7 @@ function ListView({ list, target }: { list: ViewList; target: RenderTarget }) {
 
 function FormView({ form, target }: { form: ViewForm; target: RenderTarget }) {
   const [values, setValues] = useState<Record<string, unknown>>({});
+  const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -199,9 +396,11 @@ function FormView({ form, target }: { form: ViewForm; target: RenderTarget }) {
         position: target.position,
         index: form.index,
         values,
+        ...(form.confirmCode ? { code } : {}),
       }),
     onSuccess: () => {
       setValues({});
+      setCode("");
       setError(null);
       setSaved(true);
       target.onChanged();
@@ -249,6 +448,19 @@ function FormView({ form, target }: { form: ViewForm; target: RenderTarget }) {
                     value={String(values[field.name] ?? "")}
                     onChange={(event) => set(field.name, event.target.value)}
                   />
+                ) : field.choices ? (
+                  <select
+                    className="input"
+                    value={String(values[field.name] ?? "")}
+                    onChange={(event) => set(field.name, event.target.value)}
+                  >
+                    <option value="">{field.choices.length === 0 ? "Nothing to pick yet" : "Pick one"}</option>
+                    {field.choices.map((choice) => (
+                      <option key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </option>
+                    ))}
+                  </select>
                 ) : field.type === "choice" ? (
                   <select
                     className="input"
@@ -296,9 +508,34 @@ function FormView({ form, target }: { form: ViewForm; target: RenderTarget }) {
               </Field>
             ))}
           </div>
+          {form.confirmCode && (
+            <div className="mt-3 max-w-xs">
+              <label className="label" htmlFor={`tacon-code-${form.index}`}>
+                Your six-digit confirmation code
+              </label>
+              <input
+                id={`tacon-code-${form.index}`}
+                className="input tracking-widest"
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={6}
+                value={code}
+                onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              />
+              <p className="hint">The private code from your profile. It confirms this is really you.</p>
+            </div>
+          )}
           <div className="mt-4">
             <button
-              onClick={() => submit.mutate()}
+              onClick={() => {
+                if (form.confirmCode && code.length !== 6) {
+                  setError("Type your six-digit confirmation code first.");
+                  return;
+                }
+                if (form.confirm && !window.confirm(form.confirm)) return;
+                submit.mutate();
+              }}
               disabled={submit.isPending}
               className="btn-primary"
             >

@@ -21,8 +21,11 @@
 export type PathExpr = { kind: "path"; parts: string[] };
 export type LiteralExpr = { kind: "literal"; value: string | number | boolean };
 
-export const AGGREGATES = ["sum", "count", "average", "highest", "lowest"] as const;
+export const AGGREGATES = ["sum", "count", "average", "highest", "lowest", "any"] as const;
 export type Aggregate = (typeof AGGREGATES)[number];
+
+/** Aggregates that count rows rather than read a field: `count of entry`, `any of entry`. */
+export const ROW_AGGREGATES: readonly Aggregate[] = ["count", "any"];
 
 /** `sum of entry.amount where entry.kind is "earn"`. */
 export type AggregateExpr = {
@@ -30,7 +33,7 @@ export type AggregateExpr = {
   fn: Aggregate;
   /** The store being counted over - may be `alias.store` for another Tac-On. */
   source: string[];
-  /** The field being summed. Absent for `count of`. */
+  /** The field being summed. Absent for `count of` and `any of`. */
   field: string | null;
   where: Condition | null;
 };
@@ -43,7 +46,33 @@ export type BinaryExpr = { kind: "binary"; op: BinaryOp; left: Expr; right: Expr
 /** `"You have {my.balance} bucks"` - literal chunks and embedded expressions. */
 export type TemplateExpr = { kind: "template"; parts: (string | Expr)[] };
 
-export type Expr = PathExpr | LiteralExpr | AggregateExpr | BinaryExpr | TemplateExpr;
+/** `max of 0 and setting.goal minus my.done` - the larger (or smaller) of two values. */
+export type PickExpr = { kind: "pick"; fn: "min" | "max"; left: Expr; right: Expr };
+
+/** `if my.done above 2 then "Yes" else "Not yet"`. */
+export type IfExpr = { kind: "if"; when: Condition; then: Expr; otherwise: Expr };
+
+/** `name of ap_call.partner` - a person id, as the person's name. */
+export type NameExpr = { kind: "name"; of: Expr };
+
+export type Expr =
+  | PathExpr
+  | LiteralExpr
+  | AggregateExpr
+  | BinaryExpr
+  | TemplateExpr
+  | PickExpr
+  | IfExpr
+  | NameExpr;
+
+/**
+ * Words that read the clock rather than a store, worked out in the academy's
+ * time zone: `today` and `this_week_start` are days ("2026-10-12"),
+ * `session_start` is the first day of the session running now (or empty), and
+ * `weekday` is today's name ("Monday").
+ */
+export const CLOCK_WORDS = ["today", "this_week_start", "session_start", "weekday"] as const;
+export type ClockWord = (typeof CLOCK_WORDS)[number];
 
 export const COMPARATORS = ["is", "is not", "above", "below", "contains"] as const;
 export type Comparator = (typeof COMPARATORS)[number];
@@ -75,6 +104,20 @@ export type StoreField = {
   /** Options for a `choice` field. */
   options: string[];
   required: boolean;
+  /**
+   * A `choice from` field: its options are rows of a store, shown by one of
+   * their fields and saved as the row's `id`. Absent on fixed choices.
+   */
+  from?: ChoiceSource;
+};
+
+/** `field assignment choice from assignment.title where assignment.week is my.week`. */
+export type ChoiceSource = {
+  /** `["assignment"]`, or `["alias", "store"]` for a `use`d Tac-On's store. */
+  store: string[];
+  /** The field each option is shown as. */
+  field: string;
+  where: Condition | null;
 };
 
 /**
@@ -160,22 +203,51 @@ export type DividerWidget = { kind: "divider" };
 export type StatWidget = {
   kind: "stat";
   label: string;
+  /** Set when the label has `{...}` in it; `label` is then the raw text. */
+  labelTemplate?: Expr;
   value: Expr;
   hint: Expr | null;
 };
 
+/**
+ * `link` in a list's columns: an "Open" link to a read-only page for that one
+ * row. Not a field, so it never clashes with one.
+ */
+export const LINK_COLUMN = "link";
+
+/** Ways a list can fold its rows into folders, by a date field or `created`. */
+export const DATE_PARTS = ["year", "month", "week", "day"] as const;
+export type DatePart = (typeof DATE_PARTS)[number];
+
+/** One level of a `group by`: a field, optionally cut down to part of a date. */
+export type GroupLevel = { field: string; part: DatePart | null };
+
 export type ListWidget = {
   kind: "list";
   title: string | null;
+  /** Set when the title has `{...}` in it. */
+  titleTemplate?: Expr;
   source: ListSource;
   columns: string[];
   where: Condition | null;
   sort: "newest" | "oldest" | "az";
   limit: number;
   empty: string;
-  /** Roles that may delete a row. Empty means nobody, through this list. */
+  /** Roles that may delete any row this list shows. Empty means nobody, through this list. */
   allowRemove: string[];
+  /** `allow remove own`: anyone who can see the list may delete rows they saved. */
+  removeOwn?: boolean;
+  /** `group by ...`: nested, collapsible folders. Absent or empty means a flat table. */
+  groupBy?: GroupLevel[];
+  /**
+   * `link anyone`: a row's link opens for anyone signed in to this academy,
+   * not only for people who can see this list.
+   */
+  linkAnyone?: boolean;
 };
+
+/** `set day weekday` inside a form: a value worked out on the server, never asked. */
+export type FormSet = { field: string; value: Expr };
 
 export type FormField = { field: string; label: string | null };
 
@@ -185,9 +257,15 @@ export type FormWidget = {
   /** The store rows land in. */
   into: string;
   fields: FormField[];
+  /** Fields the form fills in itself. Absent on older manifests. */
+  sets?: FormSet[];
   /** Roles allowed to submit. Empty means everyone who can see the page. */
   allow: string[];
   submitLabel: string;
+  /** "Are you sure?" before saving. */
+  confirm?: string | null;
+  /** `confirm with code`: the person's own six-digit confirmation code is checked before saving. */
+  confirmCode?: boolean;
   /** Extra actions to run after the row is written. */
   then: Action[];
 };
@@ -200,7 +278,23 @@ export type ButtonWidget = {
   does: Action[];
 };
 
-export type Widget =
+/** `celebrate "You did it!"` - confetti and a message, once per person. */
+export type CelebrateWidget = { kind: "celebrate"; text: Expr };
+
+/** `progress "Calls this week" my.days_called of setting.calls_needed`. */
+export type ProgressWidget = {
+  kind: "progress";
+  label: string;
+  labelTemplate?: Expr;
+  value: Expr;
+  goal: Expr;
+  hint: Expr | null;
+};
+
+/** `show if <condition>` on any widget: it is only drawn while the test passes. */
+export type Visibility = { showIf?: Condition | null };
+
+export type Widget = (
   | NoteWidget
   | HeadingWidget
   | DividerWidget
@@ -208,7 +302,11 @@ export type Widget =
   | ListWidget
   | FormWidget
   | ButtonWidget
-  | import("./extensions").ExtensionWidget;
+  | CelebrateWidget
+  | ProgressWidget
+  | import("./extensions").ExtensionWidget
+) &
+  Visibility;
 
 /* -------------------------------------------------------------------------- */
 /*  Pages, panels, hooks, computed values                                      */
@@ -217,6 +315,8 @@ export type Widget =
 export type PageDef = {
   name: string;
   title: string;
+  /** Set when the title has `{...}` in it, worked out for each viewer. */
+  titleTemplate?: Expr;
   icon: string;
   /** Put it in the sidebar. A page that isn't in the nav is still reachable. */
   nav: boolean;
@@ -271,6 +371,23 @@ export function positionAudience(name: string): string {
 /** The position name in an audience entry, or null for a role. */
 export function audiencePosition(entry: string): string | null {
   return entry.startsWith(POSITION_AUDIENCE) ? entry.slice(POSITION_AUDIENCE.length) : null;
+}
+
+/**
+ * A position the studio already has, named by its title: `show to position
+ * "Town Hall Leader"`. Matched without regard to case against the positions
+ * of the studio the Tac-On is installed in (its group's shared ones, and
+ * academy-wide ones), so whoever holds that seat right now is in the audience.
+ */
+export const STUDIO_POSITION_AUDIENCE = "studio-position:";
+
+export function studioPositionAudience(title: string): string {
+  return `${STUDIO_POSITION_AUDIENCE}${title.trim().toLowerCase()}`;
+}
+
+/** The lower-cased title in a studio-position audience entry, or null. */
+export function audienceStudioPosition(entry: string): string | null {
+  return entry.startsWith(STUDIO_POSITION_AUDIENCE) ? entry.slice(STUDIO_POSITION_AUDIENCE.length) : null;
 }
 
 /**
@@ -367,6 +484,12 @@ export type CalendarFeedDef = {
   showTo: string[];
   /** A page of this Tac-On to open when the entry is clicked. */
   open: string | null;
+  /**
+   * `open record`: clicking the entry opens a read-only page for that one row,
+   * showing these fields (every field of the store when the line lists none).
+   * Takes the place of `open <page>`.
+   */
+  openRecord?: string[] | null;
 };
 
 export type Manifest = {
@@ -392,6 +515,12 @@ export type Manifest = {
   computes: ComputeDef[];
   /** Absent on manifests published before the calendar existed. */
   calendars?: CalendarFeedDef[];
+  /**
+   * Titles of the studio's own positions this Tac-On names as an audience
+   * (`show to position "Town Hall Leader"`), shown to the admin at install.
+   * Absent on older manifests.
+   */
+  studioPositions?: string[];
   /** Absent on older manifests. */
   /** Package-owned configuration, compiled by trusted extensions. */
   extensions?: Record<string, unknown>;

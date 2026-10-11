@@ -100,15 +100,20 @@ store.
 
 ### "Mine" views
 
-`by` holds the submitter's name, and `me.name` is the viewer's:
+`byId` holds who saved the row, and `me.id` is the viewer. Unlike `by` (a
+name, which two people can share), it can't be wrong:
 
 ```
 list topic {
   title "Topics you added"
   columns title, created
-  where topic.by is me.name
+  where topic.byId is me.id
+  allow remove own              # let people clear their own mistakes
 }
 ```
+
+If a form needs to record someone *other* than the person submitting, that's
+a `person` field. If it should record the submitter, don't ask: `set who me.id`.
 
 For a record *about* someone, use a `person` field and compare it with
 `me.id`:
@@ -117,7 +122,7 @@ For a record *about* someone, use a `person` field and compare it with
 ask my_points sum of entry.amount where entry.hero is me.id
 ```
 
-### "This session" without date logic
+### "This week" and "this session"
 
 To *show* the current session and its Quest, read the calendar the guides
 keep:
@@ -130,21 +135,41 @@ list from calendar.sessions {
 }
 ```
 
-To *tag your own records* with a session, there's still no date logic: you
-can't compare a record's date to the session's. Put the session in a setting
-and stamp it on each record:
+To count or list *your own records* from this week or this session, compare
+`created` with the clock — no button, no setting:
 
 ```
-setting session {
-  label "Current session"
-  type text
-  default "Session 1"
+ask calls_this_week count of call where call.byId is me.id and call.created above this_week_start
+ask calls_this_session count of call where call.created above session_start
+```
+
+For periods the calendar doesn't know about (a "sprint", a "launch"), put the
+period in a setting and stamp it on each record with `set period setting.period`
+in the form. Filter with `where entry.period is setting.period`.
+
+### Show what matters, when it matters
+
+Use `show if` so a page talks about what's true right now, and `progress` and
+`celebrate` for goals:
+
+```
+ask calls_left max of 0 and setting.calls_needed minus my.calls_this_week
+
+progress "Calls this week" my.calls_this_week of setting.calls_needed
+celebrate "Fun Friday earned!" {
+  show if my.calls_left is 0
+}
+note "Nobody holds this seat yet — hold an election." warning {
+  show if position.keeper.holders is 0
 }
 ```
 
-Then `field session text` on the store, and either have the form ask for it,
-or fill it from a reaction with `session: setting.session`. Filter with
-`where entry.session is setting.session`.
+### Signed records
+
+For anything that counts as a promise (a check-in, a vote tally, a ledger
+entry), `confirm with code` makes the person type their own six-digit
+confirmation code to save it. Pair it with a `link` column so anyone can be
+pointed at the signed record.
 
 ### React to what the studio does
 

@@ -38,6 +38,7 @@ import {
   display,
   evaluate,
   matches,
+  toNumber,
   type Action,
   type BaseSource,
   type Condition,
@@ -52,12 +53,26 @@ import {
   type StoreDef,
   type Widget,
 } from "@shared/tacons";
-import { SOURCE_PERMISSIONS, audiencePosition, type PositionDef } from "@shared/tacons";
+import {
+  LINK_COLUMN,
+  SOURCE_PERMISSIONS,
+  audiencePosition,
+  audienceStudioPosition,
+  type CalendarFeedDef,
+  type ClockWord,
+  type FormWidget,
+  type GroupLevel,
+  type PositionDef,
+  type StoreField,
+} from "@shared/tacons";
 import type {
   TaconDeskView,
   TaconPanelView,
+  TaconRecordView,
   TaconView,
+  ViewChoice,
   ViewColumn,
+  ViewFormField,
   ViewPerson,
   ViewRow,
   ViewWidget,
@@ -65,7 +80,15 @@ import type {
 import { logActivity } from "../activity";
 import { scoped, studioFilter, type StudioScope } from "../studio";
 import { eventsInRange, expand, resolveLens } from "../calendar";
-import { addDays, daysBetween, KIND_LABELS, localToday } from "@shared/calendar";
+import {
+  addDays,
+  dayInZone,
+  daysBetween,
+  isTimeZone,
+  KIND_LABELS,
+  startOfWeek,
+  weekdayName,
+} from "@shared/calendar";
 import type { LoadedInstall } from "./registry";
 import { resolveUses } from "./registry";
 import { heldNames, positionFacts, type PositionFacts } from "./positions";
@@ -97,6 +120,10 @@ export type Runtime = {
   held: Set<string>;
   /** What `position.<name>` reads. */
   positions: PositionFacts;
+  /** The academy's time zone, or null for the server's own clock. */
+  timeZone: string | null;
+  /** `today`, `this_week_start`, `session_start`, `weekday`. */
+  clock: Record<ClockWord, string>;
 };
 
 export async function buildRuntime(options: {
@@ -118,7 +145,11 @@ export async function buildRuntime(options: {
   const held = options.user ? await heldNames(options.user.id, installId) : new Set<string>();
   const positions = await positionFacts(installId, options.install.manifest);
 
-  return {
+  const zone = options.settings.display?.timeZone;
+  const timeZone = isTimeZone(zone) ? zone : null;
+  const today = dayInZone(new Date(), timeZone);
+
+  const runtime: Runtime = {
     academyId: options.academy.id,
     user: options.user,
     scope: options.scope,
@@ -131,7 +162,51 @@ export async function buildRuntime(options: {
     people,
     held,
     positions,
+    timeZone,
+    clock: {
+      today,
+      this_week_start: startOfWeek(today, 0),
+      session_start: "",
+      weekday: weekdayName(today),
+    },
   };
+
+  // Finding the running session reads the calendar, so only Tac-Ons that ask
+  // for it pay for it. Every name a manifest uses is in its JSON as a string.
+  if (JSON.stringify(options.install.manifest).includes('"session_start"')) {
+    runtime.clock.session_start = (await runningSession(runtime))?.starts ?? "";
+  }
+  return runtime;
+}
+
+/** The calendar lens a Tac-On reads with: the studio being looked at, or everything. */
+async function calendarLens(runtime: Runtime) {
+  const scope = runtime.scope;
+  return resolveLens(
+    runtime.academyId,
+    scope ?? ({ studioId: null, canSeeAll: true, readableIds: [] } as unknown as StudioScope),
+    scope?.studioId != null ? "studio" : "academy",
+    null,
+  );
+}
+
+/** Sessions from a year back to a year ahead, in order. */
+async function sessionsAround(runtime: Runtime) {
+  const lens = await calendarLens(runtime);
+  const today = runtime.clock.today;
+  const from = addDays(today, -366);
+  const to = addDays(today, 366);
+  const sessions = (await eventsInRange(runtime.academyId, lens, from, to)).filter((event) => event.kind === "session");
+  return expand(sessions, lens, from, to);
+}
+
+/** The session on the calendar today, if there is one. */
+async function runningSession(runtime: Runtime): Promise<{ starts: string; ends: string } | null> {
+  const today = runtime.clock.today;
+  const running = (await sessionsAround(runtime)).find(
+    (item) => item.occurrenceStart <= today && item.occurrenceEnd >= today,
+  );
+  return running ? { starts: running.occurrenceStart, ends: running.occurrenceEnd } : null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -154,6 +229,8 @@ export function audienceAllows(
   return audience.some((entry) => {
     const position = audiencePosition(entry);
     if (position !== null) return held.has(position);
+    // A studio's own seat: `held` carries those under the same audience key.
+    if (audienceStudioPosition(entry) !== null) return held.has(entry);
     return entry === "dev" ? user.devStatus : entry === user.role;
   });
 }
@@ -169,6 +246,10 @@ const AUDIENCE_PLURALS: Record<string, string> = {
 function audienceWords(audience: string[], manifest: Manifest): string {
   if (audience.length === 0) return "anyone";
   const words = audience.map((role) => {
+    const seat = audienceStudioPosition(role);
+    if (seat !== null) {
+      return `the ${manifest.studioPositions?.find((title) => title.toLowerCase() === seat) ?? seat}`;
+    }
     const position = audiencePosition(role);
     if (position === null) return AUDIENCE_PLURALS[role] ?? `${role}s`;
     return `the ${manifest.positions.find((def) => def.name === position)?.title ?? position}`;
@@ -185,7 +266,7 @@ function storeDef(manifest: Manifest, name: string): StoreDef | undefined {
   return manifest.stores.find((store) => store.name === name);
 }
 
-function rowFrom(record: { id: number; data: Record<string, unknown>; createdAt: Date; createdBy: number | null }, runtime: Runtime): Row {
+export function rowFrom(record: { id: number; data: Record<string, unknown>; createdAt: Date; createdBy: number | null }, runtime: Runtime): Row {
   return {
     ...record.data,
     id: record.id,
@@ -324,8 +405,17 @@ async function preloadForExpr(runtime: Runtime, expr: Expr | null, prefix: strin
       break;
     }
     case "binary":
+    case "pick":
       await preloadForExpr(runtime, expr.left, prefix);
       await preloadForExpr(runtime, expr.right, prefix);
+      break;
+    case "if":
+      await preloadForCondition(runtime, expr.when, prefix);
+      await preloadForExpr(runtime, expr.then, prefix);
+      await preloadForExpr(runtime, expr.otherwise, prefix);
+      break;
+    case "name":
+      await preloadForExpr(runtime, expr.of, prefix);
       break;
     case "template":
       for (const part of expr.parts) {
@@ -340,7 +430,8 @@ async function preloadForExpr(runtime: Runtime, expr: Expr | null, prefix: strin
   }
 }
 
-async function preloadForCondition(runtime: Runtime, condition: Condition, prefix: string[]) {
+async function preloadForCondition(runtime: Runtime, condition: Condition | null | undefined, prefix: string[]) {
+  if (!condition) return;
   for (const comparison of condition.all) {
     await preloadForExpr(runtime, comparison.left, prefix);
     await preloadForExpr(runtime, comparison.right, prefix);
@@ -377,6 +468,12 @@ export function contextFor(
     // Another Tac-On's positions are its own business, so a borrowed value
     // reads none of them.
     positions: prefix.length === 0 ? runtime.positions : {},
+    clock: runtime.clock,
+    timeZone: runtime.timeZone,
+    personName: (id) => {
+      const number = Number(id);
+      return Number.isFinite(number) ? runtime.people.get(number) : undefined;
+    },
     row: options.row ?? null,
     rowAliases: [],
     records: (source) => {
@@ -598,13 +695,8 @@ async function baseRows(runtime: Runtime, source: BaseSource, limit: number): Pr
     case "calendar.sessions": {
       // The studio being looked at, its group and the academy - or, with no
       // studio selected, everything the viewer can read.
-      const lens = await resolveLens(
-        academyId,
-        scope ?? ({ studioId: null, canSeeAll: true, readableIds: [] } as unknown as StudioScope),
-        scope?.studioId != null ? "studio" : "academy",
-        null,
-      );
-      const today = localToday();
+      const lens = await calendarLens(runtime);
+      const today = runtime.clock.today;
       if (source === "calendar") {
         // What's coming up: today onwards, soonest first.
         const to = addDays(today, 180);
@@ -626,11 +718,8 @@ async function baseRows(runtime: Runtime, source: BaseSource, limit: number): Pr
         };
       }
       // Sessions across this school year and the next, in order.
-      const from = addDays(today, -366);
-      const to = addDays(today, 366);
-      const sessions = (await eventsInRange(academyId, lens, from, to)).filter((event) => event.kind === "session");
       return {
-        rows: expand(sessions, lens, from, to)
+        rows: (await sessionsAround(runtime))
           .slice(0, limit)
           .map((item) => ({
             id: item.key,
@@ -673,15 +762,25 @@ async function baseRows(runtime: Runtime, source: BaseSource, limit: number): Pr
 /*  Rendering                                                                  */
 /* -------------------------------------------------------------------------- */
 
-function columnLabel(store: StoreDef | undefined, key: string): { label: string; type: FieldType | "text" } {
+/** Where a widget sits: a page, a panel on a base page, or a position's desk. */
+export type WidgetLocation = { page?: string; panel?: string; position?: string };
+
+/** A list as it sits on a page, `show if` and all. */
+type ListOnPage = Extract<Widget, { kind: "list" }>;
+
+function columnLabel(store: StoreDef | undefined, key: string): { label: string; type: FieldType | "text" | "link" } {
   if (key === "created") return { label: "When", type: "date" };
   if (key === "by") return { label: "By", type: "text" };
+  // `byId` is shown as the person it points at; `id` as the number it is.
+  if (key === "byId") return { label: "By", type: "person" };
+  if (key === "id") return { label: "#", type: "text" };
+  if (key === LINK_COLUMN) return { label: "", type: "link" };
   const field = store?.fields.find((entry) => entry.name === key);
   if (field) return { label: field.label, type: field.type };
   return { label: key.replace(/[_-]/g, " ").replace(/^./, (letter) => letter.toUpperCase()), type: "text" };
 }
 
-function cellText(value: unknown, type: FieldType | "text", runtime: Runtime): string {
+function cellText(value: unknown, type: FieldType | "text" | "link", runtime: Runtime): string {
   if (type === "person") {
     const id = Number(value);
     if (Number.isFinite(id) && runtime.people.has(id)) return runtime.people.get(id)!;
@@ -690,7 +789,119 @@ function cellText(value: unknown, type: FieldType | "text", runtime: Runtime): s
   return display(value);
 }
 
-async function renderList(runtime: Runtime, widget: ListWidget): Promise<ViewWidget> {
+/**
+ * What each saved option of a `choice from` field is called: row id -> the
+ * field it is shown by. Every row of the source, so an old answer still reads
+ * as its title after the row stops matching the `where`.
+ */
+async function choiceLabels(runtime: Runtime, field: StoreField): Promise<Map<string, string>> {
+  const labels = new Map<string, string>();
+  if (!field.from) return labels;
+  for (const row of await loadRows(runtime, field.from.store)) {
+    labels.set(String(row.id), display(row[field.from.field]));
+  }
+  return labels;
+}
+
+/** The rows a `choice from` field offers this viewer right now. */
+export async function choicesFor(runtime: Runtime, field: StoreField): Promise<ViewChoice[]> {
+  const from = field.from;
+  if (!from) return [];
+  const rows = await loadRows(runtime, from.store);
+  await preloadForCondition(runtime, from.where, []);
+  await resolveComputes(runtime);
+  const aliases = [from.store[from.store.length - 1], "row", "it"];
+  return rows
+    .filter((row) => matches(from.where, { ...contextFor(runtime), row, rowAliases: aliases }))
+    .map((row) => ({ value: String(row.id), label: display(row[from.field]) || `#${String(row.id)}` }));
+}
+
+/** The day a value falls on: a day as it is, a saved moment in the academy's zone. */
+function dayOf(runtime: Runtime, value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  if (!text) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : dayInZone(date, runtime.timeZone);
+}
+
+function formatDay(day: string, options: Intl.DateTimeFormatOptions): string {
+  // Days are calendar days, so they're formatted at UTC noon to stay put.
+  return new Intl.DateTimeFormat("en-US", { ...options, timeZone: "UTC" }).format(new Date(`${day}T12:00:00Z`));
+}
+
+/** The folder a row goes in at one level of a `group by`. */
+function groupLabel(
+  runtime: Runtime,
+  level: GroupLevel,
+  row: Row,
+  store: StoreDef | undefined,
+  labels: Map<string, Map<string, string>>,
+): string {
+  const value = row[level.field];
+  if (level.part) {
+    const day = dayOf(runtime, value);
+    if (!day) return "No date";
+    switch (level.part) {
+      case "year":
+        return day.slice(0, 4);
+      case "month":
+        return formatDay(day, { month: "long", year: "numeric" });
+      case "week":
+        return `Week of ${formatDay(startOfWeek(day, 0), { month: "short", day: "numeric", year: "numeric" })}`;
+      case "day":
+        return formatDay(day, { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+    }
+  }
+  const own = labels.get(level.field);
+  if (own) return own.get(String(value)) || "None";
+  const { type } = columnLabel(store, level.field);
+  return cellText(value, type, runtime) || "None";
+}
+
+/** The app path of one row's own page. `query` says which widget it was opened from. */
+function recordHref(runtime: Runtime, rowId: unknown, query: Record<string, string | number>): string {
+  const params = new URLSearchParams(Object.entries(query).map(([key, value]) => [key, String(value)]));
+  return `/t/${runtime.install.install.id}/record/${String(rowId)}?${params.toString()}`;
+}
+
+function locationQuery(location: WidgetLocation, index: number): Record<string, string | number> {
+  if (location.page) return { page: location.page, index };
+  if (location.position) return { position: location.position, index };
+  return { panel: location.panel ?? "", index };
+}
+
+/**
+ * Whether this viewer may remove a row through this list: any row it shows,
+ * for the roles in `allow remove`; their own rows, with `allow remove own`.
+ * The row has to be one the list would show them - same `where`, same
+ * `show if` - so a row id typed by hand can't reach past the list.
+ */
+export async function listOffersRemove(runtime: Runtime, widget: ListOnPage, row: Row): Promise<boolean> {
+  const user = runtime.user;
+  if (!user) return false;
+  const anyRow = widget.allowRemove.length > 0 && audienceAllows(widget.allowRemove, user, runtime.held);
+  const ownRow = Boolean(widget.removeOwn) && Number(row.byId) === user.id;
+  if (!anyRow && !ownRow) return false;
+  return listShowsRow(runtime, widget, row);
+}
+
+/** Whether a list, as this viewer sees it, includes this row. */
+export async function listShowsRow(runtime: Runtime, widget: ListOnPage, row: Row): Promise<boolean> {
+  if (!(await widgetVisible(runtime, widget))) return false;
+  if (widget.source.kind !== "store") return false;
+  await preloadForCondition(runtime, widget.where, []);
+  await resolveComputes(runtime);
+  const storeName = widget.source.store[widget.source.store.length - 1];
+  return matches(widget.where, { ...contextFor(runtime), row, rowAliases: [storeName, "row", "it"] });
+}
+
+async function renderList(
+  runtime: Runtime,
+  widget: ListOnPage,
+  location: WidgetLocation,
+  index: number,
+): Promise<ViewWidget> {
   let rows: Row[] = [];
   let problem: string | null = null;
   let store: StoreDef | undefined;
@@ -724,33 +935,77 @@ async function renderList(runtime: Runtime, widget: ListWidget): Promise<ViewWid
     sorted.sort((a, b) => display(a[first]).localeCompare(display(b[first])));
   }
 
-  const columns: ViewColumn[] = widget.columns.map((key) => ({ key, ...columnLabel(store, key) }));
-  const canRemove =
-    storeName !== null &&
-    !storeName.includes(".") &&
-    widget.allowRemove.length > 0 &&
-    audienceAllows(widget.allowRemove, runtime.user, runtime.held);
+  // `choice from` fields hold a row id; they're shown as that row's title.
+  const labels = new Map<string, Map<string, string>>();
+  const ownStore = storeName !== null && !storeName.includes(".");
+  if (ownStore) {
+    for (const field of store?.fields ?? []) {
+      if (field.from) labels.set(field.name, await choiceLabels(runtime, field));
+    }
+  }
 
-  const viewRows: ViewRow[] = sorted.slice(0, widget.limit).map((row) => ({
-    id: (row.id as number | string) ?? "",
-    cells: Object.fromEntries(
-      columns.map((column) => [column.key, cellText(row[column.key], column.type, runtime)]),
-    ),
-    canRemove,
-  }));
+  const columns: ViewColumn[] = widget.columns.map((key) => ({ key, ...columnLabel(store, key) }));
+  const user = runtime.user;
+  const removeAny =
+    ownStore && widget.allowRemove.length > 0 && audienceAllows(widget.allowRemove, user, runtime.held);
+  const removeOwn = ownStore && Boolean(widget.removeOwn) && user !== null;
+  const linked = ownStore && widget.columns.includes(LINK_COLUMN);
+  const groupBy = widget.groupBy ?? [];
+
+  const viewRows: ViewRow[] = sorted.slice(0, widget.limit).map((row) => {
+    const view: ViewRow = {
+      id: (row.id as number | string) ?? "",
+      cells: Object.fromEntries(
+        columns.map((column) => {
+          if (column.type === "link") return [column.key, "Open"];
+          const own = labels.get(column.key);
+          if (own) return [column.key, own.get(String(row[column.key])) ?? display(row[column.key])];
+          return [column.key, cellText(row[column.key], column.type, runtime)];
+        }),
+      ),
+      canRemove: removeAny || (removeOwn && Number(row.byId) === user!.id),
+    };
+    if (linked) view.link = recordHref(runtime, row.id, locationQuery(location, index));
+    if (groupBy.length > 0) view.groups = groupBy.map((level) => groupLabel(runtime, level, row, store, labels));
+    return view;
+  });
 
   return {
     kind: "list",
-    title: widget.title,
+    title: widget.titleTemplate ? display(evaluate(widget.titleTemplate, contextFor(runtime))) : widget.title,
     columns,
     rows: viewRows,
     empty: widget.empty,
     store: storeName,
     problem,
+    ...(groupBy.length > 0 ? { groupDepth: groupBy.length } : {}),
   };
 }
 
-async function renderWidget(runtime: Runtime, widget: Widget, index: number): Promise<ViewWidget | null> {
+/**
+ * `show if`: whether a widget is drawn for this viewer right now. Checked when
+ * it renders and again when its form or button is used, so a hidden form
+ * can't be submitted by hand.
+ */
+export async function widgetVisible(runtime: Runtime, widget: Widget): Promise<boolean> {
+  if (!widget.showIf) return true;
+  await preloadForCondition(runtime, widget.showIf, []);
+  await resolveComputes(runtime);
+  return matches(widget.showIf, contextFor(runtime));
+}
+
+function textOf(runtime: Runtime, raw: string, template: Expr | undefined): string {
+  return template ? display(evaluate(template, contextFor(runtime))) : raw;
+}
+
+async function renderWidget(
+  runtime: Runtime,
+  widget: Widget,
+  index: number,
+  location: WidgetLocation,
+): Promise<ViewWidget | null> {
+  if (widget.showIf && !matches(widget.showIf, contextFor(runtime))) return null;
+
   switch (widget.kind) {
     case "divider":
       return { kind: "divider" };
@@ -768,18 +1023,50 @@ async function renderWidget(runtime: Runtime, widget: Widget, index: number): Pr
     case "stat":
       return {
         kind: "stat",
-        label: widget.label,
+        label: textOf(runtime, widget.label, widget.labelTemplate),
         value: display(evaluate(widget.value, contextFor(runtime))),
         hint: widget.hint ? display(evaluate(widget.hint, contextFor(runtime))) : null,
       };
 
+    case "progress": {
+      const value = toNumber(evaluate(widget.value, contextFor(runtime)));
+      const goal = toNumber(evaluate(widget.goal, contextFor(runtime)));
+      return {
+        kind: "progress",
+        label: textOf(runtime, widget.label, widget.labelTemplate),
+        value,
+        goal,
+        text: `${display(value)} of ${display(goal)}`,
+        hint: widget.hint ? display(evaluate(widget.hint, contextFor(runtime))) : null,
+      };
+    }
+
+    case "celebrate": {
+      const text = display(evaluate(widget.text, contextFor(runtime)));
+      const where = location.page ?? location.panel ?? location.position ?? "";
+      return { kind: "celebrate", key: `${runtime.install.install.id}:${where}:${index}:${text}`, text };
+    }
+
     case "list":
-      return renderList(runtime, widget);
+      return renderList(runtime, widget, location, index);
 
     case "form": {
       const store = storeDef(runtime.install.manifest, widget.into);
       if (!store) return null;
       const allowed = audienceAllows(widget.allow, runtime.user, runtime.held);
+      const fields: ViewFormField[] = [];
+      for (const entry of widget.fields) {
+        const field = store.fields.find((candidate) => candidate.name === entry.field);
+        if (!field) continue;
+        fields.push({
+          name: field.name,
+          label: entry.label ?? field.label,
+          type: field.type,
+          options: field.options,
+          required: field.required,
+          ...(field.from ? { choices: await choicesFor(runtime, field) } : {}),
+        });
+      }
       return {
         kind: "form",
         index,
@@ -789,19 +1076,9 @@ async function renderWidget(runtime: Runtime, widget: Widget, index: number): Pr
         deniedReason: allowed
           ? null
           : `Only ${audienceWords(widget.allow, runtime.install.manifest)} can add to this.`,
-        fields: widget.fields.flatMap((entry) => {
-          const field = store.fields.find((candidate) => candidate.name === entry.field);
-          if (!field) return [];
-          return [
-            {
-              name: field.name,
-              label: entry.label ?? field.label,
-              type: field.type,
-              options: field.options,
-              required: field.required,
-            },
-          ];
-        }),
+        fields,
+        confirm: widget.confirm ?? null,
+        confirmCode: Boolean(widget.confirmCode),
       };
     }
 
@@ -825,13 +1102,26 @@ async function renderWidget(runtime: Runtime, widget: Widget, index: number): Pr
 async function preloadForWidgets(runtime: Runtime, widgets: Widget[]): Promise<void> {
   const sources: string[][] = [];
   for (const widget of widgets) {
-    if (widget.kind === "list" && widget.source.kind === "store") sources.push(widget.source.store);
+    await preloadForCondition(runtime, widget.showIf, []);
+    if (widget.kind === "list") {
+      if (widget.source.kind === "store") sources.push(widget.source.store);
+      await preloadForCondition(runtime, widget.where, []);
+      await preloadForExpr(runtime, widget.titleTemplate ?? null, []);
+    }
     if (widget.kind === "stat") {
       await preloadForExpr(runtime, widget.value, []);
+      await preloadForExpr(runtime, widget.labelTemplate ?? null, []);
+      if (widget.hint) await preloadForExpr(runtime, widget.hint, []);
+    }
+    if (widget.kind === "progress") {
+      await preloadForExpr(runtime, widget.value, []);
+      await preloadForExpr(runtime, widget.goal, []);
+      await preloadForExpr(runtime, widget.labelTemplate ?? null, []);
       if (widget.hint) await preloadForExpr(runtime, widget.hint, []);
     }
     if (widget.kind === "note") await preloadForExpr(runtime, widget.text, []);
     if (widget.kind === "heading") await preloadForExpr(runtime, widget.text, []);
+    if (widget.kind === "celebrate") await preloadForExpr(runtime, widget.text, []);
   }
   await preload(runtime, sources);
 
@@ -840,30 +1130,91 @@ async function preloadForWidgets(runtime: Runtime, widgets: Widget[]): Promise<v
   await resolveComputes(runtime);
 }
 
-export async function renderPage(runtime: Runtime, page: PageDef): Promise<TaconView> {
-  await preloadForWidgets(runtime, page.widgets);
+/** A page's title for this viewer: `{...}` worked out, or the title as written. */
+export async function pageTitle(runtime: Runtime, page: PageDef): Promise<string> {
+  if (!page.titleTemplate) return page.title;
+  await preloadForExpr(runtime, page.titleTemplate, []);
+  await resolveComputes(runtime);
+  return display(evaluate(page.titleTemplate, contextFor(runtime))).trim() || titleWithoutValues(page.title);
+}
 
-  const widgets: ViewWidget[] = [];
-  for (const [index, widget] of page.widgets.entries()) {
-    const rendered = await renderWidget(runtime, widget, index);
-    if (rendered) widgets.push(rendered);
+/** "Calls with {name of my.ap}" -> "Calls with", for when there's nothing to fill in. */
+function titleWithoutValues(title: string): string {
+  return title.replace(/\{[^}]*\}/g, "").replace(/\s+/g, " ").trim();
+}
+
+async function renderWidgets(runtime: Runtime, widgets: Widget[], location: WidgetLocation): Promise<ViewWidget[]> {
+  await preloadForWidgets(runtime, widgets);
+  const out: ViewWidget[] = [];
+  for (const [index, widget] of widgets.entries()) {
+    const rendered = await renderWidget(runtime, widget, index, location);
+    if (rendered) out.push(rendered);
   }
+  return out;
+}
 
+function installSummary(runtime: Runtime): TaconView["install"] {
   return {
-    install: {
-      id: runtime.install.install.id,
-      slug: runtime.install.tacon.slug,
-      name: runtime.install.tacon.name,
-      icon: runtime.install.manifest.icon,
-      version: runtime.install.version.version,
-      studioName: runtime.install.studioName,
-      official: runtime.install.tacon.official,
-      authorName: runtime.install.tacon.authorName,
-    },
-    page: { name: page.name, title: page.title, subtitle: page.subtitle, icon: page.icon },
+    id: runtime.install.install.id,
+    slug: runtime.install.tacon.slug,
+    name: runtime.install.tacon.name,
+    icon: runtime.install.manifest.icon,
+    version: runtime.install.version.version,
+    studioName: runtime.install.studioName,
+    official: runtime.install.tacon.official,
+    authorName: runtime.install.tacon.authorName,
+  };
+}
+
+export async function renderPage(runtime: Runtime, page: PageDef): Promise<TaconView> {
+  const widgets = await renderWidgets(runtime, page.widgets, { page: page.name });
+  return {
+    install: installSummary(runtime),
+    page: { name: page.name, title: await pageTitle(runtime, page), subtitle: page.subtitle, icon: page.icon },
     widgets,
     people: peopleList(runtime),
   };
+}
+
+/**
+ * One row on its own page. The caller has already decided this viewer may
+ * see it; this only picks the fields and words them.
+ */
+export async function renderRecord(
+  runtime: Runtime,
+  options: {
+    store: string;
+    row: Row;
+    /** The fields to show. Empty means every field, then who saved it and when. */
+    fields: string[];
+    title: Expr | null;
+    back: { label: string; href: string } | null;
+  },
+): Promise<TaconRecordView | null> {
+  const store = storeDef(runtime.install.manifest, options.store);
+  if (!store) return null;
+  const row = options.row;
+
+  const keys = (options.fields.length > 0 ? options.fields : [...store.fields.map((field) => field.name), "by", "created"])
+    .filter((key) => key !== LINK_COLUMN);
+  const fields: TaconRecordView["fields"] = [];
+  for (const key of keys) {
+    const { label, type } = columnLabel(store, key);
+    const field = store.fields.find((entry) => entry.name === key);
+    let value = cellText(row[key], type, runtime);
+    if (field?.from) value = (await choiceLabels(runtime, field)).get(String(row[key])) ?? value;
+    fields.push({ key, label, type: type === "link" ? "text" : type, value });
+  }
+
+  let title = store.label;
+  if (options.title) {
+    await preloadForExpr(runtime, options.title, []);
+    await resolveComputes(runtime);
+    const context = { ...contextFor(runtime), row, rowAliases: [options.store, "row", "it"] };
+    title = display(evaluate(options.title, context)) || title;
+  }
+
+  return { install: installSummary(runtime), title, fields, back: options.back };
 }
 
 /** One record of a Tac-On, as an entry on the studio calendar. */
@@ -877,11 +1228,19 @@ export type TaconCalendarEntry = {
   color: string | null;
   installId: number;
   taconName: string;
-  /** The Tac-On page to open, when its `calendar` block names one. */
+  /** The Tac-On page (or the record's own page) to open, when its `calendar` block names one. */
   href: string | null;
 };
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** Whether a calendar block puts this row on the calendar for this viewer. */
+export async function feedShowsRow(runtime: Runtime, feed: CalendarFeedDef, row: Row): Promise<boolean> {
+  if (!audienceAllows(feed.showTo, runtime.user, runtime.held)) return false;
+  await preloadForCondition(runtime, feed.where, []);
+  await resolveComputes(runtime);
+  return matches(feed.where, { ...contextFor(runtime), row, rowAliases: [feed.store[feed.store.length - 1], "row", "it"] });
+}
 
 /**
  * Everything this install's `calendar` blocks put between `from` and `to`,
@@ -891,13 +1250,14 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 export async function calendarFeed(runtime: Runtime, from: string, to: string): Promise<TaconCalendarEntry[]> {
   const feeds = runtime.install.manifest.calendars ?? [];
   const out: TaconCalendarEntry[] = [];
-  const day = (value: unknown) => {
-    const text = String(value ?? "").trim();
-    if (!text) return null;
-    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-    const date = new Date(text);
-    return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
-  };
+
+  // `my.*` in a title or a `where` needs the named values worked out first,
+  // just as a page does before it renders.
+  for (const feed of feeds) {
+    await preloadForExpr(runtime, feed.title, []);
+    await preloadForCondition(runtime, feed.where, []);
+  }
+  await resolveComputes(runtime);
 
   for (const [index, feed] of feeds.entries()) {
     if (!audienceAllows(feed.showTo, runtime.user, runtime.held)) continue;
@@ -906,9 +1266,10 @@ export async function calendarFeed(runtime: Runtime, from: string, to: string): 
     for (const row of rows) {
       const context = { ...contextFor(runtime), row, rowAliases: aliases };
       if (feed.where && !matches(feed.where, context)) continue;
-      const start = day(row[feed.on]);
+      // `created` is a moment; it goes on the day it was in the academy's time zone.
+      const start = dayOf(runtime, row[feed.on]);
       if (!start) continue;
-      let end = feed.until ? (day(row[feed.until]) ?? start) : start;
+      let end = feed.until ? (dayOf(runtime, row[feed.until]) ?? start) : start;
       if (end < start) end = start;
       if (end < from || start > to) continue;
       const time = feed.at ? String(row[feed.at] ?? "").trim() : "";
@@ -922,7 +1283,11 @@ export async function calendarFeed(runtime: Runtime, from: string, to: string): 
         color: feed.color,
         installId: runtime.install.install.id,
         taconName: runtime.install.tacon.name,
-        href: feed.open ? `/t/${runtime.install.install.id}/${feed.open}` : null,
+        href: feed.openRecord
+          ? recordHref(runtime, row.id, { calendar: index })
+          : feed.open
+            ? `/t/${runtime.install.install.id}/${feed.open}`
+            : null,
       });
     }
   }
@@ -930,14 +1295,7 @@ export async function calendarFeed(runtime: Runtime, from: string, to: string): 
 }
 
 export async function renderPanel(runtime: Runtime, panel: PanelDef): Promise<TaconPanelView> {
-  await preloadForWidgets(runtime, panel.widgets);
-
-  const widgets: ViewWidget[] = [];
-  for (const [index, widget] of panel.widgets.entries()) {
-    const rendered = await renderWidget(runtime, widget, index);
-    if (rendered) widgets.push(rendered);
-  }
-
+  const widgets = await renderWidgets(runtime, panel.widgets, { panel: panel.host });
   return {
     installId: runtime.install.install.id,
     taconName: runtime.install.tacon.name,
@@ -955,14 +1313,7 @@ export async function renderDesk(
   positionId: number,
   title: string,
 ): Promise<TaconDeskView> {
-  await preloadForWidgets(runtime, def.widgets);
-
-  const widgets: ViewWidget[] = [];
-  for (const [index, widget] of def.widgets.entries()) {
-    const rendered = await renderWidget(runtime, widget, index);
-    if (rendered) widgets.push(rendered);
-  }
-
+  const widgets = await renderWidgets(runtime, def.widgets, { position: def.name });
   return {
     installId: runtime.install.install.id,
     taconName: runtime.install.tacon.name,
@@ -1025,8 +1376,34 @@ export async function addRecord(
   const data: Record<string, unknown> = {};
   for (const field of store.fields) {
     const raw = values[field.name];
+
+    // A `choice from` field holds the id of a row it offered. Someone filling
+    // in a form may only pick what the form showed them; a Tac-On's own
+    // `add` may pick any row of that store.
+    if (field.from) {
+      const picked = raw === null || raw === undefined || String(raw).trim() === "" ? "" : String(raw).trim();
+      if (!picked) {
+        if (field.required) return { ok: false, error: `"${field.label}" is needed.` };
+        data[field.name] = "";
+        continue;
+      }
+      const offered =
+        actor.type === "user"
+          ? (await choicesFor(runtime, field)).map((choice) => choice.value)
+          : (await loadRows(runtime, field.from.store)).map((row) => String(row.id));
+      if (!offered.includes(picked)) {
+        return { ok: false, error: `"${field.label}" has to be one of the choices offered.` };
+      }
+      data[field.name] = Number(picked);
+      continue;
+    }
+
     const clean = coerce(raw, field.type);
     if (field.required && (clean === null || clean === "" || clean === undefined)) {
+      return { ok: false, error: `"${field.label}" is needed.` };
+    }
+    // A required checkbox is a promise ("I saw the proof"), so it has to be ticked.
+    if (field.required && field.type === "boolean" && clean !== true) {
       return { ok: false, error: `"${field.label}" is needed.` };
     }
     if (field.type === "choice" && clean !== "" && !field.options.includes(String(clean))) {
@@ -1087,6 +1464,9 @@ export async function runActions(
         continue;
       }
 
+      // An earlier `add` clears the named values, and a button starts with
+      // none, so they're worked out again before `{my.week}` is filled in.
+      await preloadForExprList(runtime, [action.text]);
       const text = display(evaluate(action.text, contextFor(runtime, { event: options.event })));
       notices.push(text);
       await logActivity({
@@ -1107,6 +1487,27 @@ export async function runActions(
   }
 
   return { added, notices };
+}
+
+/**
+ * What a form submission writes: the fields it asked for, as sent, and the
+ * fields it `set`s, worked out here for the person submitting. Anything else
+ * the browser sent is dropped - a form is a contract about what gets written.
+ */
+export async function formValues(
+  runtime: Runtime,
+  form: FormWidget,
+  sent: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const values: Record<string, unknown> = {};
+  for (const field of form.fields) values[field.field] = sent[field.field];
+  const sets = form.sets ?? [];
+  if (sets.length > 0) {
+    await preloadForExprList(runtime, sets.map((entry) => entry.value));
+    const context = contextFor(runtime);
+    for (const entry of sets) values[entry.field] = evaluate(entry.value, context);
+  }
+  return values;
 }
 
 async function preloadForExprList(runtime: Runtime, exprs: Expr[]): Promise<void> {

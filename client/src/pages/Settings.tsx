@@ -1598,6 +1598,33 @@ function AccessTab() {
 
 /* --------------------------------- display --------------------------------- */
 
+/** Every zone the browser knows, or the common ones on an older browser. */
+const TIME_ZONE_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "The server's clock" },
+  ...(() => {
+    try {
+      return (Intl as unknown as { supportedValuesOf(key: string): string[] }).supportedValuesOf("timeZone");
+    } catch {
+      return [
+        "America/New_York",
+        "America/Chicago",
+        "America/Denver",
+        "America/Phoenix",
+        "America/Los_Angeles",
+        "America/Anchorage",
+        "Pacific/Honolulu",
+        "Europe/London",
+        "Europe/Paris",
+        "Africa/Johannesburg",
+        "Asia/Kolkata",
+        "Asia/Singapore",
+        "Australia/Sydney",
+        "UTC",
+      ];
+    }
+  })().map((zone) => ({ value: zone, label: zone.replace(/_/g, " ") })),
+];
+
 function DisplayTab() {
   const { draft, set, footer, error } = useSectionDraft("display");
 
@@ -1643,6 +1670,16 @@ function DisplayTab() {
               { value: "comfortable", label: "Comfortable" },
               { value: "compact", label: "Compact" },
             ]}
+          />
+        </FieldRow>
+        <FieldRow
+          label="Time zone"
+          hint="Decides which day something saved in the evening counts as, for Tac-Ons and their calendar entries."
+        >
+          <SelectInput
+            value={draft.timeZone}
+            onChange={(value) => set("timeZone", value)}
+            options={TIME_ZONE_OPTIONS}
           />
         </FieldRow>
       </SettingCard>
