@@ -186,6 +186,14 @@ when election.certified {
 Reactions run as the Tac-On. They can only add to its stores and write to the
 activity log, and they never break the event that triggered them.
 
+### One job per page
+
+When a Tac-On does more than one thing, give each its own `page` rather than
+one long page: "This week" for the daily task, "History" for browsing old
+records, a guide-only page for the people who check it. They appear as tabs
+on each page and fold into one sidebar entry, so more pages don't mean a
+longer sidebar. Two or three is usually right.
+
 ### Show up where people already are
 
 A `panel on town-hall` or `panel on wiki` puts the Tac-On in front of people

@@ -57,6 +57,8 @@ export function TaconPage({ installId, page }: { installId: number; page: string
         {view.install.official && <Chip tone="purple">Official</Chip>}
       </PageHeader>
 
+      {(view.pages?.length ?? 0) > 1 && <PageTabs installId={view.install.id} current={view.page.name} pages={view.pages!} />}
+
       <TaconViewBody view={view} onChanged={refresh} />
 
       <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-4 text-xs text-gray-500">
@@ -72,6 +74,44 @@ export function TaconPage({ installId, page }: { installId: number; page: string
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * The Tac-On's other pages, as tabs. Only drawn when it has more than one the
+ * viewer can open, so a single-page Tac-On looks exactly as before.
+ */
+function PageTabs({
+  installId,
+  current,
+  pages,
+}: {
+  installId: number;
+  current: string;
+  pages: { name: string; title: string }[];
+}) {
+  return (
+    <nav className="scroll-x -mt-2 mb-5 border-b border-gray-200" aria-label="Pages of this Tac-On">
+      <div className="flex min-w-max gap-1">
+        {pages.map((page) => {
+          const active = page.name === current;
+          return (
+            <Link
+              key={page.name}
+              href={`/t/${installId}/${page.name}`}
+              aria-current={active ? "page" : undefined}
+              className={`-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium transition ${
+                active
+                  ? "border-brand-600 text-brand-700"
+                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-800"
+              }`}
+            >
+              {page.title}
+            </Link>
+          );
+        })}
+      </div>
+    </nav>
   );
 }
 

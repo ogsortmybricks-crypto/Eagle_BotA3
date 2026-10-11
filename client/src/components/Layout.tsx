@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   CalendarDays,
+  ChevronRight,
   Code2,
   Gavel,
   LayoutDashboard,
@@ -39,6 +40,8 @@ export function Layout({ children }: { children: ReactNode }) {
   const { user, academy, studio, studioId, can, signOut } = useSession();
   const [location] = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
+  /** Tac-On groups someone opened or closed by hand; the rest follow the current page. */
+  const [toggled, setToggled] = useState<Map<number, boolean>>(new Map());
 
   /**
    * Pages installed Tac-Ons contribute. They get their own group at the bottom
@@ -57,6 +60,13 @@ export function Layout({ children }: { children: ReactNode }) {
 
   const items = NAV.filter((item) => item.permission === null || can(item.permission));
   const taconItems = taconNav.data?.entries ?? [];
+
+  // One group per install, in the order the server sent them. A Tac-On with
+  // several pages gets one expandable entry instead of a row per page.
+  const taconGroups = [...taconItems.reduce((groups, entry) => {
+    groups.set(entry.installId, [...(groups.get(entry.installId) ?? []), entry]);
+    return groups;
+  }, new Map<number, TaconNavEntry[]>()).values()];
 
   const linkClass = (active: boolean) =>
     `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
@@ -85,19 +95,56 @@ export function Layout({ children }: { children: ReactNode }) {
           <div className="px-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
             Tac-Ons
           </div>
-          {taconItems.map((entry) => {
-            const href = `/t/${entry.installId}/${entry.page}`;
+          {taconGroups.map((entries) => {
+            const first = entries[0];
+            const tooltip = `${first.taconName}${first.studioName ? ` — ${first.studioName}` : ""}`;
+            const hrefOf = (entry: TaconNavEntry) => `/t/${entry.installId}/${entry.page}`;
+
+            if (entries.length === 1) {
+              return (
+                <Link
+                  key={first.installId}
+                  href={hrefOf(first)}
+                  onClick={() => setMobileOpen(false)}
+                  className={linkClass(location === hrefOf(first))}
+                  title={tooltip}
+                >
+                  <Puzzle className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{first.label}</span>
+                </Link>
+              );
+            }
+
+            const inside = location.startsWith(`/t/${first.installId}/`);
+            const open = toggled.get(first.installId) ?? inside;
             return (
-              <Link
-                key={href}
-                href={href}
-                onClick={() => setMobileOpen(false)}
-                className={linkClass(location === href)}
-                title={`${entry.taconName}${entry.studioName ? ` — ${entry.studioName}` : ""}`}
-              >
-                <Puzzle className="h-4 w-4 shrink-0" />
-                <span className="truncate">{entry.label}</span>
-              </Link>
+              <div key={first.installId}>
+                <button
+                  type="button"
+                  onClick={() => setToggled((current) => new Map(current).set(first.installId, !open))}
+                  className={`${linkClass(inside && !open)} w-full text-left`}
+                  aria-expanded={open}
+                  title={tooltip}
+                >
+                  <Puzzle className="h-4 w-4 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{first.taconName}</span>
+                  <ChevronRight className={`h-4 w-4 shrink-0 text-gray-400 transition-transform ${open ? "rotate-90" : ""}`} />
+                </button>
+                {open && (
+                  <div className="ml-5 flex flex-col gap-0.5 border-l border-gray-200 pl-2">
+                    {entries.map((entry) => (
+                      <Link
+                        key={entry.page}
+                        href={hrefOf(entry)}
+                        onClick={() => setMobileOpen(false)}
+                        className={linkClass(location === hrefOf(entry))}
+                      >
+                        <span className="truncate">{entry.label}</span>
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
             );
           })}
           {can("tacons.market") && (

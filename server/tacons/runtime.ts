@@ -1171,9 +1171,24 @@ export async function renderPage(runtime: Runtime, page: PageDef): Promise<Tacon
   return {
     install: installSummary(runtime),
     page: { name: page.name, title: await pageTitle(runtime, page), subtitle: page.subtitle, icon: page.icon },
+    pages: await siblingPages(runtime),
     widgets,
     people: peopleList(runtime),
   };
+}
+
+/**
+ * The pages of this Tac-On a viewer can move between: the ones in the
+ * sidebar (`nav`) that their role and positions open. The same rule the
+ * sidebar uses, so a tab never leads to a page that refuses them.
+ */
+async function siblingPages(runtime: Runtime): Promise<{ name: string; title: string }[]> {
+  const pages: { name: string; title: string }[] = [];
+  for (const page of runtime.install.manifest.pages) {
+    if (!page.nav || !audienceAllows(page.showTo, runtime.user, runtime.held)) continue;
+    pages.push({ name: page.name, title: await pageTitle(runtime, page) });
+  }
+  return pages;
 }
 
 /**

@@ -119,6 +119,12 @@ export type TaconView = {
     authorName: string;
   };
   page: { name: string; title: string; subtitle: string | null; icon: string };
+  /**
+   * The Tac-On's sidebar pages this viewer may open, in the order the source
+   * declares them - the tabs across the top. Includes this page when it is
+   * one of them. Absent on views from before tabs existed.
+   */
+  pages?: { name: string; title: string }[];
   widgets: ViewWidget[];
   /** Everyone a `person` field can point at. Sent once, used by every field. */
   people: ViewPerson[];

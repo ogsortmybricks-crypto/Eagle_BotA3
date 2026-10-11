@@ -187,6 +187,41 @@ page points {
 A page `title` can hold `{...}`, worked out for each person, in the sidebar
 too: `title "Calls with {name of my.my_ap}"`.
 
+### Several pages
+
+A Tac-On can have as many `page` blocks as it needs, each with its own
+one-word name, title, audience and widgets:
+
+```
+page this_week {
+  title "This week"
+  ...
+}
+
+page partner {
+  title "Calls with {name of my.my_ap}"
+  ...
+}
+
+page cfs {
+  title "CFS"
+  show to guide, admin
+  ...
+}
+```
+
+- **Sidebar.** A Tac-On with one page shows as one link, as before. With two or
+  more, it shows as one entry under the Tac-On's `name` that opens to list its
+  pages. It opens by itself while you're on one of them.
+- **Tabs.** Each page gets a row of tabs under its title, one per page, in the
+  order you wrote them, so people move between pages without the sidebar.
+- **Who sees what.** Both only list pages with `nav true` (the default) that
+  the person may open: a page with `show to guide, admin` is no tab and no
+  sidebar link for a learner. With only one such page, there are no tabs.
+- **`nav false`** keeps a page out of the sidebar and the tabs. It still opens
+  from a calendar entry's `open`, and shows the other pages' tabs above it.
+- Put the page most people need first: it's the first tab.
+
 ### Widgets
 
 **`note`** — a sentence. `info` or `warning` puts it in a coloured box.

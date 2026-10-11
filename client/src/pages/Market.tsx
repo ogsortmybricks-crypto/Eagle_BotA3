@@ -38,7 +38,7 @@ import {
   Stat,
 } from "@/components/ui";
 import { StudioPicker } from "@/components/StudioPicker";
-import { audiencePosition, type Manifest } from "@shared/tacons";
+import { audiencePosition, audienceStudioPosition, type Manifest } from "@shared/tacons";
 import { KIND_LABELS } from "@shared/calendar";
 import { describeExtensions } from "@shared/tacons/extension-registry";
 
@@ -227,6 +227,8 @@ const NEEDS_WORDS: Record<string, string> = {
 function audienceLabel(audience: string[], manifest: Manifest): string {
   return audience
     .map((entry) => {
+      const seat = audienceStudioPosition(entry);
+      if (seat !== null) return manifest.studioPositions?.find((title) => title.toLowerCase() === seat) ?? seat;
       const name = audiencePosition(entry);
       if (name === null) return entry;
       return manifest.positions.find((position) => position.name === name)?.title ?? name;
