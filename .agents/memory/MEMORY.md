@@ -3,3 +3,4 @@
 - [Tac-On portal imports](tacon-portal-imports.md) — folder upload is the primary publishing path; verify live compiler compatibility rather than bypassing errors.
 - [Browser testing fallback](browser-testing-fallback.md) — when the testing subagent is unavailable, existing Chromium plus CDP can verify protected UI without app auth bypasses.
 - [Git state after approval](git-merge-state.md) — operation state can change while waiting; recheck markers, branch history and worktree before repairs.
+- [Roster loading errors](roster-loading-errors.md) — distinguish failed requests from empty rosters; keep appointment eligibility intact.

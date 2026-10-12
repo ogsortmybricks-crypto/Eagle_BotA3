@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Camera, Code2, Pencil } from "lucide-react";
+import { ArrowLeft, Camera, Code2, Pencil, Users } from "lucide-react";
 import { apiGet, apiPatch, apiPost, fileToDataUrl } from "@/lib/api";
 import { useDateFormat, useSession } from "@/lib/session";
 import {
   Avatar,
   Banner,
   Chip,
+  EmptyState,
   LoadingPage,
   Modal,
   PageHeader,
@@ -50,19 +51,32 @@ export function People() {
   });
 
   if (query.isLoading) return <LoadingPage />;
+  if (query.isError) return (
+    <>
+      <PageHeader title="People" />
+      <Banner tone="error" title="Couldn't load people">
+        The roster failed to load; this does not mean the academy has no people.
+        <button className="btn-secondary btn-sm mt-3" disabled={query.isFetching} onClick={() => void query.refetch()}>
+          {query.isFetching ? "Retrying…" : "Retry"}
+        </button>
+      </Banner>
+    </>
+  );
   const people = query.data?.people ?? [];
   const studios = (query.data?.studios ?? []).filter((studio) => !studio.archived);
+  const showAll = showEveryone || studioId === null;
+  const activeStudioIds = new Set(studios.map(studio => studio.id));
 
   // Default to the studio you're in: a Middle Studio learner opening People
   // wants their own roster, not ninety names across four studios.
   // A studio's assigned guides are listed with it, wherever their own home is.
-  const visible = showEveryone
+  const visible = showAll
     ? people
     : people.filter((person) => person.studioId === studioId || (studioId !== null && person.guideOf.includes(studioId)));
 
   const groups = [
     ...studios
-      .filter((studio) => showEveryone || studio.id === studioId)
+      .filter((studio) => showAll || studio.id === studioId)
       .map((studio) => ({
         key: String(studio.id),
         label: studio.name,
@@ -72,11 +86,13 @@ export function People() {
       })),
     {
       key: "none",
-      label: "Not in a studio",
+      label: "Not in an active studio",
       color: null as string | null,
       guides: [] as PersonRow[],
       // Someone placed nowhere but guiding a studio is listed there instead.
-      people: visible.filter((person) => person.studioId === null && person.guideOf.length === 0),
+      people: visible.filter((person) =>
+        (person.studioId === null || !activeStudioIds.has(person.studioId)) &&
+        !person.guideOf.some(id => activeStudioIds.has(id))),
     },
   ].filter((group) => group.people.length + group.guides.length > 0);
 
@@ -87,7 +103,7 @@ export function People() {
       <PageHeader
         title="People"
         subtitle={
-          showEveryone
+          showAll
             ? `${people.length} in the academy, across ${studios.length} studio${studios.length === 1 ? "" : "s"}.`
             : `${visible.length} in ${currentStudioName ?? "this studio"}.`
         }
@@ -103,6 +119,13 @@ export function People() {
       </PageHeader>
 
       <div className="space-y-6">
+        {groups.length === 0 && (
+          <EmptyState icon={Users} title={showAll ? "No active people found" : "No people in this studio"}>
+            {showAll
+              ? "Active academy members will appear here."
+              : "Use Show the whole academy to see people assigned elsewhere."}
+          </EmptyState>
+        )}
         {groups.map((group) => (
             <section key={group.key}>
               <h2 className="mb-2.5 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-gray-500">

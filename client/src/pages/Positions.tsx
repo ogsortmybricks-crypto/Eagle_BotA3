@@ -486,7 +486,7 @@ function AppointModal({ position, onClose }: { position: Position; onClose: () =
           </button>
           <button
             onClick={() => appoint.mutate()}
-            disabled={!userId || appoint.isPending}
+            disabled={!userId || appoint.isPending || people.isLoading || people.isError}
             className="btn-primary"
           >
             {appoint.isPending && <Spinner />} Appoint
@@ -496,6 +496,15 @@ function AppointModal({ position, onClose }: { position: Position; onClose: () =
     >
       <div className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
+        {people.isError && (
+          <Banner tone="error" title="Couldn't load people">
+            The appointment roster failed to load. Please retry before choosing someone.
+            <button className="btn-secondary btn-sm mt-3" disabled={people.isFetching} onClick={() => void people.refetch()}>
+              {people.isFetching ? "Retrying…" : "Retry"}
+            </button>
+          </Banner>
+        )}
+        {people.isLoading && <p role="status" className="text-sm text-gray-500">Loading people…</p>}
         {position.elected && (
           <Banner tone="warning">
             This is an elected position. Appointing directly bypasses the studio's vote — worth
@@ -509,6 +518,7 @@ function AppointModal({ position, onClose }: { position: Position; onClose: () =
           <select
             id="person"
             className="input"
+            disabled={people.isLoading || people.isError}
             value={userId ?? ""}
             onChange={(event) => setUserId(event.target.value ? Number(event.target.value) : null)}
           >
@@ -519,12 +529,15 @@ function AppointModal({ position, onClose }: { position: Position; onClose: () =
               </option>
             ))}
           </select>
-          {restricted && (
+          {restricted && !people.isLoading && !people.isError && (
             <p className="hint">
               {candidates.length === 0
                 ? `Nobody in ${eligibleNames.join(" or ") || "that studio"} yet. Move someone there first, or turn off the studio restriction in Settings.`
                 : `Only people in ${eligibleNames.join(" and ")} can hold this.`}
             </p>
+          )}
+          {!restricted && !people.isLoading && !people.isError && candidates.length === 0 && (
+            <p className="hint">There are no active academy members available to appoint.</p>
           )}
         </div>
         <div>
