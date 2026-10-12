@@ -187,12 +187,84 @@ Tac-On authors: see the `calendar` section of [TacScript](TacScript.md).
 
 ## Setting it up
 
-This feature adds two tables. After pulling this version:
+The calendar requires both `calendar_events` (events and sessions) and
+`studio_guides` (the guide assignments shown in the calendar header; see
+[Studio guides](Studio-Guides.md)). Attendance also uses the existing `absences`
+table and `users.attendance_days` column.
+
+### Verify development first
+
+`shared/schema.ts` declares the schema. `drizzle.config.ts` and `server/db.ts`
+use the environment's `DATABASE_URL`. In the workspace, that is the development
+database, not the published app's managed production database.
+
+After pulling schema changes, compare the actual development database with the
+declarations: all tables and columns, types and lengths, nullability, defaults,
+primary and foreign keys (including delete actions), and indexes. For these two
+tables, expect:
+
+| Table | Columns | Constraints | Named secondary indexes |
+| --- | --- | --- | --- |
+| `calendar_events` | 19 | Primary key `id`; foreign keys to academy, studio, studio group, and creator | `calendar_events_academy_idx`; `calendar_events_range_idx` on academy and start/end dates |
+| `studio_guides` | 7 | Primary key `id`; foreign keys to academy, user, studio, studio group, and assigner | `studio_guides_academy_idx`; `studio_guides_user_idx` |
+
+If development is missing declared changes, preview the existing Drizzle
+workflow before applying them:
 
 ```sh
-npm run db:push
+npm run db:push -- --strict --verbose
 ```
 
-New: `calendar_events` (the calendar) and `studio_guides` (see
-[Studio guides](Studio-Guides.md)). Attendance uses the `absences` table and
-`attendance_days` column that were already there.
+Stop if the preview proposes dropping or truncating tables, losing data,
+renaming objects ambiguously, or other unexpected changes. Do not use `--force`
+to bypass warnings. For reviewed, safe additive changes, apply with
+`npm run db:push -- --verbose` in **development only**. Independently inspect the
+result afterward: a confirmation prompt can exit without applying changes in a
+non-interactive shell, and a successful build is not schema verification.
+
+Sign in through the normal development login and check `/calendar` and a
+calendar-dependent Tac-On page (`/t/<install-id>/<page>`). Check their API
+responses too: `/api/calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` and
+`/api/tacons/view/<install-id>/<page>`. Verify academy and studio boundaries with
+authorized accounts; do not disable authentication or permissions for testing.
+
+### Synchronize the published app without replacing its data
+
+For Replit's **managed production database**, schema synchronization happens in
+the supported **Publish / Republish** flow, which compares the actual
+development and production schemas. Updating the TypeScript declarations or
+running `db:push` in the workspace alone does not update production.
+
+1. Obtain explicit approval from the app owner before publishing. The owner
+   must initiate **Publish / Republish** in Replit's Publishing pane.
+2. Keep the existing managed production database selected. Leave **“Set up
+   your production database with your current development data”** (or any
+   overwrite/reset/copy-development-data option) **off**. Replacing production
+   data would replace real academy users, records, and Tac-On installations.
+3. Review the schema changes. If only these tables are missing, expect creation
+   of both tables with their columns, defaults, keys, sequences, and indexes.
+   They are new tables, not renames of existing ones. If a rename prompt,
+   destructive change, or unexpected change appears, stop and have it reviewed
+   before confirming. Do not approve a drop-and-add as a substitute for a rename.
+4. Complete publishing and wait for the new build to become healthy.
+5. Recheck production metadata read-only, including both required tables and
+   the rest of the schema. Confirm existing academy data and installed Tac-Ons
+   remain intact. New tables may legitimately be empty; do not seed them or
+   copy development rows as part of this repair.
+6. Sign in to the published app with an authorized account. Open the originally
+   affected **installed** Tac-On page and the ordinary Calendar. Check their
+   API responses and recent publishing logs for missing-relation errors,
+   especially `calendar_events` and `studio_guides`.
+
+Do not run Drizzle against production, add production migration scripts, put
+schema mutation in the deployment build, or add startup-time schema repair.
+Do not reinstall or republish Tac-On packages to fix missing base-app tables.
+
+If production already has both tables and matches development, do not push or
+republish unnecessarily: test the original page and inspect recent logs first.
+Schema verification alone is not proof that the signed-in pages work. If
+publishing or an authorized live session is unavailable, report exactly which
+owner action and live-page checks are still pending.
+
+References: [Replit production databases](https://docs.replit.com/cloud-services/storage-and-databases/production-databases)
+and [development and production databases](https://docs.replit.com/features/data-and-storage/development-and-production).
