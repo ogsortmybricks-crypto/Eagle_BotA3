@@ -7,6 +7,17 @@
 - Preview port: `5000`
 - Database: Replit PostgreSQL, configured through `DATABASE_URL`
 
+Automatic task-merge setup runs `scripts/post-merge.sh`: it restores locked
+dependencies, checks TypeScript, and rebuilds the app. Database changes are
+deliberately separate so an unattended merge cannot apply an unreviewed
+destructive schema change. Follow the reviewed development/publishing procedure
+below when a merge changes the schema.
+
+The `shell-quote` and `proxy-addr` dependency overrides select patched releases:
+older locked transitive versions were blocked by the package security firewall,
+even when updating their parent dependencies. Keep these safety pins until the
+parent dependency graph reliably selects patched versions without them.
+
 The development database schema is managed with Drizzle:
 
 ```sh

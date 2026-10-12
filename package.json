@@ -46,6 +46,10 @@
     "wouter": "^3.11.0",
     "zod": "^3.25.76"
   },
+  "overrides": {
+    "shell-quote": "^1.12.0",
+    "proxy-addr": "^2.0.8"
+  },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",
     "@types/connect-pg-simple": "^7.0.3",
@@ -59,7 +63,7 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.6.1",
-    "drizzle-kit": "^0.30.6",
+    "drizzle-kit": "^0.31.11",
     "esbuild": "^0.24.2",
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
