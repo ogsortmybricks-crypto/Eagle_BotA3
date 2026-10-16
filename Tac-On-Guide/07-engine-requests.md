@@ -70,7 +70,7 @@ own name in `who` whatever they send.
 
 ## When the user says the engine changed
 
-The October 2026 update shipped ER-001 to ER-017; each entry in
+The October 2026 updates shipped ER-001 to ER-019; each entry in
 `ENGINE-REQUESTS.md` says what changed and anything that differs from what was
 asked. Versions published before it keep their old behaviour until you
 republish them.

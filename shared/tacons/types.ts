@@ -117,6 +117,8 @@ export type ChoiceSource = {
   store: string[];
   /** The field each option is shown as. */
   field: string;
+  /** More fields shown after it, `choice from assignment.title, assignment.block`. */
+  also?: string[];
   where: Condition | null;
 };
 
@@ -244,7 +246,22 @@ export type ListWidget = {
    * not only for people who can see this list.
    */
   linkAnyone?: boolean;
+  /** `value done sum of ...`: worked out for each row, shown as a column. */
+  values?: ListValue[];
+  /** `progress done of goal`: a bar per row, from two values or fields. */
+  progress?: { value: string; goal: string } | null;
+  /** `total steps`: columns added up on each folder's header and under the table. */
+  totals?: string[];
 };
+
+/**
+ * A number worked out for each row of a list. Inside it, `each.<field>` is the
+ * row being drawn - even inside a total, where `row` means the row counted.
+ */
+export type ListValue = { name: string; expr: Expr };
+
+/** The column `progress` adds to a list. */
+export const PROGRESS_COLUMN = "progress";
 
 /** `set day weekday` inside a form: a value worked out on the server, never asked. */
 export type FormSet = { field: string; value: Expr };

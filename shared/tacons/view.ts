@@ -10,8 +10,11 @@
 import type { FieldType } from "./types";
 import type { ViewExtension } from "./extensions";
 
-/** `link` is the "Open" column, pointing at a read-only page for the row. */
-export type ViewColumn = { key: string; label: string; type: FieldType | "text" | "link" };
+/**
+ * `link` is the "Open" column, pointing at a read-only page for the row;
+ * `progress` draws `row.progress` as a bar.
+ */
+export type ViewColumn = { key: string; label: string; type: FieldType | "text" | "link" | "progress" };
 
 export type ViewRow = {
   id: number | string;
@@ -22,6 +25,10 @@ export type ViewRow = {
   link?: string | null;
   /** The folder names this row sits in, outermost first, for a grouped list. */
   groups?: string[];
+  /** For a `progress` column: how far along this row is. */
+  progress?: { value: number; goal: number };
+  /** The numbers behind the `total` columns, so a folder can add up its own rows. */
+  numbers?: Record<string, number>;
 };
 
 export type ViewNote = { kind: "note"; text: string; tone: "plain" | "info" | "warning" };
@@ -41,6 +48,8 @@ export type ViewList = {
   problem: string | null;
   /** How many levels of folders `rows[].groups` holds. Absent for a flat list. */
   groupDepth?: number;
+  /** Columns added up on each folder's header and under the table. */
+  totals?: string[];
 };
 
 /** One option of a `choice from` field: the row's id, shown as one of its fields. */

@@ -412,6 +412,14 @@ export type EvalContext = {
   timeZone?: string | null;
   /** A person's name from their id, for `name of`. */
   personName?: (id: unknown) => string | undefined;
+  /** The list row being drawn, for a list's `value` lines: `each.id`. */
+  each?: Row | null;
+  /**
+   * Reads through a `choice from` field: in store `store`, field `field`
+   * holds `id`, a row of another store; `rest` is read from that row.
+   * Returns undefined when `field` isn't a `choice from` field.
+   */
+  through?: (store: string, field: string, id: unknown, rest: string[]) => { value: unknown } | undefined;
 };
 
 export function evaluate(expr: Expr | null, ctx: EvalContext): unknown {
@@ -498,17 +506,20 @@ function resolvePath(parts: string[], ctx: EvalContext): unknown {
     return dig(ctx.me, rest);
   }
   if (lower === "event") return dig(ctx.event, rest);
+  if (lower === "each") return dig(ctx.each ?? {}, rest);
   if ((lower === "position" || lower === "positions") && rest.length > 0) {
     // `position.treasurer` on its own means who holds it, as words.
     const [name, ...field] = rest;
     return dig(ctx.positions[name] ?? { names: "nobody yet", holder: null, holders: 0 }, field.length ? field : ["names"]);
   }
   if (lower === "setting" || lower === "settings") return dig(ctx.setting, rest);
-  if (lower === "row" || lower === "it" || lower === "this") return dig(ctx.row ?? {}, rest);
-  if (ctx.rowAliases.includes(root)) return dig(ctx.row ?? {}, rest);
+  if (lower === "row" || lower === "it" || lower === "this" || ctx.rowAliases.includes(root)) {
+    return fromRow(ctx, rest);
+  }
 
-  // A bare field name inside a row context: `amount` rather than `entry.amount`.
-  if (rest.length === 0 && ctx.row && root in ctx.row) return ctx.row[root];
+  // A bare field name inside a row context: `amount` rather than `entry.amount`,
+  // and `assignment.block` for a `choice from` field.
+  if (ctx.row && root in ctx.row) return rest.length === 0 ? ctx.row[root] : fromRow(ctx, parts);
 
   // The clock comes after a row's own fields, so a field called `weekday` wins.
   if (rest.length === 0 && (CLOCK_WORDS as readonly string[]).includes(lower)) {
@@ -517,6 +528,19 @@ function resolvePath(parts: string[], ctx: EvalContext): unknown {
 
   // Anything left is another Tac-On's published value.
   return ctx.compute(parts);
+}
+
+/**
+ * A field of the row being tested. `assignment.block`, where `assignment` is
+ * a `choice from` field, reads `block` from the row it picked.
+ */
+function fromRow(ctx: EvalContext, path: string[]): unknown {
+  const row = ctx.row ?? {};
+  if (path.length >= 2 && ctx.through) {
+    const linked = ctx.through(ctx.rowAliases[0] ?? "", path[0], row[path[0]], path.slice(1));
+    if (linked) return linked.value;
+  }
+  return dig(row, path);
 }
 
 function dig(source: Row, path: string[]): unknown {

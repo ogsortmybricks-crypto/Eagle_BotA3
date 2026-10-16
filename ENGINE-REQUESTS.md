@@ -407,3 +407,93 @@ second one.
 **What it unlocks.** No silent surprises.
 
 **How to verify.** The snippet either keeps both tests or shows a warning.
+
+## ER-018: Read a field of the row a `choice from` field picked
+
+- **Status:** shipped — `<store>.<choice field>.<field>` reads the picked row's field in `where`, totals, `set`, `columns` and `group by` (and on a record's page). `set` now sees the form's answers as the row being saved, in order. `choice from assignment.title, assignment.block` shows both fields ("Draft 2 · Quest"). A path through a field that isn't a `choice from`, or to a field the picked store doesn't have, is now a compile error rather than an empty value.
+- **Kind:** language feature
+- **Priority:** workaround exists
+- **Needed by:** ap-calls (match finished work to the posted assignment's block and day)
+
+**The problem.** A `choice from` field saves the picked row's `id`, which is
+exact. But nothing can read *through* it. A `where` can't say "the picked
+assignment is due Monday to Thursday", and `set` can't copy the assignment's
+`block` into the record, because `set` runs before the record exists and
+can't see the form's answers (`formValues` in `runtime.ts` evaluates `sets`
+with no row). The dropdown also shows only one field, so two "Draft 2"s in
+different blocks look the same.
+
+**What I tried.**
+
+    store finished {
+      field assignment choice from assignment.title where assignment.created above this_week_start
+      field block choice "Quest", "Civilization"
+    }
+    form "I finished it" {
+      into finished
+      ask assignment
+      set block finished.assignment.block        # saves nothing
+    }
+    ask done_early count of finished where finished.assignment.day is not "Friday"
+
+Both compile with no warning. `finished.assignment.day` reads as empty, so
+`is not "Friday"` matches **every** row, including a Friday assignment, and
+`set block` saves nothing. At least a compile warning would help.
+
+ap-calls 0.3.0 asks for the assignment, its block and its day, and trusts the
+learner to make them match. It counts Monday to Thursday work by the day the
+learner chose.
+
+**What would fix it.** Let `<store>.<choice field>.<field>` read the picked
+row's field, in `where`, totals, columns and `set` (with `set` able to read the
+form's own answers). Optionally `choice from assignment.title, assignment.block`
+to show more than one field in the dropdown.
+
+**What it unlocks.** Exact "done or not" per posted item in any checklist-style
+Tac-On: marks against assignments, sign-ups against events, votes against
+candidates. Forms get shorter because they ask one question instead of three.
+
+**How to verify.** `count of finished where finished.assignment.day is not "Friday"`
+counts rows whose picked assignment isn't due on Friday, and the form above
+saves the assignment's block without asking for it.
+
+## ER-019: Totals per folder, or a progress bar per person
+
+- **Status:** shipped — both options. A list takes `value <name> <expr>` lines worked out per row, `progress <value> of <goal>` for a bar per row, and `total <columns>` for sums on each folder's header (and under a flat table). One change from the suggested syntax: inside a total, `row` already means the row being counted, so the list's row is `each` — write `core_goal.byId is each.id`, not `row.id`.
+- **Kind:** language feature
+- **Priority:** workaround exists
+- **Needed by:** ap-calls (Goal Board)
+
+**The problem.** Every `ask` is worked out for the person looking, so a page
+can show *my* Core steps against *my* goal, but not everyone's. The Goal Board
+wants "Ava: 3 of 5 steps, Ben: 5 of 5" for each learner. A folder list groups
+each learner's rows, but nothing adds up a column inside a folder, and goals
+and progress live in two stores.
+
+**What I tried.**
+
+    list core_log {
+      where core_log.created above this_week_start
+      group by core_log.by, core_log.subject
+    }
+
+It shows every log row in a folder per learner, but no total. ap-calls 0.4.0
+shows a goals list and a progress list side by side and leaves the adding up
+to the reader.
+
+**What would fix it.** Either a folder total (`total steps` in a list: the
+sum shown on each folder's header), or a list of people with per-row values,
+for example:
+
+    list from people {
+      columns name, goal, done
+      value goal sum of core_goal.steps where core_goal.byId is row.id and core_goal.created above this_week_start
+      value done sum of core_log.steps where core_log.byId is row.id and core_log.created above this_week_start
+      progress done of goal
+    }
+
+**What it unlocks.** Boards and leaderboards in any tracking Tac-On: goals,
+points, reading logs, attendance.
+
+**How to verify.** The Goal Board shows one row (or folder header) per learner
+with their logged steps out of their goal steps.

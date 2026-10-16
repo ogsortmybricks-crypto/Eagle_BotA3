@@ -157,7 +157,7 @@ function ListView({ list, target }: { list: ViewList; target: RenderTarget }) {
         (list.groupDepth ? (
           <div className="card divide-y divide-gray-100">
             {folders(list.rows, 0, list.groupDepth).map((folder) => (
-              <Folder key={folder.name} folder={folder} depth={0}>
+              <Folder key={folder.name} folder={folder} depth={0} list={list}>
                 {(rows) => <RowTable list={list} rows={rows} cell={cell} onRemove={(id) => remove.mutate(id)} removing={remove.isPending} />}
               </Folder>
             ))}
@@ -203,7 +203,9 @@ function RowTable({
           <tr key={row.id} className="border-b border-gray-100 last:border-0">
             {list.columns.map((column) => (
               <td key={column.key} className="px-3 py-2 align-top text-gray-700">
-                {column.type === "link" ? (
+                {column.type === "progress" ? (
+                  <RowBar progress={row.progress} text={row.cells[column.key] ?? ""} />
+                ) : column.type === "link" ? (
                   row.link ? (
                     <Link href={row.link} className="text-brand-600 underline">
                       {row.cells[column.key] || "Open"}
@@ -231,7 +233,46 @@ function RowTable({
           </tr>
         ))}
       </tbody>
+      {list.totals && list.totals.length > 0 && rows.length > 1 && (
+        <tfoot>
+          <tr className="border-t border-gray-200 bg-gray-50 font-semibold text-gray-800">
+            {list.columns.map((column, index) => (
+              <td key={column.key} className="px-3 py-2 tabular-nums">
+                {list.totals!.includes(column.key) ? formatTotal(sumOf(rows, column.key)) : index === 0 ? "Total" : ""}
+              </td>
+            ))}
+            {removable && <td />}
+          </tr>
+        </tfoot>
+      )}
     </table>
+  );
+}
+
+/** Adds up one `total` column over some rows. */
+function sumOf(rows: ViewRow[], key: string): number {
+  return rows.reduce((total, row) => total + (row.numbers?.[key] ?? 0), 0);
+}
+
+function formatTotal(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+/** One row's bar in a list's `progress` column. */
+function RowBar({ progress, text }: { progress?: { value: number; goal: number }; text: string }) {
+  if (!progress) return null;
+  const share = progress.goal > 0 ? Math.max(0, Math.min(1, progress.value / progress.goal)) : 0;
+  const done = progress.goal > 0 && progress.value >= progress.goal;
+  return (
+    <div className="flex min-w-[8rem] items-center gap-2">
+      <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
+        <div
+          className={`h-full rounded-full ${done ? "bg-emerald-500" : "bg-brand-600"}`}
+          style={{ width: `${share * 100}%` }}
+        />
+      </div>
+      <span className="whitespace-nowrap text-xs tabular-nums text-gray-600">{text}</span>
+    </div>
   );
 }
 
@@ -254,12 +295,20 @@ function folders(rows: ViewRow[], level: number, depth: number): FolderNode[] {
 function Folder({
   folder,
   depth,
+  list,
   children,
 }: {
   folder: FolderNode;
   depth: number;
+  list: ViewList;
   children: (rows: ViewRow[]) => ReactNode;
 }) {
+  // `total steps`: the folder's own rows added up, on its header.
+  const totals = (list.totals ?? []).map((key) => ({
+    key,
+    label: list.columns.find((column) => column.key === key)?.label ?? key,
+    value: sumOf(folder.rows, key),
+  }));
   return (
     <details open={depth === 0} className="group">
       <summary
@@ -268,12 +317,17 @@ function Folder({
       >
         <ChevronRight className="h-4 w-4 shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
         <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+        {totals.map((total) => (
+          <span key={total.key} className="whitespace-nowrap text-xs font-semibold tabular-nums text-gray-700">
+            {total.label}: {formatTotal(total.value)}
+          </span>
+        ))}
         <span className="text-xs tabular-nums text-gray-500">{folder.rows.length}</span>
       </summary>
       {folder.children.length > 0 ? (
         <div className="divide-y divide-gray-100">
           {folder.children.map((child) => (
-            <Folder key={child.name} folder={child} depth={depth + 1}>
+            <Folder key={child.name} folder={child} depth={depth + 1} list={list}>
               {children}
             </Folder>
           ))}

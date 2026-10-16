@@ -164,6 +164,48 @@ note "Nobody holds this seat yet — hold an election." warning {
 }
 ```
 
+### Checklists against posted items
+
+When learners mark things off a list someone posted (assignments, sign-ups,
+candidates), make the mark a `choice from` the posted store and read the rest
+through it, rather than asking for the same details again:
+
+```
+store finished {
+  field assignment choice from assignment.title, assignment.block where assignment.created above this_week_start
+  field block choice Quest, Civilization
+}
+
+form "I finished it" {
+  into finished
+  ask assignment
+  set block finished.assignment.block
+}
+
+ask done_early count of finished where finished.byId is me.id and finished.assignment.day is not "Friday"
+```
+
+One question instead of three, and nothing for a learner to get wrong.
+
+### Boards: one row per person
+
+For "how is everyone doing", list the people and work out each one's numbers
+with `value` lines. `each` is the person in the row:
+
+```
+list from people {
+  title "Goal Board"
+  columns name, goal, done
+  where row.role is "learner"
+  value goal sum of core_goal.steps where core_goal.byId is each.id and core_goal.created above this_week_start
+  value done sum of core_log.steps where core_log.byId is each.id and core_log.created above this_week_start
+  progress done of goal
+}
+```
+
+Or, from the records themselves, fold them by person and add them up:
+`group by by` with `total steps`.
+
 ### Signed records
 
 For anything that counts as a promise (a check-in, a vote tally, a ledger

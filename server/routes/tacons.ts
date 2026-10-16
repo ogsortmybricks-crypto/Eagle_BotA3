@@ -481,6 +481,7 @@ taconsRouter.get(
         store: record.store,
         row,
         fields: list.columns,
+        skip: (list.values ?? []).map((entry) => entry.name),
         title: list.titleTemplate ?? (list.title ? { kind: "literal", value: list.title } : null),
         back: page
           ? { label: await pageTitle(runtime, page), href: `/t/${entry.install.id}/${page.name}` }

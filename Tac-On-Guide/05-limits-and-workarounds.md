@@ -15,6 +15,7 @@ Check for these every time. The compiler won't stop you.
 | **Filtering a `list from` Eagle Bot source by a made-up name**: `where rule.section contains "ROE"` | Matches nothing. Base-source rows are called `row`. | `where row.section contains "ROE"`, or just `where section contains "ROE"` |
 | **A Tac-On published before the October 2026 engine update** | A published version keeps what it was compiled to: `a minus b plus c` still means `a minus (b plus c)`, and of two `where` lines in a list or calendar only the last counts. | Republish (new `version`), then check every total that mixes `minus` or `divided` with another step, and every block with two `where` lines. |
 | **A total inside `max of` / `min of`**: `max of count of x where x.a is 1 and x.b is 2 and 5` | The total's `where` swallows the `and`s, so the second value is lost. | Put the total in its own `ask` and write `max of my.total and 5`. |
+| **`row` inside a total in a list's `value`**: `value done sum of log.steps where log.byId is row.id` | Inside the total, `row` is the log row being counted, not the list's row, so it compares each log with itself. | `each.id` is the list's row: `where log.byId is each.id`. |
 | **A bare `day` in `group by` after a date level**: `group by created.week, day` | Means "by day of `created`", even if the store has a field called `day`. | To group by the field, write `store.day`. |
 | **`event.*` outside a `when`** | Empty. Buttons and forms have no event. | Use `me.*`, `setting.*`, the clock words or literal text. |
 | **Filtering `list from calendar` by kind code**: `where row.kind is "field_trip"` | Matches nothing. The `kind` column holds the word people see. | `where row.kind is "Field trip"`. (`event.kind` inside a `when` *is* the code, `field_trip`.) |
@@ -98,6 +99,13 @@ arriving doesn't fire anything.
 It doesn't message anyone. To get someone's attention, put a `note` on their
 desk (`{my.waiting} topics are waiting for you`) or a `stat` on a panel where
 they work.
+
+### Numbers per person need a list
+
+An `ask` is worked out once, for the person looking, so a `stat` can only ever
+show *their* number. To show everyone's ("Ava 3 of 5, Ben 5 of 5"), use a list
+with `value` lines (`list from people` with `value done ... where ... is
+each.id`), a `progress` column and `total`. See the reference.
 
 ### Totals see at most 2,000 rows
 

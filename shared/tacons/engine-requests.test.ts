@@ -307,3 +307,120 @@ where outing.place contains "park"
   assert.equal(manifest.calendars![0].where?.all.length, 2);
   assert.equal((manifest.pages[0].widgets[0] as ListWidget).where?.all.length, 2);
 });
+
+test("ER-018: reading through a choice from field", () => {
+  const manifest = ok(`
+    store assignment {
+      field title text
+      field block text
+      field day text
+    }
+    store finished {
+      field assignment choice from assignment.title, assignment.block
+      field block text
+    }
+    ask done_early count of finished where finished.assignment.day is not "Friday"
+    page home {
+      form "I finished it" {
+        into finished
+        ask assignment
+        set block finished.assignment.block
+      }
+      list finished {
+        columns assignment, assignment.day
+        group by assignment.block
+      }
+    }
+  `);
+  const field = manifest.stores[1].fields[0];
+  assert.deepEqual(field.from?.also, ["block"]);
+  const assignments: Row[] = [
+    { id: 1, title: "Draft 2", block: "Quest", day: "Monday" },
+    { id: 2, title: "Draft 2", block: "Civilization", day: "Friday" },
+  ];
+  const finished: Row[] = [{ id: 10, assignment: 1 }, { id: 11, assignment: 2 }];
+  const through: EvalContext["through"] = (store, name, id, rest) => {
+    if (store !== "finished" || name !== "assignment") return undefined;
+    const row = assignments.find((entry) => entry.id === Number(id));
+    return { value: row?.[rest[0]] };
+  };
+  assert.equal(evaluate(ask(manifest, "done_early"), ctx({ through }, { finished })), 1);
+  const list = manifest.pages[0].widgets[1] as ListWidget;
+  assert.deepEqual(list.columns, ["assignment", "assignment.day"]);
+  assert.deepEqual(list.groupBy, [{ field: "assignment.block", part: null }]);
+
+  // The request's own snippet, where `assignment` isn't a `choice from` field, now says so.
+  fails(
+    `store finished {
+      field assignment text
+    }
+    ask done_early count of finished where finished.assignment.day is not "Friday"
+    ${PAGE}`,
+    /isn't a `choice from` field/,
+  );
+  fails(
+    `store assignment {
+      field title text
+    }
+    store finished {
+      field assignment choice from assignment.title
+    }
+    ask x count of finished where finished.assignment.dya is "Monday"
+    ${PAGE}`,
+    /has no field called "dya"/,
+  );
+});
+
+test("ER-019: list values with each, a progress column, and totals", () => {
+  const manifest = ok(`
+    store core_goal {
+      field steps number
+    }
+    store core_log {
+      field steps number
+      field subject text
+    }
+    page board {
+      list from people {
+        columns name, goal, done
+        where row.role is "learner"
+        value goal sum of core_goal.steps where core_goal.byId is each.id and core_goal.created above this_week_start
+        value done sum of core_log.steps where core_log.byId is each.id and core_log.created above this_week_start
+        progress done of goal
+        total goal, done
+      }
+      list core_log {
+        columns subject, steps
+        group by by, subject
+        total steps
+      }
+    }
+  `);
+  const board = manifest.pages[0].widgets[0] as ListWidget;
+  assert.deepEqual(board.columns, ["name", "goal", "done", "progress"]);
+  assert.deepEqual(board.progress, { value: "done", goal: "goal" });
+  assert.deepEqual(board.totals, ["goal", "done"]);
+  const logs = {
+    core_log: [
+      { id: 1, byId: 7, steps: 2, created: "2026-10-12T15:00:00.000Z" },
+      { id: 2, byId: 7, steps: 1, created: "2026-10-12T16:00:00.000Z" },
+      { id: 3, byId: 8, steps: 5, created: "2026-10-12T16:00:00.000Z" },
+      { id: 4, byId: 7, steps: 9, created: "2026-10-01T16:00:00.000Z" },
+    ],
+  };
+  const done = board.values!.find((entry) => entry.name === "done")!.expr;
+  const context = ctx({ clock: { this_week_start: "2026-10-11" }, each: { id: 7 } }, logs);
+  assert.equal(evaluate(done, context), 3);
+  fails(
+    `store log {
+      field steps number
+    }
+    page home {
+      list log {
+        columns steps
+        progress done of goal
+      }
+    }`,
+    /There's no "done" for the bar/,
+  );
+});

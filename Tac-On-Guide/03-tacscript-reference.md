@@ -108,6 +108,46 @@ record's page it shows as the title again. Someone filling in the form can
 only save a row the dropdown offered them. The `where` is optional, and the
 store can be declared anywhere in the file (but not be the same store).
 
+To tell apart rows with the same title, list more fields after the first.
+They're shown joined with a dot, `Draft 2 · Quest`:
+
+```
+field assignment choice from assignment.title, assignment.block
+```
+
+**Reading through the choice.** `<store>.<choice field>.<field>` reads a field
+of the row that was picked, anywhere a field can be used: in `where`, totals,
+`set`, `columns` and `group by`.
+
+```
+store finished {
+  field assignment choice from assignment.title, assignment.block where assignment.created above this_week_start
+  field block choice Quest, Civilization
+}
+
+ask done_early count of finished where finished.assignment.day is not "Friday"
+
+form "I finished it" {
+  into finished
+  ask assignment
+  set block finished.assignment.block      # copied from the picked assignment
+}
+
+list finished {
+  columns assignment, assignment.day       # the picked assignment's day
+  group by assignment.block
+}
+```
+
+Inside a list, `assignment.day` and `finished.assignment.day` mean the same.
+A column that reads through is headed with both labels, like "Assignment:
+Day". It goes further through another `choice from` field in the picked row,
+if there is one. If nothing was picked, it reads as empty.
+
+The compiler checks these paths: writing `finished.assignment.day` when
+`assignment` isn't a `choice from` field, or the picked store has no `day`, is
+an error.
+
 ### Fields every row has
 
 Every row also gets four fields for free. You can use them in `where`, in
@@ -318,6 +358,45 @@ that happens to be called `day`, write `ap_call.day`. Folders appear in the
 list's sort order, newest first by default. `limit` still counts rows, so
 raise it for a browser of old records.
 
+**Values worked out for each row.** A `value` line adds a column that is
+worked out separately for every row in the list. Inside it, `each` is the row
+being drawn. This is how one list shows a number per person, which an `ask`
+(worked out only for the person looking) can't:
+
+```
+list from people {
+  title "Goal Board"
+  columns name, goal, done
+  where row.role is "learner"
+  value goal sum of core_goal.steps where core_goal.byId is each.id and core_goal.created above this_week_start
+  value done sum of core_log.steps where core_log.byId is each.id and core_log.created above this_week_start
+  progress done of goal
+  total goal, done
+  sort az
+}
+```
+
+- **`each` vs `row`.** Inside a total such as `sum of core_log.steps where ...`,
+  `row` (and `core_log`) means the row being *counted*. `each` always means
+  the list's row, here the person. Outside a total, `row.name` and
+  `each.name` are the same thing.
+- A `value` can be any expression, and its name works as a column, in
+  `progress`, in `total` and for `sort az` when it's the first column. It
+  can't share a name with a field.
+- `value` lines work on any list: your own stores, another Tac-On's, or
+  Eagle Bot's (`people`, `positions` and so on).
+
+**A bar per row.** `progress <value> of <goal>` adds a `progress` column: a
+bar with "3 of 5" next to it, green once the goal is reached. Both sides can
+be fields or `value`s. It goes at the end of the columns unless you put
+`progress` in `columns` yourself.
+
+**Totals.** `total steps` (one or more columns) adds those columns up. A
+grouped list shows each folder's total on its header ("Steps: 12"), so
+`group by by` with `total steps` gives each person's total. A flat list shows a
+"Total" row under the table. Totals count the rows the list shows, so a
+`limit` that cuts rows off also cuts them out of the totals.
+
 **Links to one record.** Put `link` in `columns` and each row gets an
 **Open** link to a read-only page for that one record, showing the list's
 columns. Paste it anywhere (Journey Tracker, a message) to point someone at
@@ -409,7 +488,7 @@ Forms can also:
 
 | Line | What it does |
 | --- | --- |
-| `set day weekday` | Fills a field in itself, on the server, instead of asking. Any expression: `set who me.id`, `set week my.week`. Whatever the browser sends for that field is ignored. A field can't be both asked and set. |
+| `set day weekday` | Fills a field in itself, on the server, instead of asking. Any expression: `set who me.id`, `set week my.week`. It can read the form's own answers as the row being saved, so `set block finished.assignment.block` copies a field of the picked row. `set` lines run in order, and each can read the ones above it. Whatever the browser sends for that field is ignored. A field can't be both asked and set. |
 | `confirm "Sign this AP Call?"` | Asks "are you sure?" before saving. |
 | `confirm with code` | The person types **their own six-digit confirmation code** (set under their profile) to save. A wrong code saves nothing; five wrong tries lock it for 15 minutes. Add text after it for an "are you sure?" too: `confirm with code "Sign this?"`. |
 
@@ -715,6 +794,8 @@ quietly.
 | `position.treasurer` | Who holds one of your positions |
 | `entry.amount` | A field of the row being tested |
 | `entry.id`, `entry.byId` | The row's number, and who saved it (see *Fields every row has*) |
+| `entry.assignment.day` | A field of the row a `choice from` field picked |
+| `each.id` | In a list's `value` line: the list row being drawn |
 | `points.balance` | Another Tac-On's, via `use` |
 
 **The clock**, worked out in the academy's time zone:
@@ -864,6 +945,10 @@ titles before installing. It works anywhere an audience does: `show to`,
 - `choice from` has to name a store and field that exist.
 - `group by` on a part of a date only works on a `date` field or `created`.
 - `link`, `allow remove own` and `open record` only work on your own stores.
+- A path like `finished.assignment.day` has to go through a `choice from`
+  field to a field that exists.
+- A list's `value` names can't repeat or clash with a field; `progress` and
+  `total` have to name its columns or values.
 - A position needs its own name — not a role's, and not another position's.
 
 The editor checks all of this as you type, with the line number. If it says

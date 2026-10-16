@@ -27,6 +27,7 @@ import {
   HOOK_EVENTS,
   LINK_COLUMN,
   PANEL_HOSTS,
+  PROGRESS_COLUMN,
   SOURCE_PERMISSIONS,
   positionAudience,
   studioPositionAudience,
@@ -45,6 +46,7 @@ import {
   type Expr,
   type FieldType,
   type FormWidget,
+  type ListValue,
   type ListWidget,
   type HookDef,
   type HookEvent,
@@ -226,6 +228,11 @@ function compileStore(ctx: Ctx, node: Node): StoreDef | null {
         continue;
       }
       const whereAt = restTokens.findIndex((token) => token.kind === "word" && token.value.toLowerCase() === "where");
+      // `choice from assignment.title, assignment.block`: more fields to show.
+      const sourceName = path.slice(0, -1).join(".");
+      const also = words(restTokens.slice(2, whereAt === -1 ? undefined : whereAt)).map((word) =>
+        word.startsWith(`${sourceName}.`) ? word.slice(sourceName.length + 1) : word,
+      );
       const field: StoreField = {
         name: fieldName,
         type: "choice",
@@ -235,6 +242,7 @@ function compileStore(ctx: Ctx, node: Node): StoreDef | null {
         from: {
           store: path.slice(0, -1),
           field: path[path.length - 1],
+          ...(also.length > 0 ? { also } : {}),
           where: whereAt === -1 ? null : conditionOf(ctx, restTokens.slice(whereAt + 1), child.line),
         },
       };
@@ -651,6 +659,11 @@ function compileList(ctx: Ctx, node: Node): Widget | null {
   const storeName = source.kind === "store" ? source.store[source.store.length - 1] : null;
   let groupLine: Node | null = null;
   let wantsLink = false;
+  const values: ListValue[] = [];
+  let progress: { value: string; goal: string } | null = null;
+  let totals: string[] = [];
+  let progressLine: Node | null = null;
+  let totalLine: Node | null = null;
 
   for (const child of node.children) {
     const keyword = child.keyword.toLowerCase();
@@ -726,15 +739,73 @@ function compileList(ctx: Ctx, node: Node): Widget | null {
         });
         break;
       }
+      case "value": {
+        // `value done sum of core_log.steps where core_log.byId is each.id`
+        const name = text(child.args[0]);
+        if (!IDENTIFIER.test(name)) {
+          error(ctx, child, "A value needs a one-word name: `value done sum of log.steps where log.byId is each.id`.");
+          break;
+        }
+        if (known.includes(name) || ROW_FIELDS.includes(name) || values.some((entry) => entry.name === name)) {
+          error(ctx, child, `"${name}" is already a column here. Give the value its own name.`);
+          break;
+        }
+        const expr = child.args.length > 1 ? parseExpr(child.args.slice(1), child.line, ctx.diagnostics) : null;
+        if (!expr) {
+          error(ctx, child, `Say how to work out "${name}": \`value ${name} sum of log.steps where log.byId is each.id\`.`);
+          break;
+        }
+        values.push({ name, expr });
+        break;
+      }
+      case "progress": {
+        // `progress done of goal` / `progress done out of goal`
+        const parts = words(child.args).filter((word) => !["of", "out"].includes(word.toLowerCase()));
+        if (parts.length !== 2) {
+          error(ctx, child, "Write it as `progress <value> of <goal>`, like `progress done of goal`.");
+          break;
+        }
+        progress = { value: parts[0], goal: parts[1] };
+        progressLine = child;
+        break;
+      }
+      case "total":
+      case "totals":
+        totals = [...totals, ...words(child.args)];
+        totalLine = child;
+        break;
       default:
         error(ctx, child, `"${child.keyword}" doesn't belong in a list.`);
     }
   }
 
   if (wantsLink && !widget.columns.includes(LINK_COLUMN)) widget.columns.push(LINK_COLUMN);
+  if (progress && !widget.columns.includes(PROGRESS_COLUMN)) widget.columns.push(PROGRESS_COLUMN);
+  // `finished.assignment.block` and `assignment.block` mean the same column.
+  if (ownStore && storeName) {
+    widget.columns = widget.columns.map((column) =>
+      column.startsWith(`${storeName}.`) ? column.slice(storeName.length + 1) : column,
+    );
+  }
+  const valueNames = values.map((entry) => entry.name);
+  const isThrough = (column: string) => ownStore && storeName !== null && throughColumn(ctx, storeName, column);
 
-  // Fields a store row always has: `created`, `by`, `id`, `byId`.
-  const available = source.kind === "store" && known.length > 0 ? [...known, ...ROW_FIELDS] : known;
+  // Fields a store row always has: `created`, `by`, `id`, `byId`; then the list's own values.
+  const rowFields = source.kind === "store" && known.length > 0 ? [...known, ...ROW_FIELDS] : known;
+  const available = rowFields.length > 0 ? [...rowFields, ...valueNames] : rowFields;
+
+  if (progress) {
+    for (const name of [progress.value, progress.goal]) {
+      if (available.length > 0 && !available.includes(name) && !valueNames.includes(name)) {
+        error(ctx, progressLine!, `There's no "${name}" for the bar. Use a field, or a \`value\` line in this list.`);
+      }
+    }
+  }
+  for (const name of totals) {
+    if (!widget.columns.includes(name)) {
+      error(ctx, totalLine!, `"${name}" isn't one of this list's columns, so there's nothing to add up.`);
+    }
+  }
 
   if (widget.columns.includes(LINK_COLUMN) && !ownStore) {
     error(ctx, node, "`link` only works on a list of your own store - those are the rows it can open.");
@@ -748,12 +819,13 @@ function compileList(ctx: Ctx, node: Node): Widget | null {
     }
   } else if (known.length > 0) {
     for (const column of widget.columns) {
-      if (available.includes(column) || column === LINK_COLUMN) continue;
+      if (available.includes(column) || column === LINK_COLUMN || column === PROGRESS_COLUMN) continue;
+      if (isThrough(column)) continue;
       error(ctx, node, `There's no "${column}" to show here. Available: ${available.join(", ")}.`);
     }
   }
 
-  if (groupLine) widget.groupBy = groupLevels(ctx, groupLine, available, storeName);
+  if (groupLine) widget.groupBy = groupLevels(ctx, groupLine, rowFields, storeName, isThrough);
 
   const compiled: ListWidget = {
     kind: "list",
@@ -771,6 +843,9 @@ function compileList(ctx: Ctx, node: Node): Widget | null {
   if (widget.removeOwn) compiled.removeOwn = true;
   if (widget.groupBy.length > 0) compiled.groupBy = widget.groupBy;
   if (widget.linkAnyone) compiled.linkAnyone = true;
+  if (values.length > 0) compiled.values = values;
+  if (progress) compiled.progress = progress;
+  if (totals.length > 0) compiled.totals = totals;
   return compiled;
 }
 
@@ -778,7 +853,13 @@ function compileList(ctx: Ctx, node: Node): Widget | null {
  * `group by created.week, day` -> [created by week, created by day]. A bare
  * `year`, `month`, `week` or `day` that isn't a field reuses the field before it.
  */
-function groupLevels(ctx: Ctx, node: Node, available: string[], storeName: string | null): GroupLevel[] {
+function groupLevels(
+  ctx: Ctx,
+  node: Node,
+  available: string[],
+  storeName: string | null,
+  isThrough: (column: string) => boolean = () => false,
+): GroupLevel[] {
   const items = words(node.args).filter((word, index) => !(index === 0 && word.toLowerCase() === "by"));
   if (text(node.args[0]).toLowerCase() !== "by" || items.length === 0) {
     error(ctx, node, "Write it as `group by <field>`, like `group by created.week, day`.");
@@ -795,6 +876,11 @@ function groupLevels(ctx: Ctx, node: Node, available: string[], storeName: strin
     const previous = levels[levels.length - 1];
 
     let level: GroupLevel | null = null;
+    // `assignment.block`: a field of the row a `choice from` field picked.
+    if (path.length >= 2 && !(path.length === 2 && isPart) && isThrough(path.join("."))) {
+      levels.push({ field: path.join("."), part: null });
+      continue;
+    }
     if (path.length === 2 && isPart) level = { field: path[0], part: last as DatePart };
     else if (path.length === 1 && isPart && !named && previous?.part) level = { field: previous.field, part: last as DatePart };
     else if (path.length === 1 && (available.length === 0 || available.includes(path[0]))) level = { field: path[0], part: null };
@@ -1433,12 +1519,20 @@ export function compile(source: string): CompileResult {
   // `choice from` can name a store declared further down, so it's checked now.
   for (const { node, store, field } of ctx.choiceSources) {
     const from = field.from!;
+    checkPaths(ctx, node, from.where);
     if (from.store.length === 1) {
       const source = ctx.stores.get(from.store[0]);
       if (!source) {
         error(ctx, node, `There's no store called "${from.store[0]}" for "${field.name}" to choose from.`);
-      } else if (!source.fields.some((entry) => entry.name === from.field) && !ROW_FIELDS.includes(from.field)) {
-        error(ctx, node, `"${source.name}" has no field called "${from.field}" to show as the choices.`);
+      } else if (
+        [from.field, ...(from.also ?? [])].some(
+          (name) => !source.fields.some((entry) => entry.name === name) && !ROW_FIELDS.includes(name),
+        )
+      ) {
+        const missing = [from.field, ...(from.also ?? [])].find(
+          (name) => !source.fields.some((entry) => entry.name === name) && !ROW_FIELDS.includes(name),
+        );
+        error(ctx, node, `"${source.name}" has no field called "${missing}" to show in the choices.`);
       } else if (source.name === store.name) {
         error(ctx, node, `"${field.name}" can't choose from its own store.`);
       }
@@ -1459,6 +1553,8 @@ export function compile(source: string): CompileResult {
   for (const node of root.children) {
     const keyword = node.keyword.toLowerCase();
     const value = joined(node.args);
+    // Whatever this line adds is checked for paths that read through a field.
+    const before = manifestSizes(manifest);
 
     switch (keyword) {
       case "store":
@@ -1570,6 +1666,7 @@ export function compile(source: string): CompileResult {
           `"${node.keyword}" isn't part of a Tac-On. Use name, version, about, store, setting, extension, page, panel, position, calendar, when, ask, needs, provides, use or a registered extension definition.`,
         );
     }
+    checkPathsAfter(ctx, node, manifest, before);
   }
 
   manifest.needs = [...ctx.needs].sort();
@@ -1610,6 +1707,98 @@ export function compile(source: string): CompileResult {
   const failed = ctx.diagnostics.some((entry) => entry.severity === "error");
   if (failed) return { ok: false, manifest: null, diagnostics: sorted(ctx.diagnostics) };
   return { ok: true, manifest, diagnostics: sorted(ctx.diagnostics) };
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Reading through a `choice from` field                                      */
+/* -------------------------------------------------------------------------- */
+
+type ManifestSizes = Record<"pages" | "panels" | "positions" | "hooks" | "computes" | "calendars", number>;
+
+function manifestSizes(manifest: Manifest): ManifestSizes {
+  return {
+    pages: manifest.pages.length,
+    panels: manifest.panels.length,
+    positions: manifest.positions.length,
+    hooks: manifest.hooks.length,
+    computes: manifest.computes.length,
+    calendars: manifest.calendars?.length ?? 0,
+  };
+}
+
+/** Walks what one top-level line added and checks every three-part path in it. */
+function checkPathsAfter(ctx: Ctx, node: Node, manifest: Manifest, before: ManifestSizes): void {
+  const added: unknown[] = [
+    ...manifest.pages.slice(before.pages),
+    ...manifest.panels.slice(before.panels),
+    ...manifest.positions.slice(before.positions),
+    ...manifest.hooks.slice(before.hooks),
+    ...manifest.computes.slice(before.computes),
+    ...(manifest.calendars ?? []).slice(before.calendars),
+  ];
+  checkPaths(ctx, node, added);
+}
+
+/** Reports every path in `value` that reads through a field that can't be read through. */
+function checkPaths(ctx: Ctx, node: Node, value: unknown): void {
+  const seen = new Set<string>();
+  const walk = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(walk);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (record.kind === "path" && Array.isArray(record.parts)) {
+      const parts = record.parts as string[];
+      const key = parts.join(".");
+      if (parts.length >= 3 && !seen.has(key)) {
+        seen.add(key);
+        const problem = throughProblem(ctx, parts);
+        if (problem) error(ctx, node, problem);
+      }
+      return;
+    }
+    Object.values(record).forEach(walk);
+  };
+  walk(value);
+}
+
+/**
+ * `finished.assignment.block`: `finished` is a store, `assignment` a `choice
+ * from` field in it, `block` a field of the row it picked. Anything else of
+ * that shape would quietly read as empty, so it is an error. Paths that don't
+ * start with one of our own stores are left alone.
+ */
+function throughProblem(ctx: Ctx, parts: string[]): string | null {
+  let store = ctx.stores.get(parts[0]);
+  if (!store) return null;
+  const path = parts.join(".");
+  for (let index = 1; index < parts.length - 1; index += 1) {
+    const field = store.fields.find((entry) => entry.name === parts[index]);
+    if (!field) return `\`${path}\`: "${store.name}" has no field called "${parts[index]}".`;
+    if (!field.from) {
+      return `\`${path}\`: "${field.name}" isn't a \`choice from\` field, so there's no row to read "${parts[index + 1]}" from.`;
+    }
+    if (field.from.store.length > 1) return null; // Another Tac-On's store; checked when it runs.
+    const next = ctx.stores.get(field.from.store[0]);
+    if (!next) return null; // Reported where the field is declared.
+    const wanted = parts[index + 1];
+    if (!next.fields.some((entry) => entry.name === wanted) && !ROW_FIELDS.includes(wanted)) {
+      return `\`${path}\`: "${next.name}" has no field called "${wanted}".`;
+    }
+    store = next;
+  }
+  return null;
+}
+
+/** A list column that reads through a `choice from` field: `assignment.block`. */
+function throughColumn(ctx: Ctx, storeName: string, column: string): boolean {
+  const parts = column.split(".");
+  if (parts.length < 2) return false;
+  return throughProblem(ctx, [storeName, ...parts]) === null && ctx.stores.get(storeName)?.fields.some(
+    (field) => field.name === parts[0] && field.from,
+  ) === true;
 }
 
 function sorted(diagnostics: Diagnostic[]): Diagnostic[] {

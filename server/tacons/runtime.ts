@@ -55,6 +55,7 @@ import {
 } from "@shared/tacons";
 import {
   LINK_COLUMN,
+  PROGRESS_COLUMN,
   SOURCE_PERMISSIONS,
   audiencePosition,
   audienceStudioPosition,
@@ -316,7 +317,44 @@ export async function loadRows(runtime: Runtime, source: string[]): Promise<Row[
 
   const rows = records.map((record) => rowFrom(record, runtime));
   runtime.rows.set(key, rows);
+
+  // `finished.assignment.block` reads the row a `choice from` field picked,
+  // and expressions can't wait for a load - so the stores our own rows point
+  // into come in with them. The cache above stops this going round in circles.
+  if (source.length === 1) {
+    for (const field of storeDef(install.manifest, storeName)?.fields ?? []) {
+      if (field.from) await loadRows(runtime, field.from.store);
+    }
+  }
   return rows;
+}
+
+/**
+ * Reads through a `choice from` field: `assignment` in `finished` holds a row
+ * id of `assignment`, and `rest` is read from that row - through another
+ * `choice from` field in it, if `rest` goes on. Undefined when `field` isn't
+ * a `choice from` field, so the path is read the ordinary way.
+ */
+function readThrough(
+  runtime: Runtime,
+  storeName: string,
+  fieldName: string,
+  id: unknown,
+  rest: string[],
+): { value: unknown } | undefined {
+  const field = storeDef(runtime.install.manifest, storeName)?.fields.find((entry) => entry.name === fieldName);
+  if (!field?.from || rest.length === 0) return undefined;
+  const picked = (runtime.rows.get(field.from.store.join(".")) ?? []).find(
+    (row) => id !== null && id !== undefined && id !== "" && String(row.id) === String(id),
+  );
+  if (!picked) return { value: undefined };
+  if (rest.length >= 2 && field.from.store.length === 1) {
+    const deeper = readThrough(runtime, field.from.store[0], rest[0], picked[rest[0]], rest.slice(1));
+    if (deeper) return deeper;
+  }
+  let value: unknown = picked;
+  for (const key of rest) value = value && typeof value === "object" ? (value as Row)[key] : undefined;
+  return { value };
 }
 
 /** Preloads every store an expression or widget could touch. */
@@ -474,6 +512,8 @@ export function contextFor(
       const number = Number(id);
       return Number.isFinite(number) ? runtime.people.get(number) : undefined;
     },
+    // Only our own stores' fields can be read through; a borrowed value's rows aren't ours.
+    through: prefix.length === 0 ? (store, field, id, rest) => readThrough(runtime, store, field, id, rest) : undefined,
     row: options.row ?? null,
     rowAliases: [],
     records: (source) => {
@@ -768,7 +808,20 @@ export type WidgetLocation = { page?: string; panel?: string; position?: string 
 /** A list as it sits on a page, `show if` and all. */
 type ListOnPage = Extract<Widget, { kind: "list" }>;
 
-function columnLabel(store: StoreDef | undefined, key: string): { label: string; type: FieldType | "text" | "link" } {
+type ColumnType = FieldType | "text" | "link" | "progress";
+
+function columnLabel(store: StoreDef | undefined, key: string, manifest?: Manifest): { label: string; type: ColumnType } {
+  if (key === PROGRESS_COLUMN) return { label: "Progress", type: "progress" };
+  // `assignment.block`: labelled and shown like the picked row's own field.
+  const [first, ...rest] = key.split(".");
+  if (rest.length > 0 && manifest) {
+    const field = store?.fields.find((entry) => entry.name === first);
+    const source = field?.from?.store.length === 1 ? storeDef(manifest, field.from.store[0]) : undefined;
+    if (field?.from && source) {
+      const inner = columnLabel(source, rest.join("."), manifest);
+      return { label: `${field.label}: ${inner.label}`, type: inner.type };
+    }
+  }
   if (key === "created") return { label: "When", type: "date" };
   if (key === "by") return { label: "By", type: "text" };
   // `byId` is shown as the person it points at; `id` as the number it is.
@@ -780,13 +833,21 @@ function columnLabel(store: StoreDef | undefined, key: string): { label: string;
   return { label: key.replace(/[_-]/g, " ").replace(/^./, (letter) => letter.toUpperCase()), type: "text" };
 }
 
-function cellText(value: unknown, type: FieldType | "text" | "link", runtime: Runtime): string {
+function cellText(value: unknown, type: ColumnType, runtime: Runtime): string {
   if (type === "person") {
     const id = Number(value);
     if (Number.isFinite(id) && runtime.people.has(id)) return runtime.people.get(id)!;
     return display(value);
   }
   return display(value);
+}
+
+/** "Draft 2 · Quest": the fields a `choice from` shows, joined. */
+function choiceLabel(from: NonNullable<StoreField["from"]>, row: Row): string {
+  return [from.field, ...(from.also ?? [])]
+    .map((name) => display(row[name]))
+    .filter(Boolean)
+    .join(" · ");
 }
 
 /**
@@ -798,7 +859,7 @@ async function choiceLabels(runtime: Runtime, field: StoreField): Promise<Map<st
   const labels = new Map<string, string>();
   if (!field.from) return labels;
   for (const row of await loadRows(runtime, field.from.store)) {
-    labels.set(String(row.id), display(row[field.from.field]));
+    labels.set(String(row.id), choiceLabel(field.from, row));
   }
   return labels;
 }
@@ -813,7 +874,7 @@ export async function choicesFor(runtime: Runtime, field: StoreField): Promise<V
   const aliases = [from.store[from.store.length - 1], "row", "it"];
   return rows
     .filter((row) => matches(from.where, { ...contextFor(runtime), row, rowAliases: aliases }))
-    .map((row) => ({ value: String(row.id), label: display(row[from.field]) || `#${String(row.id)}` }));
+    .map((row) => ({ value: String(row.id), label: choiceLabel(from, row) || `#${String(row.id)}` }));
 }
 
 /** The day a value falls on: a day as it is, a saved moment in the academy's zone. */
@@ -855,7 +916,7 @@ function groupLabel(
   }
   const own = labels.get(level.field);
   if (own) return own.get(String(value)) || "None";
-  const { type } = columnLabel(store, level.field);
+  const { type } = columnLabel(store, level.field, runtime.install.manifest);
   return cellText(value, type, runtime) || "None";
 }
 
@@ -928,12 +989,26 @@ async function renderList(
     ? rows.filter((row) => matches(widget.where, { ...contextFor(runtime), row, rowAliases: aliases }))
     : rows;
 
-  const sorted = [...filtered];
+  // A list's `value` lines, worked out for each row: `each` is that row.
+  const values = widget.values ?? [];
+  const withValues = (row: Row): Row => {
+    if (values.length === 0) return row;
+    const out: Row = { ...row };
+    const context = { ...contextFor(runtime), row, rowAliases: aliases, each: row };
+    for (const entry of values) out[entry.name] = evaluate(entry.expr, context);
+    return out;
+  };
+
+  // Sorting a-z by a value needs every row's value; otherwise only the rows shown.
+  const sortsByValue = widget.sort === "az" && values.some((entry) => entry.name === widget.columns[0]);
+  let sorted = sortsByValue ? filtered.map(withValues) : [...filtered];
   if (widget.sort === "oldest") sorted.reverse();
   if (widget.sort === "az") {
     const first = widget.columns[0];
-    sorted.sort((a, b) => display(a[first]).localeCompare(display(b[first])));
+    sorted.sort((a, b) => display(a[first]).localeCompare(display(b[first]), undefined, { numeric: true }));
   }
+  sorted = sorted.slice(0, widget.limit);
+  if (!sortsByValue) sorted = sorted.map(withValues);
 
   // `choice from` fields hold a row id; they're shown as that row's title.
   const labels = new Map<string, Map<string, string>>();
@@ -944,29 +1019,50 @@ async function renderList(
     }
   }
 
-  const columns: ViewColumn[] = widget.columns.map((key) => ({ key, ...columnLabel(store, key) }));
+  const manifest = runtime.install.manifest;
+  const columns: ViewColumn[] = widget.columns.map((key) => ({ key, ...columnLabel(store, key, manifest) }));
   const user = runtime.user;
   const removeAny =
     ownStore && widget.allowRemove.length > 0 && audienceAllows(widget.allowRemove, user, runtime.held);
   const removeOwn = ownStore && Boolean(widget.removeOwn) && user !== null;
   const linked = ownStore && widget.columns.includes(LINK_COLUMN);
   const groupBy = widget.groupBy ?? [];
+  const totals = widget.totals ?? [];
 
-  const viewRows: ViewRow[] = sorted.slice(0, widget.limit).map((row) => {
+  // Columns and folders that read through a `choice from` field, `assignment.block`.
+  const throughKeys = ownStore
+    ? [...widget.columns, ...groupBy.map((level) => level.field)].filter((key) => key.includes("."))
+    : [];
+  const valueOf = (row: Row, key: string): unknown => {
+    if (!throughKeys.includes(key)) return row[key];
+    const [field, ...rest] = key.split(".");
+    return readThrough(runtime, storeName!, field, row[field], rest)?.value;
+  };
+
+  const viewRows: ViewRow[] = sorted.map((row) => {
+    const shown: Row = { ...row };
+    for (const key of throughKeys) shown[key] = valueOf(row, key);
+    const bar = widget.progress
+      ? { value: toNumber(shown[widget.progress.value]), goal: toNumber(shown[widget.progress.goal]) }
+      : null;
+
     const view: ViewRow = {
       id: (row.id as number | string) ?? "",
       cells: Object.fromEntries(
         columns.map((column) => {
           if (column.type === "link") return [column.key, "Open"];
+          if (column.type === "progress") return [column.key, bar ? `${display(bar.value)} of ${display(bar.goal)}` : ""];
           const own = labels.get(column.key);
-          if (own) return [column.key, own.get(String(row[column.key])) ?? display(row[column.key])];
-          return [column.key, cellText(row[column.key], column.type, runtime)];
+          if (own) return [column.key, own.get(String(shown[column.key])) ?? display(shown[column.key])];
+          return [column.key, cellText(shown[column.key], column.type, runtime)];
         }),
       ),
       canRemove: removeAny || (removeOwn && Number(row.byId) === user!.id),
     };
     if (linked) view.link = recordHref(runtime, row.id, locationQuery(location, index));
-    if (groupBy.length > 0) view.groups = groupBy.map((level) => groupLabel(runtime, level, row, store, labels));
+    if (groupBy.length > 0) view.groups = groupBy.map((level) => groupLabel(runtime, level, shown, store, labels));
+    if (bar) view.progress = bar;
+    if (totals.length > 0) view.numbers = Object.fromEntries(totals.map((key) => [key, toNumber(shown[key])]));
     return view;
   });
 
@@ -979,6 +1075,7 @@ async function renderList(
     store: storeName,
     problem,
     ...(groupBy.length > 0 ? { groupDepth: groupBy.length } : {}),
+    ...(totals.length > 0 ? { totals } : {}),
   };
 }
 
@@ -1107,6 +1204,7 @@ async function preloadForWidgets(runtime: Runtime, widgets: Widget[]): Promise<v
       if (widget.source.kind === "store") sources.push(widget.source.store);
       await preloadForCondition(runtime, widget.where, []);
       await preloadForExpr(runtime, widget.titleTemplate ?? null, []);
+      for (const entry of widget.values ?? []) await preloadForExpr(runtime, entry.expr, []);
     }
     if (widget.kind === "stat") {
       await preloadForExpr(runtime, widget.value, []);
@@ -1204,21 +1302,27 @@ export async function renderRecord(
     fields: string[];
     title: Expr | null;
     back: { label: string; href: string } | null;
+    /** Columns to leave out: a list's own `value` names. */
+    skip?: string[];
   },
 ): Promise<TaconRecordView | null> {
   const store = storeDef(runtime.install.manifest, options.store);
   if (!store) return null;
   const row = options.row;
 
+  // A list's `value` and `progress` columns belong to the list, not the record.
   const keys = (options.fields.length > 0 ? options.fields : [...store.fields.map((field) => field.name), "by", "created"])
-    .filter((key) => key !== LINK_COLUMN);
+    .filter((key) => key !== LINK_COLUMN && key !== PROGRESS_COLUMN && !(options.skip ?? []).includes(key));
+  await loadRows(runtime, [options.store]); // and the stores its choices point into
   const fields: TaconRecordView["fields"] = [];
   for (const key of keys) {
-    const { label, type } = columnLabel(store, key);
+    const { label, type } = columnLabel(store, key, runtime.install.manifest);
+    const [first, ...rest] = key.split(".");
+    const raw = rest.length > 0 ? readThrough(runtime, options.store, first, row[first], rest)?.value : row[key];
     const field = store.fields.find((entry) => entry.name === key);
-    let value = cellText(row[key], type, runtime);
+    let value = cellText(raw, type, runtime);
     if (field?.from) value = (await choiceLabels(runtime, field)).get(String(row[key])) ?? value;
-    fields.push({ key, label, type: type === "link" ? "text" : type, value });
+    fields.push({ key, label, type: type === "link" || type === "progress" ? "text" : type, value });
   }
 
   let title = store.label;
@@ -1519,8 +1623,16 @@ export async function formValues(
   const sets = form.sets ?? [];
   if (sets.length > 0) {
     await preloadForExprList(runtime, sets.map((entry) => entry.value));
-    const context = contextFor(runtime);
-    for (const entry of sets) values[entry.field] = evaluate(entry.value, context);
+    // The answers so far are the row being made, so `set block
+    // finished.assignment.block` can read the assignment that was picked.
+    // Loading the form's own store also loads the stores its choices point into.
+    await loadRows(runtime, [form.into]);
+    const answers: Row = { ...values };
+    for (const entry of sets) {
+      const value = evaluate(entry.value, { ...contextFor(runtime), row: answers, rowAliases: [form.into, "row", "it"] });
+      values[entry.field] = value;
+      answers[entry.field] = value;
+    }
   }
   return values;
 }
