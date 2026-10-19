@@ -12,6 +12,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { EagleLogo } from "@/components/EagleLogo";
 import {
   ArrowLeft,
   BadgeCheck,
@@ -20,7 +21,6 @@ import {
   KeyRound,
   Megaphone,
   Rocket,
-  Terminal,
   Users,
 } from "lucide-react";
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
@@ -84,7 +84,7 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gray-900 px-4 py-12">
       <div className="mb-6 flex items-center gap-2 text-gray-100">
-        <Terminal className="h-5 w-5" />
+        <EagleLogo className="h-8 w-8" />
         <span className="text-lg font-bold tracking-tight">Eagle Bot — dev portal</span>
       </div>
       <div className="w-full max-w-md">{children}</div>
@@ -309,7 +309,7 @@ function PortalHome({
     <div className="min-h-screen bg-gray-900 text-gray-100">
       <header className="border-b border-gray-800 px-5 py-3">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3">
-          <Terminal className="h-5 w-5" />
+          <EagleLogo className="h-8 w-8" />
           <span className="font-bold tracking-tight">Dev portal</span>
           <span className="text-sm text-gray-400">
             {dev.name}

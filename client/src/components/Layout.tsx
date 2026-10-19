@@ -22,6 +22,7 @@ import { useSession } from "@/lib/session";
 import { Avatar, Chip } from "./ui";
 import { StudioSwitcher } from "./StudioSwitcher";
 import { PortalNotices } from "./PortalNotices";
+import { EagleLogo } from "./EagleLogo";
 import type { TaconNavEntry } from "@shared/tacons/view";
 
 const NAV = [
@@ -180,9 +181,7 @@ export function Layout({ children }: { children: ReactNode }) {
           {academy.logoUrl ? (
             <img src={academy.logoUrl} alt="" className="h-9 w-9 rounded-lg object-contain" />
           ) : (
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
-              {academy.name.slice(0, 2).toUpperCase()}
-            </div>
+            <EagleLogo className="h-9 w-9" />
           )}
           <div className="min-w-0">
             <div className="truncate text-sm font-bold text-gray-900">{academy.name}</div>
@@ -222,9 +221,7 @@ export function Layout({ children }: { children: ReactNode }) {
             {academy.logoUrl ? (
               <img src={academy.logoUrl} alt="" className="h-8 w-8 rounded-lg object-contain" />
             ) : (
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-600 text-xs font-bold text-white">
-                {academy.name.slice(0, 2).toUpperCase()}
-              </div>
+              <EagleLogo className="h-8 w-8" />
             )}
             <div className="min-w-0">
               <div className="truncate text-sm font-bold text-gray-900">{academy.name}</div>

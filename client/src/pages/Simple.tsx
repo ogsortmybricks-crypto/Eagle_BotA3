@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { EagleLogo } from "@/components/EagleLogo";
 import { Link, Redirect, Route, Switch, useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -57,9 +58,7 @@ export function SimpleApp() {
           {academy.logoUrl ? (
             <img src={academy.logoUrl} alt="" className="h-11 w-11 rounded-xl bg-white/90 p-1" />
           ) : (
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 text-lg font-bold">
-              {academy.name.slice(0, 1)}
-            </div>
+            <EagleLogo className="h-11 w-11" />
           )}
           <div className="min-w-0 flex-1">
             <div className="text-xl font-bold leading-tight">{studio?.name ?? academy.name}</div>

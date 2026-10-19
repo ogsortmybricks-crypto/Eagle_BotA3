@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Feather, Plus, Trash2, Upload, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Plus, Trash2, Upload, X } from "lucide-react";
+import { EagleLogo } from "@/components/EagleLogo";
 import { apiGet, apiPost, fileToDataUrl } from "@/lib/api";
 import { applyPalette, type Palette } from "@/lib/session";
 import { Banner, Spinner } from "@/components/ui";
@@ -177,9 +178,7 @@ export function Setup() {
     <div className="min-h-screen bg-gradient-to-b from-brand-50 to-white px-4 py-10">
       <div className="mx-auto max-w-2xl">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-600 shadow-lg shadow-brand-600/20">
-            <Feather className="h-7 w-7 text-white" />
-          </div>
+          <EagleLogo className="mx-auto mb-4 h-16 w-16" />
           <h1 className="text-2xl font-bold tracking-tight text-gray-900">Set up Eagle Bot</h1>
           <p className="mt-1.5 text-sm text-gray-600">
             One place where each studio's rules, Town Hall decisions, and elections stay current.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Feather } from "lucide-react";
+import { EagleLogo } from "@/components/EagleLogo";
 import { apiGet, apiPost } from "@/lib/api";
 import { applyPalette, type Palette } from "@/lib/session";
 import { Banner, Chip, LoadingPage, Spinner } from "@/components/ui";
@@ -83,9 +83,7 @@ export function AcceptInvite({ token }: { token: string }) {
               className="mx-auto mb-4 h-14 w-14 rounded-2xl object-contain"
             />
           ) : (
-            <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-brand-600 shadow-lg shadow-brand-600/20">
-              <Feather className="h-7 w-7 text-white" />
-            </div>
+            <EagleLogo className="mx-auto mb-4 h-16 w-16" />
           )}
           <h1 className="text-xl font-bold tracking-tight text-gray-900">
             Join {invite.academy.name}

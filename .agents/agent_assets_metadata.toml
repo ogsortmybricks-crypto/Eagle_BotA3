@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "AERrEeUrCWTva8QisJE6l"
+uri = "file://client/public/eagle-bot-logo.png"
+type = "image"
+title = "Transparent Eagle Bot logo"
+description = "Blue-and-gold eagle with a transparent background, used for the app’s default branding and favicon."
+logical_id = "d613eb90-99d1-4437-a29e-19e14ce828c9"
+content_hash = "sha256:53e6cbdab425b93e1af1d859f580ed6aa1bd30d57118a0119a8694d9c6d1ffae"
+size = 134472
+mtime_ms = 1792430191173
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:e84284cc-69f6-4ee6-afd3-8ff22fd4f465/d613eb90-99d1-4437-a29e-19e14ce828c9/a3fc5084-0755-44dc-8aa8-1ab6e290c1d4"
+storage_version_token = "1792430264049164"
+content_type = "image/png"
