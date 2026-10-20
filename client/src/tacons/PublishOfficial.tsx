@@ -6,6 +6,8 @@ import { Banner, Spinner } from "@/components/ui";
 import { compile, type Diagnostic } from "@shared/tacons";
 import type { TaconValidation } from "@shared/tacons/validation";
 import { importTaconFolder, type PackageFile } from "./importFolder";
+import { CodeFilesEditor } from "./CodeFilesEditor";
+import type { CodeFiles } from "@shared/tacons/programs";
 
 type Props = { onClose: () => void; onDone: () => void };
 type ServerResult = { source: string; result: TaconValidation };
@@ -27,6 +29,7 @@ export default function PublishOfficial({ onClose, onDone }: Props) {
   const selectionId = useRef(0);
   const sourceRef = useRef("");
   const [source, setSource] = useState("");
+  const [codeFiles, setCodeFiles] = useState<CodeFiles>({});
   const [sourcePath, setSourcePath] = useState("");
   const [ignoredFiles, setIgnoredFiles] = useState(0);
   const [sourceRevision, setSourceRevision] = useState(0);
@@ -66,6 +69,7 @@ export default function PublishOfficial({ onClose, onDone }: Props) {
       try {
         const result = await apiPost<TaconValidation>("/portal/tacons/validate", {
           source: candidate,
+          codeFiles,
         });
         if (requestId.current !== currentRequest || sourceRef.current !== candidate) return;
         setValidation({ source: candidate, result });
@@ -85,10 +89,10 @@ export default function PublishOfficial({ onClose, onDone }: Props) {
       }
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [source, sourceRevision, importPending]);
+  }, [source, sourceRevision, importPending, codeFiles]);
 
   const publish = useMutation({
-    mutationFn: () => apiPost("/portal/tacons/publish", { source, tagline, description }),
+    mutationFn: () => apiPost("/portal/tacons/publish", { source, codeFiles, tagline, description }),
     onSuccess: onDone,
   });
 
@@ -107,6 +111,7 @@ export default function PublishOfficial({ onClose, onDone }: Props) {
       if (selectionId.current !== currentSelection) return;
       sourceRef.current = imported.source;
       setSource(imported.source);
+      setCodeFiles(imported.codeFiles);
       setSourcePath(imported.sourcePath);
       setIgnoredFiles(imported.ignoredFiles);
       setTagline("");
@@ -150,7 +155,7 @@ export default function PublishOfficial({ onClose, onDone }: Props) {
               Publish a Tac-On
             </h2>
             <p className="mt-1 max-w-xl text-sm leading-5 text-gray-500">
-              Choose the package folder. We find its single TacScript file and send only that source
+              Choose the package folder. We find its TacScript source and browser code files
               for validation and publication.
             </p>
           </div>
@@ -202,7 +207,7 @@ export default function PublishOfficial({ onClose, onDone }: Props) {
                   Start with a package folder
                 </div>
                 <p className="mt-1 max-w-lg text-sm leading-5 text-gray-500">
-                  README, tests, and other files stay on your device. Only the one .tacon source is
+                  README and unrelated files stay on your device. TacScript and local browser code are
                   submitted.
                 </p>
               </div>
@@ -283,6 +288,14 @@ export default function PublishOfficial({ onClose, onDone }: Props) {
             </div>
           </div>
 
+          <CodeFilesEditor files={codeFiles} disabled={importPending || publish.isPending} onChange={next => {
+            requestId.current += 1;
+            setCodeFiles(next);
+            setValidation(null);
+            setValidationPending(false);
+            setValidationError(null);
+            setSourceRevision(revision => revision + 1);
+          }} />
           {source && (
             <div className="space-y-4">
               <div className="flex items-center justify-between gap-3">

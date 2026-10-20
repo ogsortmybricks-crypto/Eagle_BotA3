@@ -280,9 +280,14 @@ A single `.tacon` file
 can also be selected if your browser doesn't support folders.
 
 The portal loads the source, shows its file name and package metadata, and
-checks it with both the browser and server compiler. Only the `.tacon` source is
-published; README files, tests, and other folder files are ignored. Source editing
-remains available as an advanced option.
+checks it with both the browser and server compiler. The `.tacon` source and
+local JavaScript/TypeScript/CSS files are published together; README files,
+dependencies, and unrelated file types are ignored. Both publishing flows have
+source and code-file editors. Executable code runs only in the isolated browser
+program runtime, never on the server.
+
+For a working package, the program SDK and its security limits, see
+[JavaScript and TypeScript programs](Tac-On-Programs.md).
 
 Fix any file/line diagnostics before publishing. This does not bypass the
 compiler or install a Tac-On automatically. If the live app reports that

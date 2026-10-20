@@ -112,7 +112,8 @@ export type ViewWidget =
   | ViewButton
   | ViewCelebrate
   | ViewProgress
-  | ViewExtension;
+  | ViewExtension
+  | import("./programs").ViewProgram;
 
 export type ViewPerson = { id: number; name: string };
 

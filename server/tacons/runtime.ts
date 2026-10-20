@@ -1188,6 +1188,20 @@ async function renderWidget(
         allowed: audienceAllows(widget.allow, runtime.user, runtime.held),
       };
 
+    case "program": {
+      if (!runtime.user) return { kind: "note", tone: "warning", text: "Sign in to run this Tac-On program." };
+      const bundle = runtime.install.manifest.programBundles?.[widget.entry];
+      if (!bundle) return { kind: "note", tone: "warning", text: `Program "${widget.entry}" is missing. Its developer must republish the complete package.` };
+      const data: Record<string, Row[]> = {};
+      for (const store of widget.reads) {
+        data[store] = await loadRows(runtime, [store]);
+      }
+      if (JSON.stringify(data).length > 500_000) return { kind: "note", tone: "warning", text: "This program's declared data exceeds the 500 KB view limit. Reduce the data in its stores." };
+      return {
+        ...widget, index, bundle, data,
+        viewer: { id: runtime.user.id, name: runtime.user.name, role: runtime.user.role },
+      };
+    }
     case "extension":
       return renderExtensionWidget(runtime, widget, index);
   }

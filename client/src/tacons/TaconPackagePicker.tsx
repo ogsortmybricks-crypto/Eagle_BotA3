@@ -61,7 +61,7 @@ export function TaconPackagePicker({
             Upload a Tac-On package folder
           </div>
           <p className="mt-1 max-w-xl text-xs leading-5 text-gray-600">
-            Only its single .tacon source is read. Other files stay on this device and are not uploaded or run.
+            Reads one .tacon source plus local JavaScript, TypeScript and CSS files. README, dependencies and unrelated files stay on this device.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">

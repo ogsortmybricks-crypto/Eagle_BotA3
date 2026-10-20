@@ -2,10 +2,8 @@
  * Drawing a Tac-On.
  *
  * The server sends a finished view - strings, rows, fields - and this walks it.
- * There is no interpreter here and no Tac-On code in the browser: the widget
- * kinds below are the entire surface a Tac-On can paint with, which is what
- * makes installing one safe and what makes every Tac-On look like it belongs
- * in the app rather than like a page someone pasted in.
+ * Native widgets render here. Optional package programs run only in the
+ * separate opaque-origin iframe/worker, never in this authenticated window.
  */
 
 import { useEffect, useState, type ReactNode } from "react";
@@ -16,6 +14,7 @@ import { apiDelete, apiPost } from "@/lib/api";
 import { useDateFormat } from "@/lib/session";
 import { Banner, Spinner } from "@/components/ui";
 import { ExtensionView } from "./Extensions";
+import { ProgramView } from "./Program";
 import type {
   TaconView,
   ViewCelebrate,
@@ -110,6 +109,8 @@ function WidgetView({
 
     case "extension":
       return <ExtensionView {...widget} target={target} />;
+    case "program":
+      return <ProgramView program={widget} target={target} />;
   }
 }
 

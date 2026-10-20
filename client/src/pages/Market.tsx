@@ -41,6 +41,7 @@ import { StudioPicker } from "@/components/StudioPicker";
 import { audiencePosition, audienceStudioPosition, type Manifest } from "@shared/tacons";
 import { KIND_LABELS } from "@shared/calendar";
 import { describeExtensions } from "@shared/tacons/extension-registry";
+import { ProgramPermissions } from "@/tacons/ProgramPermissions";
 
 type Listing = {
   id: number;
@@ -392,6 +393,7 @@ export function TaconDetail({ slug }: { slug: string }) {
                     happens
                   </li>
                 ))}
+                <ProgramPermissions manifest={manifest} />
                 {describeExtensions(manifest).map((description, index) => (
                   <li key={`extension-${index}`}>
                     <span className="font-medium text-gray-800">{description.title}</span> — {description.description}
@@ -628,6 +630,7 @@ function InstallModal({
       <div className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
 
+        <ProgramPermissions manifest={manifest} />
         {manifest.needs.length > 0 && (
           <Banner tone="warning" title="This Tac-On reads">
             <ul className="mt-1 list-disc pl-4">

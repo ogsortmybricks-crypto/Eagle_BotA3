@@ -23,3 +23,14 @@ runtime when finished if the application itself is still Node-only.
 **Cleanup:** Wait for Chromium to exit before deleting its profile directory,
 and allow deletion retries. Removing the profile immediately after SIGTERM can
 raise ENOTEMPTY even when all browser assertions passed.
+
+Opaque sandbox iframes may be cross-process targets missing from the current
+CDP page's frame/context tree. An undefined frame evaluation is not proof that
+the program failed.
+
+**Why:** The program can render correctly while the basic CDP client is looking
+in the wrong process.
+
+**How to apply:** Attach to the iframe's proper CDP target or use testing-only
+browser process-isolation settings. Never add `allow-same-origin` or weaken the
+application's sandbox/CSP merely to make its contents easier to inspect.

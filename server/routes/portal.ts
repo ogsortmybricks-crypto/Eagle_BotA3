@@ -18,6 +18,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "../db";
+import { compilePackage, codeFilesSchema } from "../tacons/program-build";
 import {
   TACON_VISIBILITIES,
   portalDevs,
@@ -396,6 +397,7 @@ portalRouter.get("/tacons", requirePortal, async (_req, res) => {
 });
 
 const officialSchema = z.object({
+  codeFiles: codeFilesSchema,
   source: z.string().min(10).max(200_000),
   tagline: z.string().max(200).optional(),
   description: z.string().max(20_000).optional(),
@@ -404,12 +406,12 @@ const officialSchema = z.object({
 });
 
 /** Check the selected package against the server's compiler without publishing. */
-portalRouter.post("/tacons/validate", requirePortal, (req, res) => {
-  const parsed = officialSchema.pick({ source: true }).safeParse(req.body);
+portalRouter.post("/tacons/validate", requirePortal, async (req, res) => {
+  const parsed = officialSchema.pick({ source: true, codeFiles: true }).safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Choose a .tacon file." });
   }
-  const result = compile(parsed.data.source);
+  const result = await compilePackage(parsed.data.source, parsed.data.codeFiles);
   return res.json({
     ok: result.ok,
     diagnostics: result.diagnostics,
@@ -428,7 +430,7 @@ portalRouter.post("/tacons/publish", requirePortal, async (req, res) => {
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the form." });
   }
 
-  const result = compile(parsed.data.source);
+  const result = await compilePackage(parsed.data.source, parsed.data.codeFiles);
   if (!result.ok) {
     return res.status(400).json({
       error: "This Tac-On doesn't compile yet.",

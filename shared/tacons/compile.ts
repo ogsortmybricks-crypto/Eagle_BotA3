@@ -16,6 +16,7 @@
 import { joined, parse, text, words, type Node, type Token } from "./parse";
 import { parseCondition, parseExpr, parseTemplate } from "./expr";
 import { compilerExtensions } from "./extension-registry";
+import { compileProgram } from "./programs";
 import {
   AGGREGATES,
   AUDIENCES,
@@ -549,6 +550,8 @@ function compileWidgetBody(ctx: Ctx, node: Node): Widget | null {
 
     case "divider":
       return { kind: "divider" };
+    case "program":
+      return compileProgram(node, new Set(ctx.stores.keys()), ctx.diagnostics);
 
     case "stat": {
       const label = text(node.args[0]) || "Total";

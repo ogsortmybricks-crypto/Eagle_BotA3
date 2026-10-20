@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; worker-src blob:; style-src 'unsafe-inline'; connect-src 'none'; img-src data:; base-uri 'none'; form-action 'none'; object-src 'none'; frame-src 'none'">
+  <title>Tac-On isolated program</title>
+  <style>body{font:14px system-ui,sans-serif;color:#172033;margin:16px}button,input,select,textarea{font:inherit}button{cursor:pointer}input,textarea,select{max-width:100%;box-sizing:border-box}button{padding:8px 14px}#error{color:#b91c1c;white-space:pre-wrap}</style>
+</head>
+<body>
+  <div id="root"></div><p id="error" role="alert"></p>
+  <script>
+  (() => {
+    "use strict";
+    // This file must never execute package code with Eagle Bot's real origin,
+    // even if someone embeds it directly without the sandbox attribute.
+    if (self.origin !== "null") {
+      document.getElementById("error").textContent = "Programs must be opened in Eagle Bot's isolated sandbox.";
+      return;
+    }
+    let worker, token, initialized = false, stopped = false, lastHeartbeat = Date.now();
+    const root = document.getElementById("root");
+    const fail = message => {
+      if (stopped) return;
+      stopped = true;
+      if (worker) worker.terminate();
+      document.getElementById("error").textContent = String(message).slice(0, 1000);
+      parent.postMessage({type:"error", token, error:String(message).slice(0,1000)}, "*");
+    };
+    const tags = new Set("div main section article header footer h1 h2 h3 h4 h5 h6 p span strong em small ul ol li table thead tbody tr th td label input textarea select option button form hr br progress meter details summary pre code".split(" "));
+    const attributes = new Set("id name value checked placeholder min max step disabled class aria-label rows cols selected multiple required for colspan rowspan open title".split(" "));
+    const inputTypes = new Set("text number checkbox radio date time datetime-local email search range color".split(" "));
+    function values() {
+      const output = Object.create(null);
+      for (const element of root.querySelectorAll("input[name],select[name],textarea[name]")) {
+        output[element.name] = element.type === "checkbox" ? element.checked :
+          element.type === "number" && element.value !== "" ? Number(element.value) : element.value;
+      }
+      return output;
+    }
+    function render(tree) {
+      let count = 0;
+      function node(spec, depth) {
+        if (++count > 1500 || depth > 25) throw new Error("Program UI is too large or deeply nested.");
+        if (typeof spec === "string" || typeof spec === "number") return document.createTextNode(String(spec));
+        if (!spec || !tags.has(spec.tag)) throw new Error("Unsupported UI element. Scripts, links, frames, images and raw HTML are not allowed.");
+        const element = document.createElement(spec.tag);
+        for (const [key, value] of Object.entries(spec.attrs || {})) {
+          if (key === "type" && spec.tag === "input") {
+            if (!inputTypes.has(value)) throw new Error("Unsupported input type.");
+            element.type = value;
+          } else if (attributes.has(key) && ["string","number","boolean"].includes(typeof value)) {
+            if (typeof value === "boolean") { if (value) element.setAttribute(key, ""); }
+            else element.setAttribute(key, String(value));
+          } else throw new Error("Unsupported UI attribute: " + key);
+        }
+        if (spec.tag === "button") element.type = "button";
+        if (spec.text !== undefined) element.textContent = String(spec.text);
+        for (const child of spec.children || []) element.append(node(child, depth + 1));
+        if (Object.hasOwn(spec.attrs || {}, "value") && "value" in element) element.value = String(spec.attrs.value);
+        if (spec.tag === "form") element.addEventListener("submit", event => event.preventDefault());
+        if (typeof spec.action === "string") {
+          const kind = spec.tag === "form" ? "submit" : ["input","select","textarea"].includes(spec.tag) ? "change" : "click";
+          element.addEventListener(kind, event => {
+            event.preventDefault();
+            worker.postMessage({type:"event", name:spec.action, values:values(), value:element.value});
+          });
+        }
+        return element;
+      }
+      root.replaceChildren(node(tree, 0));
+    }
+    function workerBoot() {
+      const send = self.postMessage.bind(self), handlers = new Map(), pending = new Map();
+      let sequence = 0;
+      setInterval(() => send({type:"heartbeat"}), 500);
+      const report = error => send({type:"error", error:String(error && error.message || error)});
+      self.addEventListener("error", event => report(event.error || event.message));
+      self.addEventListener("unhandledrejection", event => report(event.reason));
+      self.onmessage = async event => {
+        const message = event.data;
+        try {
+          if (message.type === "start") {
+            const eagle = Object.freeze({
+              Fragment: "div",
+              h(tag, props, ...items) {
+                const children = items.flat(20).filter(item => item !== null && item !== undefined && typeof item !== "boolean");
+                if (typeof tag === "function") return tag({...props, children});
+                const {action, text, className, ...attrs} = props || {};
+                if (className !== undefined) attrs.class = className;
+                return {tag, action, text, attrs, children};
+              },
+              viewer: Object.freeze(message.viewer),
+              read(store) {
+                if (!Object.hasOwn(message.data, store)) throw new Error("Declare read " + store + " in Tac-Script first.");
+                return structuredClone(message.data[store]);
+              },
+              render(tree) { send({type:"render", tree}); },
+              styles(css) { send({type:"styles", css:String(css)}); },
+              on(name, handler) {
+                if (typeof handler !== "function") throw new Error("An event handler must be a function.");
+                handlers.set(name, handler);
+              },
+              submit(index, values) {
+                return new Promise((resolve,reject) => {
+                  const id = ++sequence;
+                  const timer = setTimeout(() => { pending.delete(id); reject(new Error("Tac-On request timed out.")); }, 15000);
+                  pending.set(id, {resolve,reject,timer});
+                  send({type:"rpc", id, method:"submit", index, values});
+                });
+              },
+            });
+            const entry = self.TaconProgram?.default || self.TaconProgram;
+            if (typeof entry !== "function") throw new Error("The entry file must export default function(eagle).");
+            await entry(eagle);
+          } else if (message.type === "event") {
+            await handlers.get(message.name)?.({values:message.values, value:message.value});
+          } else if (message.type === "reply") {
+            const request = pending.get(message.id);
+            if (request) {
+              clearTimeout(request.timer); pending.delete(message.id);
+              message.error ? request.reject(new Error(message.error)) : request.resolve(message.result);
+            }
+          }
+        } catch (error) { report(error); }
+      };
+    }
+    window.addEventListener("message", event => {
+      if (event.source !== parent) return;
+      const message = event.data;
+      if (!initialized && message?.type === "init" && typeof message.token === "string" && typeof message.bundle === "string") {
+        initialized = true; token = message.token;
+        const url = URL.createObjectURL(new Blob(["(" + workerBoot.toString() + ")();\n" + message.bundle], {type:"text/javascript"}));
+        worker = new Worker(url); URL.revokeObjectURL(url);
+        worker.onerror = event => fail(event.message || "Program worker failed.");
+        let messageWindow = Date.now(), messages = 0;
+        worker.onmessage = event => {
+          if (stopped) return;
+          const reply = event.data;
+          try {
+            if (reply.type === "heartbeat") { lastHeartbeat = Date.now(); return; }
+            if (Date.now() - messageWindow >= 1000) { messageWindow = Date.now(); messages = 0; }
+            if (++messages > 100) throw new Error("Program message rate exceeded 100 messages per second.");
+            if (JSON.stringify(reply).length > 500000) throw new Error("Program message exceeds 500 KB.");
+            if (reply.type === "render") render(reply.tree);
+            else if (reply.type === "styles") {
+              if (reply.css.length > 50000) throw new Error("Program CSS exceeds 50 KB.");
+              let style = document.getElementById("program-style");
+              if (!style) { style = document.createElement("style"); style.id = "program-style"; document.head.append(style); }
+              style.textContent = reply.css;
+            } else if (reply.type === "rpc") parent.postMessage({...reply, token}, "*");
+            else if (reply.type === "error") fail(reply.error);
+          } catch (error) { fail(error.message); }
+        };
+        worker.postMessage({type:"start", data:message.data, viewer:message.viewer});
+        setInterval(() => { if (Date.now() - lastHeartbeat > 5000) fail("Program stopped responding. Reload the page to restart it."); }, 1000);
+      } else if (initialized && message?.token === token && message.type === "reply") {
+        worker.postMessage(message);
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

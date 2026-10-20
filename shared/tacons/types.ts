@@ -322,6 +322,7 @@ export type Widget = (
   | CelebrateWidget
   | ProgressWidget
   | import("./extensions").ExtensionWidget
+  | import("./programs").ProgramWidget
 ) &
   Visibility;
 
@@ -510,6 +511,9 @@ export type CalendarFeedDef = {
 };
 
 export type Manifest = {
+  /** Package-owned code, compiled on the server and executed only in a browser sandbox. */
+  codeFiles?: import("./programs").CodeFiles;
+  programBundles?: Record<string, string>;
   slug: string;
   name: string;
   version: string;

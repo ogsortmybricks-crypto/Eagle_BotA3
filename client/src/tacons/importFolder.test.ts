@@ -25,7 +25,7 @@ function file(path: string, text = source): PackageFile {
   };
 }
 
-test("a package folder imports only its .tacon source and compiles", async () => {
+test("a package folder imports Tac-Script and local code without executing either", async () => {
   const result = await importTaconFolder([
     file("sample-notes/sample-notes.tacon"),
     file("sample-notes/README.md", "# Notes"),
@@ -34,7 +34,8 @@ test("a package folder imports only its .tacon source and compiles", async () =>
   assert.equal(result.source, source);
   assert.equal(result.sourcePath, "sample-notes/sample-notes.tacon");
   assert.equal(result.folderName, "sample-notes");
-  assert.equal(result.ignoredFiles, 2);
+  assert.equal(result.ignoredFiles, 1);
+  assert.equal(Object.keys(result.codeFiles).length, 1);
   const checked = compile(result.source);
   assert.equal(checked.ok, true, JSON.stringify(checked.diagnostics));
   if (checked.ok) assert.equal(checked.manifest.pages[0].name, "notes");

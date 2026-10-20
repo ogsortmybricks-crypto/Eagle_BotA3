@@ -1,4 +1,5 @@
-/** Reads a Tac-On package without uploading or executing unrelated files. */
+/** Read source and package-owned browser code; never execute imported files. */
+import { codeFilesError, validCodePath, type CodeFiles } from "@shared/tacons/programs";
 export type PackageFile = {
   name: string;
   size: number;
@@ -7,6 +8,7 @@ export type PackageFile = {
 };
 
 export type ImportedTacon = {
+  codeFiles: CodeFiles;
   source: string;
   sourcePath: string;
   folderName: string;
@@ -44,10 +46,30 @@ export async function importTaconFolder(files: Iterable<PackageFile>): Promise<I
     throw new Error("The .tacon file is too large. The limit is 200 KB.");
   }
   const sourcePath = file.webkitRelativePath || file.name;
+  const base = sourcePath.includes("/") ? sourcePath.slice(0, sourcePath.lastIndexOf("/") + 1) : "";
+  const codeFiles: CodeFiles = Object.create(null);
+  let included = 1;
+  let codeBytes = 0;
+  for (const candidate of selected) {
+    const path = candidate.webkitRelativePath || candidate.name;
+    if (!path.startsWith(base)) continue;
+    const relative = path.slice(base.length);
+    if (relative.split("/").some(part => IGNORED_DIRECTORIES.has(part)) || !validCodePath(relative)) continue;
+    if (++included > 41) throw new Error("A package may contain at most 40 code files.");
+    codeBytes += candidate.size;
+    if (codeBytes > 500_000) throw new Error("The combined code files exceed 500 KB.");
+    if (Object.hasOwn(codeFiles, relative)) throw new Error(`Duplicate code path "${relative}".`);
+    const contents = await candidate.text();
+    if (contents.includes("\0")) throw new Error(`"${relative}" must be a plain-text code file.`);
+    codeFiles[relative] = contents.replace(/^\uFEFF/, "");
+  }
+  const invalid = codeFilesError(codeFiles);
+  if (invalid) throw new Error(invalid);
   return {
+    codeFiles,
     source,
     sourcePath,
     folderName: sourcePath.includes("/") ? sourcePath.split("/")[0] : file.name,
-    ignoredFiles: selected.length - 1,
+    ignoredFiles: selected.length - included,
   };
 }

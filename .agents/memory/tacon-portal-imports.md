@@ -21,7 +21,14 @@ Importing a folder alone cannot add language features to an old published
 engine.
 
 **How to apply:** Keep folder selection as the primary portal publishing path.
-Accept one declarative TacScript source, not arbitrary executable folder code.
+Accept one Tac-Script source plus package-owned JS/TS browser modules and CSS.
+Never execute uploaded code on the Eagle Bot server or in its authenticated
+window. Programs use isolated workers and the permission-checked native form
+bridge; do not add a Node.js execution shortcut.
+
+**Why:** The user selected JavaScript/TypeScript support to move feature logic
+out of the limited Tac-Script language while retaining Tac-Script integration.
+
 Keep server compilation authoritative. When new syntax fails only on the live
 site, compare the published compiler with the workspace before weakening
 validation or rewriting a valid package.

@@ -39,6 +39,8 @@ import {
 } from "@/components/ui";
 import { compile, type Diagnostic, type Manifest } from "@shared/tacons";
 import { TaconPackagePicker } from "@/tacons/TaconPackagePicker";
+import { CodeFilesEditor } from "@/tacons/CodeFilesEditor";
+import type { CodeFiles } from "@shared/tacons/programs";
 
 type MyTacon = {
   id: number;
@@ -54,6 +56,7 @@ type MyTacon = {
   installCount: number;
   version: string | null;
   source: string;
+  codeFiles?: CodeFiles;
   updatedAt: string;
   stats: {
     active: number;
@@ -255,6 +258,7 @@ export function DevMenu() {
 function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [source, setSource] = useState(tacon?.source || STARTER_SOURCE);
+  const [codeFiles, setCodeFiles] = useState<CodeFiles>(tacon?.codeFiles ?? {});
   const [tagline, setTagline] = useState(tacon?.tagline ?? "");
   const [description, setDescription] = useState(tacon?.description ?? "");
   const [changelog, setChangelog] = useState("");
@@ -276,6 +280,7 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
     mutationFn: () =>
       apiPost<{ version: { version: string } }>("/tacons/dev/publish", {
         source,
+        codeFiles,
         tagline: tagline.trim() || undefined,
         description: description.trim() || undefined,
         changelog: changelog.trim() || undefined,
@@ -317,7 +322,7 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
       wide
       onClose={onClose}
       title={tacon ? `Edit ${tacon.name}` : "New Tac-On"}
-      description="TacScript. The panel on the right tells you what it will do."
+      description="Tac-Script connects your pages and permissions. Optional JS/TS files provide isolated custom logic and UI."
       footer={
         <>
           {tacon && (
@@ -380,6 +385,7 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
           onReadingChange={setImportPending}
           onImported={(result) => {
             setSource(result.source);
+            setCodeFiles(result.codeFiles);
             setImportError(null);
             setError(null);
             publish.reset();
@@ -389,6 +395,7 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
 
         <div className="grid gap-4 lg:grid-cols-[1.35fr_1fr]">
           <div>
+            <CodeFilesEditor files={codeFiles} onChange={setCodeFiles} disabled={publish.isPending || importPending} />
             <label className="label" htmlFor="source">
               Source
             </label>

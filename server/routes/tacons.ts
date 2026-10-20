@@ -71,6 +71,7 @@ import {
 import { checkVerifyCode, VerifyCodeError } from "../personal";
 import { heldNames, heldPositions, setPositionsArchived, syncPositions } from "../tacons/positions";
 import { registerExtensionRoutes } from "../tacons/extensions";
+import { compilePackage, codeFilesSchema } from "../tacons/program-build";
 
 export const taconsRouter = Router();
 registerExtensionRoutes(taconsRouter);
@@ -908,10 +909,10 @@ taconsRouter.get("/devs/:handle", requireAuth, async (req, res) => {
 
 /** Compiles without saving. This is what the editor calls as you type. */
 taconsRouter.post("/dev/check", requirePermission("tacons.develop"), async (req, res) => {
-  const parsed = z.object({ source: z.string().max(200_000) }).safeParse(req.body);
+  const parsed = z.object({ source: z.string().max(200_000), codeFiles: codeFilesSchema }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: "Send the source." });
 
-  const result = compile(parsed.data.source);
+  const result = await compilePackage(parsed.data.source, parsed.data.codeFiles);
   res.json({
     ok: result.ok,
     diagnostics: result.diagnostics,
@@ -958,6 +959,7 @@ taconsRouter.get("/dev/mine", requirePermission("tacons.develop"), async (req, r
         installCount: row.tacon.installCount,
         version: row.version?.version ?? null,
         source: row.version?.source ?? "",
+        codeFiles: (row.version?.manifest as Manifest | undefined)?.codeFiles ?? {},
         updatedAt: row.tacon.updatedAt,
         stats: {
           /** Installs still in place, across every academy on this Eagle Bot. */
@@ -975,6 +977,7 @@ taconsRouter.get("/dev/mine", requirePermission("tacons.develop"), async (req, r
 });
 
 const publishSchema = z.object({
+  codeFiles: codeFilesSchema,
   source: z.string().min(10).max(200_000),
   tagline: z.string().max(200).optional(),
   description: z.string().max(20_000).optional(),
@@ -996,7 +999,7 @@ taconsRouter.post("/dev/publish", requirePermission("tacons.develop"), async (re
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the form." });
   }
 
-  const result = compile(parsed.data.source);
+  const result = await compilePackage(parsed.data.source, parsed.data.codeFiles);
   if (!result.ok) {
     return res.status(400).json({
       error: "This Tac-On doesn't compile yet.",
