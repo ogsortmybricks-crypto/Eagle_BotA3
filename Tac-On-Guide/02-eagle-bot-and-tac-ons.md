@@ -28,8 +28,8 @@ still learners.
 
 ## What a Tac-On is
 
-An add-on, like a browser extension. One `.tacon` file, written in TacScript,
-can add:
+An add-on with one `.tacon` file written in TacScript, optionally accompanied by
+local JavaScript/TypeScript/CSS files. It can add:
 
 | It can add | Where it shows up |
 | --- | --- |
@@ -40,11 +40,14 @@ can add:
 | **Reactions** (`when`) | Run by themselves when something happens, such as an election being certified |
 | **Stores** | Its own tables of records |
 | **Settings** | Questions the installing admin answers, such as a number or a choice |
+| **Programs** | Sandboxed custom UI and logic on pages, panels and desks |
 
 It can **read** Eagle Bot's wiki rules and sections, positions, elections,
 meetings, people, activity log and studio calendar (what's coming up, and the
 sessions with their Quests). It can **write** only to its own stores and
-to the activity log.
+to the activity log. Reviewed native setup can create/synchronize its declared
+positions; approved events write scoped extension inboxes, not another
+Tac-On's business records directly.
 
 ## The safety model
 
@@ -52,8 +55,9 @@ This is why an academy can install a Tac-On written by a fourteen-year-old at
 another school. The engine enforces every rule. Don't design anything that
 depends on getting around one.
 
-- **Nothing executes.** A Tac-On describes what to show and record. The server
-  compiles and renders it. No code from a Tac-On ever runs.
+- **Uploaded code is not host code.** TacScript describes native behavior.
+  Optional JS/TS runs in an isolated browser worker through a restricted SDK,
+  never as trusted server code. It has no host DOM, session secrets or Node APIs.
 - **Reads are scoped to the viewer.** Every read uses the permissions and
   studio of the person looking, not the author's or the installer's. A learner
   who can't see the activity log gets an empty list with a note saying why.
@@ -61,13 +65,19 @@ depends on getting around one.
   create elections, change people, add to or change the studio calendar, send
   email or reach another academy. Its `calendar` entries are its own records,
   drawn on the calendar read-only.
-- **Reach is declared.** Every Eagle Bot source a Tac-On lists is shown to the
-  admin before they install it.
-- **Failures are quiet.** A broken reaction fails silently and never breaks
-  somebody's election.
+- **Reach is declared and reviewed.** New contracts request capabilities and
+  setup, which admins approve separately from ordinary settings. View,
+  configure, read and write audiences are independently enforced.
+- **Failures are contained.** A broken reaction must not break somebody's
+  election. Setup failures are visible, rolled back and retryable; programs
+  must handle SDK errors instead of treating failure as success.
 - **Borrowing is read-only.** One Tac-On can read what another `provides`, in
   the same academy. If the other isn't installed, its lists come back empty and
-  its numbers read zero.
+  its numbers read zero. Separately, reviewed contracts can exchange declared,
+  scoped events when both installations permit it.
+
+Read [programs and engine contracts](08-programs-and-engine-contracts.md) for
+the complete authoring example, permission review and remaining security limits.
 
 ## Who's who
 
@@ -94,6 +104,10 @@ belongs to whoever publishes it first.
 Two studio installs keep completely separate records. Studios in a group share
 one install's records. Settings are filled in at install and can be changed
 later.
+
+New contracts also require review of capabilities and any proposed native setup
+before mutation. Optional setup starts off. Authorized configurers can change
+declared settings later even when their role cannot open the extension UI.
 
 **Update.** Nothing changes for an academy until its admin presses **Update**.
 A Town Hall must never find a page changed mid-meeting. So **every new version

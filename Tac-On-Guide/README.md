@@ -4,7 +4,8 @@ You're building **Tac-Ons**: add-ons for **Eagle Bot**, a web app that helps
 learners at Acton Academies run their own studio. That means their Contract
 (rules), Town Halls, elections and positions. A Tac-On adds pages, panels,
 positions, calendar entries and automatic reactions to Eagle Bot. It's written in a small,
-safe language called **TacScript**.
+safe language called **TacScript**, with optional sandboxed JavaScript/TypeScript
+programs for custom logic and UI.
 
 ## Your job
 
@@ -26,6 +27,7 @@ safe language called **TacScript**.
 | [01-acton-philosophy.md](01-acton-philosophy.md) | Who the users are and what they believe. Every design decision starts here. |
 | [02-eagle-bot-and-tac-ons.md](02-eagle-bot-and-tac-ons.md) | What Eagle Bot does, what a Tac-On is, the safety rules, and the publish/install/update lifecycle |
 | [03-tacscript-reference.md](03-tacscript-reference.md) | The whole language |
+| [08-programs-and-engine-contracts.md](08-programs-and-engine-contracts.md) | JS/TS package example, SDK 1, reviewed permissions/setup, configuration and inter-Tac-On events |
 | [04-designing-great-tac-ons.md](04-designing-great-tac-ons.md) | How to decide what to build, patterns that work, a complete worked example |
 | [05-limits-and-workarounds.md](05-limits-and-workarounds.md) | What the engine can't do yet, and how to build around each gap |
 | [06-testing-and-publishing.md](06-testing-and-publishing.md) | Checking, testing as different people, versioning, publishing |
@@ -48,5 +50,6 @@ safe language called **TacScript**.
   anything here, the compiler is right. Note the difference in
   `ENGINE-REQUESTS.md`.
 - **Tac-Ons live in the app.** A Tac-On exists only once it's published through
-  Eagle Bot's Dev menu or dev portal. Keep your `.tacon` source files in your
-  own workspace. They're never added to Eagle Bot's code.
+  Eagle Bot's Dev menu or dev portal. Keep your `.tacon` and local program files
+  in your own workspace and upload the folder. They're never added to Eagle
+  Bot's main code.

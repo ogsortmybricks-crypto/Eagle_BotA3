@@ -4,7 +4,7 @@ There's no separate test environment. You test in the real app, safely, by
 publishing as a **Draft**, which only your own academy can see.
 
 How much of this you do yourself depends on the access the user gives you.
-Without an Eagle Bot account, hand the user the `.tacon` file and the steps
+Without an Eagle Bot account, hand the user the complete package folder and the steps
 below, and ask them to paste back exactly what the compiler and pages show.
 
 ## 1. Compile
@@ -12,6 +12,12 @@ below, and ask them to paste back exactly what the compiler and pages show.
 **Dev menu → New Tac-On** (or open your existing one). Paste the source. The
 right-hand panel compiles as you type and lists every problem with its line
 number.
+
+For packages with code, use **Upload folder** in the learner Dev menu or the
+developer portal, then edit the imported `.tacon` and local code files there.
+The server compiler validates the complete package at publication; a native
+source preview alone does not verify code imports. See
+[the complete package example](08-programs-and-engine-contracts.md).
 
 - Fix every **error**. It won't publish otherwise.
 - Read every **warning**. Several real bugs only show up as warnings, such as
@@ -32,6 +38,10 @@ the first version other academies will see.
 
 As an admin: **Tac-Ons → Market**, open your Tac-On, **Install** into one
 studio (not academy-wide), and fill in its settings.
+
+For an `engine 1` package, review the four access audiences, approve only needed
+capabilities and choose optional setup deliberately. Check both opt-in and
+opt-out, retry setup without duplicate positions, and inspect any failed result.
 
 ## 4. Use it as each kind of person
 
@@ -72,6 +82,11 @@ Then:
 - **Try the update path.** With records saved, bump the version, publish,
   press **Update** on the install, and check the old records still display
   correctly.
+- **Test the new contract.** Try view/configure/read/write as separate roles,
+  including a configurer denied private UI access. Revoke a capability and check
+  future calls fail. Test discovery, targeted/broadcast events, cursor reads and
+  denied academy/studio recipients. Check JS/TS UI at desktop and phone sizes.
+  Disable/re-enable with saved records and verify data/settings survive updates.
 
 ## 5. Publish for real
 
@@ -85,8 +100,10 @@ Once it works:
 
 **Official Tac-Ons**, from Eagle Bot's maintainers, are published from the dev
 portal (Ctrl+D): **Tac-Ons → Publish official → Choose folder**. Select a folder
-with exactly one `.tacon` file. Only that file is published. READMEs and other
-files are ignored.
+with exactly one `.tacon` file and its local program files. Supported
+JS/TS/JSX/TSX/CSS files are published with the immutable version; READMEs,
+dependency directories and build output are not program source. The learner
+Dev menu also supports folder upload/editing for non-official packages.
 
 ## Versioning rules
 

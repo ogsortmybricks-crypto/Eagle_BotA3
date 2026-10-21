@@ -7,11 +7,16 @@
 
 *The language Tac-Ons are written in. For learners with dev status.*
 
-TacScript is small on purpose. There are no loops, no variables you assign to,
-and no way to run arbitrary code — a Tac-On *describes* what to show and what to
-record, and Eagle Bot does the rest. That is what makes it safe for an academy
-to install something a stranger wrote, and it means the whole language fits on
-this page.
+TacScript itself is small on purpose: it describes native UI, records and
+actions rather than offering general-purpose loops or mutable variables.
+For custom logic, a `program` widget can load package-local JavaScript or
+TypeScript in the sandbox. This does not grant unrestricted host/server access.
+
+The new `engine 1` block declares independent view/configure/read/write
+audiences, requested capabilities, emitted/listened topics and reviewed native
+setup. Top-level `tags` adds package metadata. See the complete syntax and
+working JS/TS example in [programs and engine contracts](08-programs-and-engine-contracts.md).
+Older native packages need no rewrite but gain no new event APIs automatically.
 
 Everything you write looks like one of two shapes:
 

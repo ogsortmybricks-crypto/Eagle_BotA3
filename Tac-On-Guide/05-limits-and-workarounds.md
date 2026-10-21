@@ -1,5 +1,12 @@
 # Limits and workarounds
 
+**Scope:** the native TacScript expression/widget limits below do not mean
+JavaScript/TypeScript programs lack loops, variables or custom calculations.
+For sandboxed programs, independent access policies and reviewed event APIs,
+read [programs and engine contracts](08-programs-and-engine-contracts.md).
+Programs still cannot bypass native confirmation checks, obtain host secrets,
+run Node.js or act as persistent background jobs.
+
 What the engine can't do yet, checked against the compiler and runtime in
 October 2026. **Build around these now**, and add the ones that cost you
 something real to `ENGINE-REQUESTS.md`.
@@ -128,7 +135,9 @@ it a different shape, such as one record per week instead of one per action.
 - **Positions:** your own Tac-On's can be read (`position.x`); the studio's
   existing positions can be used as an audience
   (`show to position "Town Hall Leader"`) but not read.
-- **Other Tac-Ons:** only what they `provides`, read-only, same academy.
+- **Other Tac-Ons' records:** only what they `provides`, read-only, in an
+  accessible academy/studio scope. Reviewed SDK contracts also support declared
+  targeted/broadcast events; these do not directly edit a recipient's records.
 
 ### No files or images, and only links to your own records
 
