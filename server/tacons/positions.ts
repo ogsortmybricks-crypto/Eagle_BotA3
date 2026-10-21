@@ -38,9 +38,12 @@ export async function syncPositions(options: {
   taconName: string;
   manifest: Manifest;
   actorUserId: number | null;
+  database?: Pick<typeof db, "select" | "insert" | "update">;
+  log?: boolean;
 }): Promise<void> {
   const { install, taconName, manifest } = options;
-  const existing = await ownedBy(install.id);
+  const database = options.database ?? db;
+  const existing = await database.select().from(positions).where(eq(positions.taconInstallId, install.id));
   const declared = new Set(manifest.positions.map((def) => def.name));
 
   for (const def of manifest.positions) {
@@ -59,11 +62,11 @@ export async function syncPositions(options: {
 
     const found = existing.find((row) => row.taconPosition === def.name);
     if (found) {
-      await db.update(positions).set(values).where(eq(positions.id, found.id));
+      await database.update(positions).set(values).where(eq(positions.id, found.id));
       continue;
     }
 
-    const [created] = await db
+    const [created] = await database
       .insert(positions)
       .values({
         ...values,
@@ -74,7 +77,7 @@ export async function syncPositions(options: {
       })
       .returning();
 
-    await logActivity({
+    if (options.log !== false) await logActivity({
       academyId: install.academyId,
       studioId: install.studioId,
       actorUserId: options.actorUserId,
@@ -88,7 +91,7 @@ export async function syncPositions(options: {
 
   const dropped = existing.filter((row) => !declared.has(row.taconPosition ?? "") && !row.archived);
   if (dropped.length > 0) {
-    await db
+    await database
       .update(positions)
       .set({ archived: true, updatedAt: new Date() })
       .where(inArray(positions.id, dropped.map((row) => row.id)));
@@ -99,15 +102,15 @@ export async function syncPositions(options: {
  * Hides an install's positions (turned off, or about to be removed) or brings
  * them back (turned on again). Holders are left exactly as they were.
  */
-export async function setPositionsArchived(install: TaconInstall, manifest: Manifest, archived: boolean) {
-  const rows = await ownedBy(install.id);
+export async function setPositionsArchived(install: TaconInstall, manifest: Manifest, archived: boolean, database: Pick<typeof db, "select" | "update"> = db) {
+  const rows = await database.select().from(positions).where(eq(positions.taconInstallId, install.id));
   // Only the ones the running version declares come back; a dropped one stays archived.
   const declared = new Set(manifest.positions.map((def) => def.name));
   const ids = rows
     .filter((row) => archived || declared.has(row.taconPosition ?? ""))
     .map((row) => row.id);
   if (ids.length === 0) return 0;
-  await db
+  await database
     .update(positions)
     .set({ archived, updatedAt: new Date() })
     .where(inArray(positions.id, ids));

@@ -118,6 +118,7 @@ export type ViewWidget =
 export type ViewPerson = { id: number; name: string };
 
 export type TaconView = {
+  canConfigure?: boolean;
   install: {
     id: number;
     slug: string;
@@ -141,6 +142,7 @@ export type TaconView = {
 };
 
 export type TaconPanelView = {
+  canConfigure?: boolean;
   installId: number;
   taconName: string;
   title: string;
@@ -151,6 +153,7 @@ export type TaconPanelView = {
 
 /** What a Tac-On shows the holder of one of its positions, on the Positions page. */
 export type TaconDeskView = {
+  canConfigure?: boolean;
   installId: number;
   taconName: string;
   /** The position's name in the Tac-On's source - how a submission finds it. */

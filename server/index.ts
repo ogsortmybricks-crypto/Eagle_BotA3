@@ -10,6 +10,7 @@ import { pool } from "./db";
 import { attachUser } from "./auth";
 import { apiRouter } from "./routes";
 import { recoverStuckJobs } from "./ai/jobs";
+import { TaconAccessError } from "./tacons/governance";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -54,10 +55,10 @@ async function main() {
 
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    console.error("[server] unhandled error", error);
+    if (!(error instanceof TaconAccessError)) console.error("[server] unhandled error", error);
     if (res.headersSent) return;
     const message = error instanceof Error ? error.message : "Something went wrong.";
-    res.status(500).json({ error: message });
+    res.status(error instanceof TaconAccessError ? error.status : 500).json({ error: message });
   });
 
   if (env.isProduction) {

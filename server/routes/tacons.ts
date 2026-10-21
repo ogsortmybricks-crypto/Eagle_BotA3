@@ -22,6 +22,8 @@ import {
   taconRecords,
   taconVersions,
   tacons,
+  taconControls,
+  positions,
   users,
 } from "@shared/schema";
 import { requireAuth, requirePermission } from "../auth";
@@ -72,9 +74,13 @@ import { checkVerifyCode, VerifyCodeError } from "../personal";
 import { heldNames, heldPositions, setPositionsArchived, syncPositions } from "../tacons/positions";
 import { registerExtensionRoutes } from "../tacons/extensions";
 import { compilePackage, codeFilesSchema } from "../tacons/program-build";
+import { controlsFor, demandAccess, installAllows, TaconAccessError } from "../tacons/governance";
+import { checkedSettings, executeSetup, reviewSchema, validateReview } from "../tacons/lifecycle";
+import { registerGovernanceRoutes } from "../tacons/governance-routes";
 
 export const taconsRouter = Router();
 registerExtensionRoutes(taconsRouter);
+registerGovernanceRoutes(taconsRouter);
 
 /* -------------------------------------------------------------------------- */
 /*  What this academy is running                                               */
@@ -87,6 +93,11 @@ taconsRouter.get("/nav", requirePermission("tacons.use"), async (req, res) => {
   const entries: TaconNavEntry[] = [];
 
   for (const entry of installs) {
+    if (entry.manifest.settings.length && await installAllows(entry, req.user!, "configure")) {
+      entries.push({ installId: entry.install.id, page: "__configuration", label: `${entry.tacon.name} settings`,
+        icon: entry.manifest.icon, taconName: entry.tacon.name, studioName: entry.studioName });
+    }
+    if (!(await installAllows(entry, req.user!, "view"))) continue;
     const mine = new Set(held.get(entry.install.id)?.keys() ?? []);
     // A title with `{...}` in it is worked out for this person, which needs
     // the Tac-On's runtime - so only Tac-Ons that have one pay for it.
@@ -124,6 +135,7 @@ taconsRouter.get("/panels/:host", requirePermission("tacons.use"), async (req, r
   const panels: TaconPanelView[] = [];
 
   for (const entry of installs) {
+    if (!(await installAllows(entry, req.user!, "view"))) continue;
     const mine = new Set(held.get(entry.install.id)?.keys() ?? []);
     const matching = entry.manifest.panels.filter(
       (panel) => panel.host === host && audienceAllows(panel.showTo, req.user!, mine),
@@ -155,6 +167,7 @@ taconsRouter.get("/desks", requirePermission("tacons.use"), async (req, res) => 
   const desks: TaconDeskView[] = [];
 
   for (const entry of installs) {
+    if (!(await installAllows(entry, req.user!, "view"))) continue;
     const mine = held.get(entry.install.id);
     if (!mine) continue;
     const defs = entry.manifest.positions.filter((def) => mine.has(def.name) && def.widgets.length > 0);
@@ -181,7 +194,10 @@ taconsRouter.get("/desks", requirePermission("tacons.use"), async (req, res) => 
 /* -------------------------------------------------------------------------- */
 
 async function openInstall(req: Request): Promise<LoadedInstall | null> {
-  return loadInstall(req.user!.academyId, Number(req.params.installId), req.scope);
+  const entry = await loadInstall(req.user!.academyId, Number(req.params.installId), req.scope);
+  if (entry && !entry.install.enabled) return null;
+  if (entry && !(await installAllows(entry, req.user!, "view"))) throw new TaconAccessError("This Tac-On is not open to your role or positions.");
+  return entry;
 }
 
 taconsRouter.get("/view/:installId/:page", requirePermission("tacons.use"), async (req, res) => {
@@ -270,6 +286,7 @@ taconsRouter.post("/view/:installId/submit", requirePermission("tacons.use"), as
   ) {
     return res.status(403).json({ error: "Your role can't add to this." });
   }
+  demandAccess(runtime, "write");
   if (!(await widgetVisible(runtime, form))) {
     return res.status(403).json({ error: "This form isn't open right now." });
   }
@@ -394,6 +411,8 @@ taconsRouter.delete(
       scope: req.scope,
       install: entry,
     });
+    demandAccess(runtime, "read");
+    demandAccess(runtime, "write");
     const row = rowFrom(record, runtime);
     let allowed = false;
     for (const { owner, widget } of listsOf(entry.manifest)) {
@@ -450,6 +469,7 @@ taconsRouter.get(
       scope: req.scope,
       install: entry,
     });
+    demandAccess(runtime, "read");
     const row = rowFrom(record, runtime);
     let view: TaconRecordView | null = null;
 
@@ -592,7 +612,7 @@ taconsRouter.get("/market/:slug", requirePermission("tacons.market"), async (req
 /*  Installing                                                                 */
 /* -------------------------------------------------------------------------- */
 
-const installSchema = z.object({
+const installSchema = reviewSchema.extend({
   /** Omit for the studio being viewed; null installs it academy-wide. */
   studioId: z.number().int().nullable().optional(),
   settings: z.record(z.unknown()).default({}),
@@ -622,6 +642,9 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
     .where(eq(taconVersions.id, tacon.latestVersionId))
     .limit(1);
   const manifest = version ? readManifest(version) : null;
+  if (!version || !manifest) throw new TaconAccessError("This version has no compatible, validated manifest.", 409);
+  const selectedSetup = validateReview(manifest, version.id, parsed.data);
+  const installSettings = checkedSettings(manifest, parsed.data.settings);
 
   const scope = requireScope(req);
   let studioId: number | null;
@@ -637,6 +660,7 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
     throw error;
   }
   const result = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`tacon-install:${academyId}:${tacon.id}:${studioId}`}))`);
     const [existing] = await tx
       .select()
       .from(taconInstalls)
@@ -656,30 +680,32 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
         studioId,
         taconId: tacon.id,
         versionId: tacon.latestVersionId!,
-        settings: parsed.data.settings as Record<string, unknown>,
+        settings: installSettings,
         installedBy: req.user!.id,
       })
       .returning();
+    await tx.insert(taconControls).values({ installId: install.id, grants: parsed.data.grants, selectedSetup });
     return { existing: null, install };
   });
   if (result.existing) {
-    return res.status(409).json({ error: `${tacon.name} is already installed here.` });
+    const existing = await loadInstall(academyId, result.existing.id, req.scope);
+    if (!existing) throw new TaconAccessError("That installation is not accessible.", 404);
+    const setupResults = await executeSetup(existing, req.user!.id);
+    return res.json({ install: existing.install, setupResults, alreadyInstalled: true, message: "Existing installation, settings and data preserved." });
   }
   const install = result.install!;
 
   await db
     .update(tacons)
     .set({
-      installCount: tacon.installCount + 1,
-      activeInstalls: tacon.activeInstalls + 1,
+      installCount: sql`${tacons.installCount} + 1`,
+      activeInstalls: sql`${tacons.activeInstalls} + 1`,
     })
     .where(eq(tacons.id, tacon.id));
 
   // Positions the Tac-On declares go onto the Positions page now, in the studio
   // it was installed into.
-  if (manifest) {
-    await syncPositions({ install, taconName: tacon.name, manifest, actorUserId: req.user!.id });
-  }
+  const setupResults = await executeSetup({ install, tacon, version, manifest, studioName: null }, req.user!.id);
 
   await logActivity({
     academyId,
@@ -692,7 +718,7 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
     metadata: { slug: tacon.slug },
   });
 
-  res.status(201).json({ install });
+  res.status(201).json({ install, setupResults });
 });
 
 const installPatchSchema = z.object({
@@ -709,24 +735,27 @@ taconsRouter.patch("/installs/:id", requirePermission("tacons.install"), async (
 
   const patch: Record<string, unknown> = { updatedAt: new Date() };
   if (parsed.data.enabled !== undefined) patch.enabled = parsed.data.enabled;
-  if (parsed.data.settings !== undefined) patch.settings = parsed.data.settings;
+  if (parsed.data.settings !== undefined) patch.settings = checkedSettings(entry.manifest, parsed.data.settings);
 
-  const [install] = await db
-    .update(taconInstalls)
-    .set(patch)
-    .where(eq(taconInstalls.id, entry.install.id))
-    .returning();
-
-  // A Tac-On that is off has no positions to hold; its holders come back with it.
-  if (parsed.data.enabled !== undefined && parsed.data.enabled !== entry.install.enabled) {
-    await setPositionsArchived(install, entry.manifest, !parsed.data.enabled);
-  }
+  const install = await db.transaction(async tx => {
+    await tx.execute(sql`select pg_advisory_xact_lock(72421, ${entry.install.id})`);
+    const [current] = await tx.select().from(taconInstalls).where(eq(taconInstalls.id, entry.install.id)).for("update");
+    if (!current || current.versionId !== entry.install.versionId) throw new TaconAccessError("The installation changed. Reload before editing it.", 409);
+    const [saved] = await tx.update(taconInstalls).set(patch).where(eq(taconInstalls.id, current.id)).returning();
+    if (parsed.data.enabled !== undefined) {
+      const controls = await controlsFor(saved.id, entry.manifest);
+      await setPositionsArchived(saved, entry.manifest, !saved.enabled || !controls.selectedSetup.includes("positions"), tx);
+    }
+    return saved;
+  });
 
   res.json({ install });
 });
 
 /** Takes an install to the Tac-On's latest published version. */
 taconsRouter.post("/installs/:id/update", requirePermission("tacons.install"), async (req, res) => {
+  const review = reviewSchema.safeParse(req.body ?? {});
+  if (!review.success) throw new TaconAccessError("Invalid update review.", 400);
   const entry = await loadInstall(req.user!.academyId, Number(req.params.id), req.scope);
   if (!entry) return res.status(404).json({ error: "That isn't installed here." });
   if (!entry.tacon.latestVersionId || entry.tacon.latestVersionId === entry.install.versionId) {
@@ -740,22 +769,22 @@ taconsRouter.post("/installs/:id/update", requirePermission("tacons.install"), a
     .limit(1);
   if (!version) return res.status(409).json({ error: "There's no newer version to move to." });
   const nextManifest = readManifest(version);
+  if (!nextManifest) throw new TaconAccessError("The newer manifest is incompatible.", 409);
+  const selectedSetup = validateReview(nextManifest, version.id, review.data);
+  if (entry.manifest.contract && review.data.reviewedVersionId !== version.id) throw new TaconAccessError("Review the new version before updating.", 409);
 
-  const [updated] = await db
-    .update(taconInstalls)
-    .set({ versionId: version.id, updatedAt: new Date() })
-    .where(eq(taconInstalls.id, entry.install.id))
-    .returning();
+  const updated = await db.transaction(async tx => {
+    await tx.execute(sql`select pg_advisory_xact_lock(72421, ${entry.install.id})`);
+    const [current] = await tx.select().from(taconInstalls).where(eq(taconInstalls.id, entry.install.id)).for("update");
+    if (!current || current.versionId !== entry.install.versionId) throw new TaconAccessError("This installation changed. Reload before updating.", 409);
+    const [updated] = await tx.update(taconInstalls).set({ versionId: version.id, updatedAt: new Date() }).where(eq(taconInstalls.id, current.id)).returning();
+    await tx.insert(taconControls).values({ installId: current.id, grants: review.data.grants, selectedSetup })
+      .onConflictDoUpdate({ target: taconControls.installId, set: { grants: review.data.grants, selectedSetup, setupResults: [], updatedAt: new Date() } });
+    return updated;
+  });
 
   const manifest = nextManifest;
-  if (manifest) {
-    await syncPositions({
-      install: updated,
-      taconName: entry.tacon.name,
-      manifest,
-      actorUserId: req.user!.id,
-    });
-  }
+  const setupResults = await executeSetup({ ...entry, install: updated, manifest, version }, req.user!.id);
 
   await logActivity({
     academyId: req.user!.academyId,
@@ -767,29 +796,23 @@ taconsRouter.post("/installs/:id/update", requirePermission("tacons.install"), a
     summary: `${req.user!.name} updated "${entry.tacon.name}" to ${version.version}.`,
   });
 
-  res.json({ ok: true, version: version.version });
+  res.json({ ok: true, version: version.version, setupResults });
 });
 
 taconsRouter.delete("/installs/:id", requirePermission("tacons.install"), async (req, res) => {
   const entry = await loadInstall(req.user!.academyId, Number(req.params.id), req.scope);
   if (!entry) return res.status(404).json({ error: "That isn't installed here." });
 
-  const [{ total }] = await db
-    .select({ total: sql<number>`count(*)` })
-    .from(taconRecords)
-    .where(eq(taconRecords.installId, entry.install.id));
-
-  // Its positions are archived, not deleted: who held them is the studio's
-  // history, not the Tac-On's.
-  const archivedPositions = await setPositionsArchived(entry.install, entry.manifest, true);
-
-  // Uninstalling takes the Tac-On's rows with it, so the count goes in the log
-  // where an admin can find it afterwards.
-  await db.delete(taconInstalls).where(eq(taconInstalls.id, entry.install.id));
-  await db
-    .update(tacons)
-    .set({ activeInstalls: Math.max(0, entry.tacon.activeInstalls - 1) })
-    .where(eq(tacons.id, entry.tacon.id));
+  const { total, archivedPositions } = await db.transaction(async tx => {
+    await tx.execute(sql`select pg_advisory_xact_lock(72421, ${entry.install.id})`);
+    const [current] = await tx.select().from(taconInstalls).where(eq(taconInstalls.id, entry.install.id)).for("update");
+    if (!current) throw new TaconAccessError("This installation was already removed.", 404);
+    const [{ total }] = await tx.select({ total: sql<number>`count(*)` }).from(taconRecords).where(eq(taconRecords.installId, current.id));
+    const archived = await tx.update(positions).set({ archived: true, updatedAt: new Date() }).where(eq(positions.taconInstallId, current.id)).returning({ id: positions.id });
+    await tx.delete(taconInstalls).where(eq(taconInstalls.id, current.id));
+    await tx.update(tacons).set({ activeInstalls: sql`greatest(0, ${tacons.activeInstalls} - 1)` }).where(eq(tacons.id, entry.tacon.id));
+    return { total, archivedPositions: archived.length };
+  });
 
   await logActivity({
     academyId: req.user!.academyId,

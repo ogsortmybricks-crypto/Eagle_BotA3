@@ -22,6 +22,9 @@ export function CodeFilesEditor({ files, onChange, disabled = false }: {
         <p className="mt-2">Your entry exports a default function(eagle). Use eagle.render(tree), eagle.on(name, handler),
           eagle.read(store), and eagle.submit(formIndex, values). Form indexes start at zero and must be declared
           with submit. Secret confirmation codes stay in native forms. Never include API keys or server credentials.</p>
+        <p className="mt-2">For reviewed capabilities and inter-Tac-On events, add an engine 1 block to your Tac-Script.
+          Use eagle.settings for declared public settings, eagle.extensions.discover(), and eagle.events.send/read().
+          See Documentation/Tac-On-Engine.md for the complete contract and working example.</p>
       </details>
       <div className="flex flex-wrap gap-2">
         <input aria-label="New program file path" className="input min-w-0 flex-1" value={newPath} disabled={disabled} onChange={event => setNewPath(event.target.value)} />

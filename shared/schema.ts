@@ -987,6 +987,31 @@ export const taconRecords = pgTable(
   }),
 );
 
+/** Installation approval and overrides, separate from package-owned settings. */
+export const taconControls = pgTable("tacon_controls", {
+  installId: integer("install_id").primaryKey().references(() => taconInstalls.id, { onDelete: "cascade" }),
+  grants: jsonb("grants").$type<string[]>().notNull().default([]),
+  policy: jsonb("policy").$type<Partial<import("./tacons/contract").AccessPolicy>>().notNull().default({}),
+  selectedSetup: jsonb("selected_setup").$type<string[]>().notNull().default([]),
+  setupResults: jsonb("setup_results").$type<import("./tacons/contract").SetupResult[]>().notNull().default([]),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+/** Explicit, bounded inter-extension messages. Never a direct store backdoor. */
+export const taconMessages = pgTable("tacon_messages", {
+  id: serial("id").primaryKey(),
+  academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+  senderId: integer("sender_id").notNull().references(() => taconInstalls.id, { onDelete: "cascade" }),
+  recipientId: integer("recipient_id").notNull().references(() => taconInstalls.id, { onDelete: "cascade" }),
+  actorUserId: integer("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+  topic: text("topic").notNull(),
+  payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+}, t => ({
+  inbox: index("tacon_messages_inbox_idx").on(t.academyId, t.recipientId, t.id),
+  rate: index("tacon_messages_rate_idx").on(t.academyId, t.actorUserId, t.createdAt),
+}));
+
 /* -------------------------------------------------------------------------- */
 /*  The dev portal                                                             */
 /* -------------------------------------------------------------------------- */

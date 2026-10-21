@@ -511,6 +511,9 @@ export type CalendarFeedDef = {
 };
 
 export type Manifest = {
+  formatVersion?: 1 | 2;
+  contract?: import("./contract").ExtensionContract;
+  tags?: string[];
   /** Package-owned code, compiled on the server and executed only in a browser sandbox. */
   codeFiles?: import("./programs").CodeFiles;
   programBundles?: Record<string, string>;

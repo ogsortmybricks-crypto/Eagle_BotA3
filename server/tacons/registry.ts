@@ -20,7 +20,9 @@ import {
   type TaconVersion,
 } from "@shared/schema";
 import { isManifest, type Manifest } from "@shared/tacons";
+import { contractSchema } from "@shared/tacons/contract";
 import type { StudioScope } from "../studio";
+import { studioCircle } from "../studio";
 
 export type LoadedInstall = {
   install: TaconInstall;
@@ -40,6 +42,9 @@ export type LoadedInstall = {
 export function readManifest(version: Pick<TaconVersion, "manifest">): Manifest | null {
   if (!isManifest(version.manifest)) return null;
   const manifest = version.manifest as unknown as Manifest;
+  if (manifest.formatVersion !== undefined && ![1, 2].includes(manifest.formatVersion)) return null;
+  if (manifest.formatVersion === 2 && !manifest.contract) return null;
+  if (manifest.contract && (manifest.formatVersion !== 2 || !contractSchema.safeParse(manifest.contract).success)) return null;
   return { ...manifest, positions: manifest.positions ?? [] };
 }
 
@@ -137,6 +142,7 @@ export async function loadInstall(
     .limit(1);
 
   if (!row) return null;
+  if (row.install.studioId !== null && !scope) return null;
   if (row.install.studioId !== null && scope) {
     const reachable =
       scope.canSeeAll || scope.readableIds.includes(row.install.studioId);
@@ -164,23 +170,17 @@ export async function loadInstall(
 export async function resolveUses(
   academyId: number,
   manifest: Manifest,
+  scope?: StudioScope,
+  anchorStudioId: number | null = null,
 ): Promise<Map<string, LoadedInstall>> {
   const resolved = new Map<string, LoadedInstall>();
   if (manifest.uses.length === 0) return resolved;
 
   const slugs = manifest.uses.map((use) => use.slug);
-  const rows = await db
-    .select({ install: taconInstalls, tacon: tacons, version: taconVersions })
-    .from(taconInstalls)
-    .innerJoin(tacons, eq(tacons.id, taconInstalls.taconId))
-    .innerJoin(taconVersions, eq(taconVersions.id, taconInstalls.versionId))
-    .where(
-      and(
-        eq(taconInstalls.academyId, academyId),
-        eq(taconInstalls.enabled, true),
-        inArray(tacons.slug, slugs),
-      ),
-    );
+  const circle = await studioCircle(anchorStudioId);
+  const candidates = scope ? await visibleInstalls(academyId, scope) :
+    (await allInstalls(academyId)).filter(row => row.install.studioId === null || circle.includes(row.install.studioId));
+  const rows = candidates.filter(row => slugs.includes(row.tacon.slug));
 
   for (const use of manifest.uses) {
     const row = rows.find((entry) => entry.tacon.slug === use.slug);

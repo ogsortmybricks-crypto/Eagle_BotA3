@@ -18,6 +18,8 @@ import { HOOK_EVENTS, matches, type Row } from "@shared/tacons";
 import { studioCircle } from "../studio";
 import { allInstalls, type LoadedInstall } from "./registry";
 import { buildRuntime, contextFor, runActions } from "./runtime";
+import { controlsFor } from "./governance";
+import { granted } from "@shared/tacons/contract";
 
 export type TaconEvent = {
   academyId: number;
@@ -108,6 +110,7 @@ export async function dispatchTaconEvent(event: TaconEvent): Promise<void> {
 
   for (const install of relevant) {
     try {
+      if (!granted(install.manifest, await controlsFor(install.install.id, install.manifest), "host.hooks")) continue;
       await runHooks(academy, settings, install, row, event);
     } catch (error) {
       console.error(`[tacon] ${install.tacon.slug} failed on ${event.action}`, error);

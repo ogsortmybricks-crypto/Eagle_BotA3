@@ -93,6 +93,8 @@ import {
 import type { LoadedInstall } from "./registry";
 import { resolveUses } from "./registry";
 import { heldNames, positionFacts, type PositionFacts } from "./positions";
+import { controlsFor, canAccess, demandAccess, canReadShared } from "./governance";
+import { granted, type InstallControls } from "@shared/tacons/contract";
 import { renderExtensionWidget } from "./extensions";
 
 /**
@@ -106,6 +108,7 @@ import { renderExtensionWidget } from "./extensions";
 export const MAX_ROWS = 2000;
 
 export type Runtime = {
+  controls: InstallControls;
   academyId: number;
   /** The person looking. Null inside a hook, which has no viewer. */
   user: User | null;
@@ -134,7 +137,8 @@ export async function buildRuntime(options: {
   scope: StudioScope | undefined;
   install: LoadedInstall;
 }): Promise<Runtime> {
-  const uses = await resolveUses(options.academy.id, options.install.manifest);
+  const controls = await controlsFor(options.install.install.id, options.install.manifest);
+  const uses = await resolveUses(options.academy.id, options.install.manifest, options.scope, options.install.install.studioId);
   const people = new Map<number, string>();
   const roster = await db
     .select({ id: users.id, name: users.name })
@@ -151,6 +155,7 @@ export async function buildRuntime(options: {
   const today = dayInZone(new Date(), timeZone);
 
   const runtime: Runtime = {
+    controls,
     academyId: options.academy.id,
     user: options.user,
     scope: options.scope,
@@ -174,7 +179,7 @@ export async function buildRuntime(options: {
 
   // Finding the running session reads the calendar, so only Tac-Ons that ask
   // for it pay for it. Every name a manifest uses is in its JSON as a string.
-  if (JSON.stringify(options.install.manifest).includes('"session_start"')) {
+  if (granted(options.install.manifest, controls, "host.read") && JSON.stringify(options.install.manifest).includes('"session_start"')) {
     runtime.clock.session_start = (await runningSession(runtime))?.starts ?? "";
   }
   return runtime;
@@ -283,6 +288,8 @@ export function rowFrom(record: { id: number; data: Record<string, unknown>; cre
  * `provides` and is installed in this academy.
  */
 export async function loadRows(runtime: Runtime, source: string[]): Promise<Row[]> {
+  demandAccess(runtime, "view");
+  demandAccess(runtime, "read");
   const key = source.join(".");
   const cached = runtime.rows.get(key);
   if (cached) return cached;
@@ -297,6 +304,7 @@ export async function loadRows(runtime: Runtime, source: string[]): Promise<Row[
       runtime.rows.set(key, []);
       return [];
     }
+    if (!(await canReadShared(runtime, install))) return [];
     if (!install.manifest.provides.includes(storeName)) {
       runtime.rows.set(key, []);
       return [];
@@ -311,7 +319,7 @@ export async function loadRows(runtime: Runtime, source: string[]): Promise<Row[
   const records = await db
     .select()
     .from(taconRecords)
-    .where(and(eq(taconRecords.installId, install.install.id), eq(taconRecords.store, storeName)))
+    .where(and(eq(taconRecords.academyId, runtime.academyId), eq(taconRecords.installId, install.install.id), eq(taconRecords.store, storeName)))
     .orderBy(desc(taconRecords.createdAt))
     .limit(MAX_ROWS);
 
@@ -367,6 +375,8 @@ async function preload(runtime: Runtime, sources: string[][]): Promise<void> {
 /* -------------------------------------------------------------------------- */
 
 export async function computeValue(runtime: Runtime, path: string[]): Promise<unknown> {
+  demandAccess(runtime, "view");
+  demandAccess(runtime, "read");
   const key = path.join(".");
   // A value that asks for itself would spin forever. Report nothing instead.
   if (runtime.resolving.has(key)) return undefined;
@@ -377,6 +387,7 @@ export async function computeValue(runtime: Runtime, path: string[]): Promise<un
     install = runtime.uses.get(path[0]);
     name = path[1];
     if (!install) return undefined;
+    if (!install.manifest.provides.includes(name) || !(await canReadShared(runtime, install))) return undefined;
   }
 
   const compute = install.manifest.computes.find((entry) => entry.name === name);
@@ -559,6 +570,9 @@ function settingValues(runtime: Runtime): Row {
 async function baseRows(runtime: Runtime, source: BaseSource, limit: number): Promise<{ rows: Row[]; problem: string | null }> {
   const user = runtime.user;
   if (!user) return { rows: [], problem: null };
+  if (!canAccess(runtime, "read") || !granted(runtime.install.manifest, runtime.controls, "host.read")) {
+    return { rows: [], problem: "Host data access has not been granted to this installation." };
+  }
 
   const permission = SOURCE_PERMISSIONS[source];
   if (!can(user.role, permission, runtime.settings, { devStatus: user.devStatus })) {
@@ -939,6 +953,7 @@ function locationQuery(location: WidgetLocation, index: number): Record<string, 
  * `show if` - so a row id typed by hand can't reach past the list.
  */
 export async function listOffersRemove(runtime: Runtime, widget: ListOnPage, row: Row): Promise<boolean> {
+  if (!canAccess(runtime, "write")) return false;
   const user = runtime.user;
   if (!user) return false;
   const anyRow = widget.allowRemove.length > 0 && audienceAllows(widget.allowRemove, user, runtime.held);
@@ -1150,7 +1165,7 @@ async function renderWidget(
     case "form": {
       const store = storeDef(runtime.install.manifest, widget.into);
       if (!store) return null;
-      const allowed = audienceAllows(widget.allow, runtime.user, runtime.held);
+      const allowed = canAccess(runtime, "write") && audienceAllows(widget.allow, runtime.user, runtime.held);
       const fields: ViewFormField[] = [];
       for (const entry of widget.fields) {
         const field = store.fields.find((candidate) => candidate.name === entry.field);
@@ -1185,7 +1200,7 @@ async function renderWidget(
         index,
         label: widget.label,
         confirm: widget.confirm,
-        allowed: audienceAllows(widget.allow, runtime.user, runtime.held),
+        allowed: canAccess(runtime, "write") && audienceAllows(widget.allow, runtime.user, runtime.held),
       };
 
     case "program": {
@@ -1199,6 +1214,7 @@ async function renderWidget(
       if (JSON.stringify(data).length > 500_000) return { kind: "note", tone: "warning", text: "This program's declared data exceeds the 500 KB view limit. Reduce the data in its stores." };
       return {
         ...widget, index, bundle, data,
+        settings: Object.fromEntries(runtime.install.manifest.settings.map(setting => [setting.name, runtime.install.install.settings[setting.name] ?? setting.default])),
         viewer: { id: runtime.user.id, name: runtime.user.name, role: runtime.user.role },
       };
     }
@@ -1279,9 +1295,11 @@ function installSummary(runtime: Runtime): TaconView["install"] {
 }
 
 export async function renderPage(runtime: Runtime, page: PageDef): Promise<TaconView> {
+  demandAccess(runtime, "view");
   const widgets = await renderWidgets(runtime, page.widgets, { page: page.name });
   return {
     install: installSummary(runtime),
+    canConfigure: canAccess(runtime, "configure"),
     page: { name: page.name, title: await pageTitle(runtime, page), subtitle: page.subtitle, icon: page.icon },
     pages: await siblingPages(runtime),
     widgets,
@@ -1431,6 +1449,7 @@ export async function renderPanel(runtime: Runtime, panel: PanelDef): Promise<Ta
   const widgets = await renderWidgets(runtime, panel.widgets, { panel: panel.host });
   return {
     installId: runtime.install.install.id,
+    canConfigure: canAccess(runtime, "configure"),
     taconName: runtime.install.tacon.name,
     title: panel.title,
     icon: runtime.install.manifest.icon,
@@ -1451,6 +1470,7 @@ export async function renderDesk(
     installId: runtime.install.install.id,
     taconName: runtime.install.tacon.name,
     position: def.name,
+    canConfigure: canAccess(runtime, "configure"),
     positionId,
     title,
     widgets,
@@ -1500,6 +1520,7 @@ export async function addRecord(
   values: Record<string, unknown>,
   actor: { type: "user" | "tacon"; userId: number | null },
 ): Promise<WriteResult> {
+  demandAccess(runtime, "write");
   if (storeName.startsWith("__")) {
     return { ok: false, error: "Built-in records can only be changed through their own widget." };
   }
@@ -1578,6 +1599,7 @@ export async function runActions(
   actions: Action[],
   options: { event?: Row; actorUserId: number | null; studioId: number | null; reason: string },
 ): Promise<{ added: number; notices: string[] }> {
+  demandAccess(runtime, "write");
   let added = 0;
   const notices: string[] = [];
 

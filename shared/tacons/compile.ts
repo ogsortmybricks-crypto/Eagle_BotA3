@@ -17,6 +17,7 @@ import { joined, parse, text, words, type Node, type Token } from "./parse";
 import { parseCondition, parseExpr, parseTemplate } from "./expr";
 import { compilerExtensions } from "./extension-registry";
 import { compileProgram } from "./programs";
+import { compileContract } from "./contract";
 import {
   AGGREGATES,
   AUDIENCES,
@@ -1560,6 +1561,15 @@ export function compile(source: string): CompileResult {
     const before = manifestSizes(manifest);
 
     switch (keyword) {
+      case "engine":
+        if (manifest.contract) error(ctx, node, "Declare engine once.");
+        manifest.contract = compileContract(node, ctx.diagnostics, child => audiences(ctx, child));
+        manifest.formatVersion = 2;
+        break;
+      case "tags":
+        manifest.tags = words(node.args);
+        if (manifest.tags.length > 10 || manifest.tags.some(tag => tag.length > 40)) error(ctx, node, "Use up to ten tags of 40 characters each.");
+        break;
       case "store":
       case "use":
       case "setting":

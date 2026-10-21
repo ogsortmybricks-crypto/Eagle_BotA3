@@ -14,6 +14,7 @@ export type ViewProgram = ProgramWidget & {
   index: number;
   bundle: string;
   data: Record<string, unknown[]>;
+  settings?: Record<string, unknown>;
   viewer: { id: number; name: string; role: string };
 };
 

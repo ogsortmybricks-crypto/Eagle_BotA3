@@ -35,7 +35,7 @@ anything:
 
 ### Installing
 
-Press **Install**. You will be asked one question that matters:
+Press **Install**. Choose the scope:
 
 > **Install for:** a studio, or the whole academy.
 
@@ -48,6 +48,15 @@ completely separate records. The exception is studios in a
 whole group, with one set of records.
 
 If the Tac-On has settings, you fill them in here. You can change them later.
+
+New-contract packages also show four access audiences, requested capabilities,
+and required/optional host setup before installation. Approve only the
+capabilities and optional actions you want. The listing's **Manage permissions
+& setup** controls support revocation, recovery and visible setup retries.
+Updates require review and preserve records; uninstall deletes this install's
+records and messages while archiving its positions.
+See [the versioned extension engine](Tac-On-Engine.md) for the SDK, event
+interface, compatibility and publishing procedure.
 
 ### What a Tac-On can and cannot see
 

@@ -1,0 +1,105 @@
+Here’s a copy-and-paste prompt you can give another AI. Replace the bracketed details with information about the app it’s working on.
+
+```text
+I want you to add an installable extension system to my existing application, modeled on the architecture described below. First inspect the repository and identify its framework, authentication, tenant/workspace model, database conventions, existing UI patterns, and API structure. Adapt the design to the codebase rather than replacing its stack or creating a disconnected demo.
+
+My application:
+- Product: [brief description]
+- Users and roles: [roles and what they can do]
+- Tenant/workspace boundary: [organization, team, school, account, or other]
+- Existing modules or records extensions should be able to use: [list if known]
+- Important constraints: [deployment, compatibility, privacy, or other requirements]
+
+## Goal
+
+Build a system where an authorized user can install small, self-contained extensions into a tenant/workspace. An extension should be able to provide its own UI, request access to host-app features, perform optional setup actions, save extension-scoped data, and—when allowed—communicate with other installed extensions through a documented interface.
+
+Keep extensions separate from the host application’s core features. Do not invent unrelated product modules; integrate with existing concepts and patterns in this codebase.
+
+## Extension format
+
+Define a versioned, validated manifest as the single source of truth for an extension. It should include, as appropriate:
+
+- Stable machine-readable name, display title, version, description, author, icon, and tags
+- Requested capabilities and any data or events it provides or consumes
+- View and edit access rules
+- Extension setup actions
+- Display preferences that the host supports
+
+Create a documented SDK/API contract that extension UIs use to interact with the host. Keep that contract versioned and consistent with the manifest and backend implementation.
+
+## Installation and setup
+
+Implement an installation flow that:
+
+- Validates the manifest and extension UI before saving or installing them
+- Shows the installer which setup actions will run before anything is changed
+- Lets the installer opt into optional setup actions; explain each action’s purpose
+- Runs setup actions idempotently, so retries or upgrades do not create duplicate host records
+- Reports setup results and failures clearly
+- Supports reinstall or update without silently losing extension data
+- Allows authorized users to enable, disable, and uninstall an extension, with the consequences made clear
+
+Use the host app’s existing entities where possible rather than creating duplicate representations. Keep tenant/workspace data isolated.
+
+## Permissions and data
+
+Enforce permissions on the server for every extension API operation; hiding controls in the UI is not sufficient.
+
+Support separate rules for who can:
+- View or open an extension
+- Edit or manage its configuration
+- Read or write its stored records
+
+Use the application’s real roles, groups, teams, positions, or membership model. Include sensible defaults, validate permission rules, prevent accidental lockouts, and make sure tenant/workspace boundaries are checked in every query.
+
+Provide extension-scoped persistent storage. If one extension can share selected records with another, make sharing explicit and enforce it on the server.
+
+## Interoperability
+
+If extensions need to communicate, implement a small documented event interface rather than allowing direct database access or relying on each other’s internals.
+
+Support:
+- Discovering installed extensions that the current user may access
+- Sending an event to a specific installed extension or broadcasting where appropriate
+- Reading events incrementally with pagination or a cursor
+- Validating sender, recipient, topic, payload, permissions, and tenant/workspace scope
+- Reasonable payload and rate limits
+
+## Extension catalog
+
+If this application needs a catalog, provide the complete lifecycle:
+
+- Browse and search available extensions
+- Inspect a listing before installation
+- Install into the current tenant/workspace
+- Publish and manage listings for authorized publishers
+- Update existing listings and define how installed copies receive updates
+- Track installation state accurately
+
+Do not build a marketplace if this app only needs private extensions; make that an explicit scope decision based on the existing product.
+
+## Security requirements
+
+Treat extension code and manifest data as untrusted input.
+
+- Do not execute extension HTML/JavaScript in the host app’s privileged origin
+- Isolate extension UIs using an appropriately sandboxed iframe or equivalent boundary
+- Do not expose session cookies, bearer tokens, secrets, or unrestricted host APIs to extension code
+- Use a narrowly scoped, validated message/API bridge
+- Sanitize rendered content and validate all inputs on the server
+- Use parameterized database queries and tenant-scoped authorization checks
+- Define how sensitive capabilities are granted and revoked
+- Document remaining security limits and avoid claiming untrusted extensions are safe without isolation
+
+## Implementation process
+
+1. Summarize the existing architecture and relevant files before making changes.
+2. Propose a concise implementation plan and identify any decisions that would materially change scope.
+3. Reuse existing authentication, database, migration, styling, and routing conventions.
+4. Implement the full vertical slice: schema/migrations, backend validation and authorization, SDK/API, extension UI, install/setup flow, and catalog if in scope.
+5. Add tests for manifest validation, permissions, tenant isolation, idempotent setup, install/update/uninstall, record access, and event delivery.
+6. Verify the app builds and runs, run the relevant tests, inspect the UI at desktop and mobile sizes, and report any behavior that could not be verified.
+
+Keep the implementation focused, maintainable, and consistent with the existing product. Preserve existing functionality. Do not replace the application or add placeholder screens that appear functional but are not connected to real data.
+```

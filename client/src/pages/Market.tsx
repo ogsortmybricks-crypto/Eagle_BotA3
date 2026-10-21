@@ -8,7 +8,10 @@
  * touches.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { PermissionReview } from "@/tacons/InstallationReview";
+import { InstallationManagement, type ControlResponse } from "@/tacons/InstallationManagement";
+import { setupPlan } from "@shared/tacons/contract";
 import { Link, useLocation } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -243,6 +246,7 @@ export function TaconDetail({ slug }: { slug: string }) {
   const queryClient = useQueryClient();
   const [, navigate] = useLocation();
   const [installing, setInstalling] = useState(false);
+  const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [showSource, setShowSource] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -261,16 +265,6 @@ export function TaconDetail({ slug }: { slug: string }) {
       void queryClient.invalidateQueries({ queryKey: ["tacon-market"] });
     },
     onError: (removeError: Error) => setError(removeError.message),
-  });
-
-  const update = useMutation({
-    mutationFn: (installId: number) => apiPost(`/tacons/installs/${installId}/update`),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["tacon-detail", slug] });
-      void queryClient.invalidateQueries({ queryKey: ["tacon-nav"] });
-      void queryClient.invalidateQueries({ queryKey: ["positions"] });
-    },
-    onError: (updateError: Error) => setError(updateError.message),
   });
 
   const toggle = useMutation({
@@ -312,6 +306,7 @@ export function TaconDetail({ slug }: { slug: string }) {
               {tacon.mine && <Chip tone="brand">From this academy</Chip>}
             </div>
             <p className="mt-1 text-sm text-gray-600">{tacon.tagline}</p>
+            {!!manifest?.tags?.length && <div className="mt-2 flex flex-wrap gap-1">{manifest.tags.map(tag => <Chip key={tag}>{tag}</Chip>)}</div>}
             <p className="mt-1 text-xs text-gray-500">
               by{" "}
               {tacon.authorHandle ? (
@@ -499,9 +494,8 @@ export function TaconDetail({ slug }: { slug: string }) {
                       <div className="mt-2 flex flex-wrap gap-1.5">
                         {install.updateAvailable && (
                           <button
-                            onClick={() => update.mutate(install.id)}
+                            onClick={() => setUpdatingId(install.id)}
                             className="btn-secondary btn-sm"
-                            disabled={update.isPending}
                           >
                             Update
                           </button>
@@ -530,6 +524,7 @@ export function TaconDetail({ slug }: { slug: string }) {
                         </button>
                       </div>
                     )}
+                    {can("tacons.install") && <InstallationManagement installId={install.id} />}
                   </li>
                 ))}
               </ul>
@@ -555,11 +550,21 @@ export function TaconDetail({ slug }: { slug: string }) {
         </div>
       </div>
 
+      {updatingId !== null && manifest && <InstallModal
+        slug={slug} name={tacon.name} manifest={manifest} installId={updatingId}
+        versionId={versions.find(version => version.version === manifest.version)?.id ?? 0}
+        onClose={() => setUpdatingId(null)}
+        onDone={() => {
+          setUpdatingId(null);
+          void queryClient.invalidateQueries({ predicate: query => String(query.queryKey[0]).startsWith("tacon") || query.queryKey[0] === "positions" });
+        }}
+      />}
       {installing && manifest && (
         <InstallModal
           slug={tacon.slug}
           name={tacon.name}
           manifest={manifest}
+          versionId={versions.find(version => version.version === manifest.version)?.id ?? 0}
           onClose={() => setInstalling(false)}
           onDone={() => {
             setInstalling(false);
@@ -578,12 +583,16 @@ function InstallModal({
   slug,
   name,
   manifest,
+  versionId,
+  installId,
   onClose,
   onDone,
 }: {
   slug: string;
   name: string;
   manifest: Manifest;
+  versionId: number;
+  installId?: number;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -595,12 +604,24 @@ function InstallModal({
     Object.fromEntries(manifest.settings.map((setting) => [setting.name, setting.default])),
   );
   const [error, setError] = useState<string | null>(null);
+  const [grants, setGrants] = useState<string[]>([]);
+  const [selectedSetup, setSelectedSetup] = useState<string[]>(() => setupPlan(manifest).filter(step => !step.optional).map(step => step.id));
+  const existing = useQuery<ControlResponse>({
+    queryKey: ["tacon-controls", installId], enabled: !!installId,
+    queryFn: () => apiGet(`/tacons/installs/${installId}/controls`),
+  });
+  useEffect(() => {
+    if (!existing.data) return;
+    setGrants(existing.data.controls.grants.filter(capability => (manifest.contract?.capabilities as string[] | undefined)?.includes(capability)));
+    setSelectedSetup(setupPlan(manifest).filter(step => !step.optional || existing.data.controls.selectedSetup.includes(step.id)).map(step => step.id));
+  }, [existing.data, manifest]);
 
   const install = useMutation({
     mutationFn: () =>
-      apiPost(`/tacons/market/${slug}/install`, {
+      apiPost(installId ? `/tacons/installs/${installId}/update` : `/tacons/market/${slug}/install`, {
         ...(target === undefined ? {} : { studioId: target }),
         settings,
+        reviewedVersionId: versionId, grants, selectedSetup,
       }),
     onSuccess: onDone,
     onError: (installError: Error) => setError(installError.message),
@@ -610,8 +631,8 @@ function InstallModal({
     <Modal
       open
       onClose={onClose}
-      title={`Install ${name}`}
-      description="It appears for everyone in the studio you pick."
+      title={`${installId ? "Update" : "Install"} ${name}`}
+      description={installId ? "Review this exact version. Existing records and settings are preserved." : "Review access and host changes before installing in the selected studio."}
       footer={
         <>
           <button onClick={onClose} className="btn-secondary">
@@ -619,16 +640,18 @@ function InstallModal({
           </button>
           <button
             onClick={() => install.mutate()}
-            disabled={install.isPending || target === undefined}
+            disabled={install.isPending || !versionId || (!installId && target === undefined) || (!!installId && !existing.data)}
             className="btn-primary"
           >
-            {install.isPending && <Spinner />} Install
+            {install.isPending && <Spinner />} {installId ? "Review & update" : "Install"}
           </button>
         </>
       }
     >
       <div className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
+        {existing.error && <Banner tone="error">{existing.error.message}</Banner>}
+        <PermissionReview manifest={manifest} grants={grants} onGrants={setGrants} selectedSetup={selectedSetup} onSetup={setSelectedSetup} />
 
         <ProgramPermissions manifest={manifest} />
         {manifest.needs.length > 0 && (
@@ -649,14 +672,14 @@ function InstallModal({
           </Banner>
         )}
 
-        <StudioPicker
+        {!installId && <StudioPicker
           value={target}
           onChange={setTarget}
           label="Install for"
           hint="Academy-wide puts it in every studio's sidebar."
-        />
+        />}
 
-        {manifest.settings.map((setting) => (
+        {!installId && manifest.settings.map((setting) => (
           <div key={setting.name}>
             <label className="label" htmlFor={`setting-${setting.name}`}>
               {setting.label}

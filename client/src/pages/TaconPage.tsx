@@ -14,9 +14,14 @@ import { apiGet } from "@/lib/api";
 import { useDateFormat, useSession } from "@/lib/session";
 import { Banner, Chip, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
 import { TaconViewBody, Widgets } from "@/tacons/Renderer";
+import { ConfigurationButton, ConfigurationPage } from "@/tacons/Configuration";
 import type { TaconDeskView, TaconRecordView, TaconView } from "@shared/tacons/view";
 
 export function TaconPage({ installId, page }: { installId: number; page: string }) {
+  if (page === "__configuration") return <ConfigurationPage installId={installId} />;
+  return <NativeTaconPage installId={installId} page={page} />;
+}
+function NativeTaconPage({ installId, page }: { installId: number; page: string }) {
   const { studioId, can } = useSession();
   const queryClient = useQueryClient();
 
@@ -53,6 +58,7 @@ export function TaconPage({ installId, page }: { installId: number; page: string
   return (
     <>
       <PageHeader title={view.page.title} subtitle={view.page.subtitle ?? undefined}>
+        {view.canConfigure && <ConfigurationButton installId={installId} />}
         {view.install.studioName && <Chip tone="brand">{view.install.studioName}</Chip>}
         {view.install.official && <Chip tone="purple">Official</Chip>}
       </PageHeader>
@@ -203,7 +209,7 @@ export function TaconPanels({ host }: { host: string }) {
         <div key={`${panel.installId}-${panel.title}`} className="card-pad">
           <div className="mb-3 flex items-center justify-between gap-3">
             <h2 className="font-semibold text-gray-900">{panel.title}</h2>
-            <Chip>{panel.taconName}</Chip>
+            <div className="flex flex-wrap gap-2"><Chip>{panel.taconName}</Chip>{panel.canConfigure && <ConfigurationButton installId={panel.installId} />}</div>
           </div>
           {panel.widgets.length === 0 ? (
             <Banner tone="info">This panel has nothing to show right now.</Banner>
@@ -265,7 +271,7 @@ export function TaconDesks() {
               </div>
               <h2 className="font-semibold text-gray-900">{desk.title}</h2>
             </div>
-            <Chip>{desk.taconName}</Chip>
+            <div className="flex flex-wrap gap-2"><Chip>{desk.taconName}</Chip>{desk.canConfigure && <ConfigurationButton installId={desk.installId} />}</div>
           </div>
           {desk.widgets.length === 0 ? (
             <Banner tone="info">This desk has nothing to show right now.</Banner>
@@ -288,6 +294,7 @@ export function TaconDesks() {
 }
 
 type TaconPanelData = {
+  canConfigure?: boolean;
   installId: number;
   taconName: string;
   title: string;

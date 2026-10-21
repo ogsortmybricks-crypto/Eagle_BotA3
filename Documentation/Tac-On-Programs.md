@@ -1,5 +1,10 @@
 # JavaScript and TypeScript Tac-On programs
 
+For versioned permission contracts, installer approvals, optional setup,
+configuration access and cross-Tac-On events, see [the extension engine
+contract](Tac-On-Engine.md). Existing packages need no rewrite; new event APIs
+require an explicitly reviewed `engine 1` contract.
+
 Tac-Script is the integration and permission layer. Write feature logic in
 JavaScript or TypeScript and keep it in your uploaded package, not Eagle Bot's
 source tree. Programs are installed and versioned with their Tac-On.
@@ -121,6 +126,11 @@ export default function(eagle: Eagle) {
   desk; do not use a broadly visible store for private personal records.
 - `render(tree)`: draw a safe UI tree. Nodes have `tag`, optional `text`,
   `attrs`, `children`, and an `action` event name.
+- `settings`: read-only declared public configuration with defaults. Values
+  are visible to program viewers; never use settings for secrets.
+- `sdkVersion`: currently `1`. Reviewed `engine 1` packages may also use
+  `extensions.discover()` and `events.send/read()` with the declared capabilities
+  and installation grants described in the [engine contract](Tac-On-Engine.md).
 - `styles(css)`: apply package CSS inside the isolated frame. CSS imports return
   strings; they are not automatically injected.
 - `on(name, handler)`: handle a named UI event. Buttons emit clicks, inputs and

@@ -21,6 +21,9 @@ export async function compilePackage(source: string, files: CodeFiles = {}): Pro
   });
   const invalid = codeFilesError(files);
   if (invalid) return fail(invalid);
+  if (manifest.contract && manifest.positions.length && !manifest.contract.setup.some(step => step.id === "positions")) {
+    return fail('Positions require reviewed setup: declare setup positions optional|required "why these seats are needed" inside engine 1.');
+  }
   const programs = [...manifest.pages, ...manifest.panels, ...manifest.positions]
     .flatMap(owner => owner.widgets).filter((widget): widget is ProgramWidget => widget.kind === "program");
   for (const owner of [...manifest.pages, ...manifest.panels, ...manifest.positions]) {
