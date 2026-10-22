@@ -9,7 +9,9 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearch } from "wouter";
-import { ArrowLeft, PlugZap, Puzzle } from "lucide-react";
+import { ArrowLeft, Maximize2, PlugZap, Puzzle } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { AppFrame } from "@/tacons/AppFrame";
 import { apiGet } from "@/lib/api";
 import { useDateFormat, useSession } from "@/lib/session";
 import { Banner, Chip, EmptyState, LoadingPage, PageHeader } from "@/components/ui";
@@ -19,6 +21,10 @@ import type { TaconDeskView, TaconRecordView, TaconView } from "@shared/tacons/v
 export function TaconPage({ installId, page }: { installId: number; page: string }) {
   const { studioId, can } = useSession();
   const queryClient = useQueryClient();
+  // An app installed to open full screen does, until its Exit button is pressed.
+  const [exitedFullWindow, setExitedFullWindow] = useState(false);
+  const exitFullWindow = useCallback(() => setExitedFullWindow(true), []);
+  useEffect(() => setExitedFullWindow(false), [installId, page]);
 
   const query = useQuery<{ view: TaconView }>({
     queryKey: ["tacon-view", installId, page, studioId],
@@ -59,7 +65,24 @@ export function TaconPage({ installId, page }: { installId: number; page: string
 
       {(view.pages?.length ?? 0) > 1 && <PageTabs installId={view.install.id} current={view.page.name} pages={view.pages!} />}
 
-      <TaconViewBody view={view} onChanged={refresh} />
+      {view.app ? (
+        <>
+          {view.app.display === "fullscreen" && exitedFullWindow && (
+            <div className="mb-3">
+              <button type="button" onClick={() => setExitedFullWindow(false)} className="btn-secondary btn-sm">
+                <Maximize2 className="h-4 w-4" /> Open full screen
+              </button>
+            </div>
+          )}
+          <AppFrame
+            app={view.app}
+            fullWindow={view.app.display === "fullscreen" && !exitedFullWindow}
+            onExitFullWindow={exitFullWindow}
+          />
+        </>
+      ) : (
+        <TaconViewBody view={view} onChanged={refresh} />
+      )}
 
       <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-4 text-xs text-gray-500">
         <PlugZap className="h-3.5 w-3.5" />

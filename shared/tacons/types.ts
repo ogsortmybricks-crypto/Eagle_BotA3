@@ -542,6 +542,12 @@ export type Manifest = {
    * Absent on older manifests.
    */
   studioPositions?: string[];
+  /**
+   * Set when this version is an app (manifest.json + index.html), which is
+   * what every Tac-On published since TacScript was retired is. Its one page
+   * runs the app; the TacScript parts of the manifest are empty.
+   */
+  app?: import("./app").AppDef;
   /** Absent on older manifests. */
   /** Package-owned configuration, compiled by trusted extensions. */
   extensions?: Record<string, unknown>;

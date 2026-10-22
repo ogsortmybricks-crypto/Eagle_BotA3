@@ -4,100 +4,118 @@ There's no separate test environment. You test in the real app, safely, by
 publishing as a **Draft**, which only your own academy can see.
 
 How much of this you do yourself depends on the access the user gives you.
-Without an Eagle Bot account, hand the user the `.tacon` file and the steps
-below, and ask them to paste back exactly what the compiler and pages show.
+Without an Eagle Bot account, hand the user the app folder and the steps
+below, and ask them to paste back exactly what the checklist and the app show.
 
-## 1. Compile
+## 1. Check it on your own computer first
 
-**Dev menu → New Tac-On** (or open your existing one). Paste the source. The
-right-hand panel compiles as you type and lists every problem with its line
-number.
+Most of your app is ordinary HTML and JavaScript, so you can open
+`index.html` in a browser while you build. `window.EagleBot` won't exist
+there. A small stand-in at the top of a test page lets you click through:
 
-- Fix every **error**. It won't publish otherwise.
-- Read every **warning**. Several real bugs only show up as warnings, such as
-  a one-line `add` dropping fields.
-- **Compiles** means it will publish. It doesn't mean it does what you meant.
-  See the traps in [05](05-limits-and-workarounds.md).
+```html
+<script>
+  // Test stand-in only — never put this in the folder you publish.
+  window.EagleBot = window.EagleBot || {
+    user: { id: 1, name: "Test Learner", email: null, role: "learner" },
+    academy: { id: 1, name: "Test Academy" }, studio: null, display: "inline",
+    tacon: { installId: 0, name: "Test", version: "0.0.0", icon: "🧪" },
+    api: (() => {
+      const records = []; let next = 1;
+      return {
+        getRecords: async (o) => records.filter((r) => !o?.store || r.store === o.store).slice().reverse(),
+        createRecord: async (data, o) => { const r = { id: next++, store: o?.store ?? "records", data, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), created_by: 1, created_by_name: "Test Learner" }; records.push(r); return r; },
+        updateRecord: async (id, data) => Object.assign(records.find((r) => r.id === id), { data }),
+        deleteRecord: async (id) => { records.splice(records.findIndex((r) => r.id === id), 1); return { ok: true }; },
+      };
+    })(),
+    positions: { list: async () => [] }, members: { list: async () => [] },
+  };
+</script>
+```
 
-## 2. Publish a Draft
+Remember what the stand-in can't show you: the sandbox (no network, no
+`localStorage`, no CDN scripts) and the server saying no.
+
+## 2. Check
+
+**Dev menu → New Tac-On → Choose folder.** Eagle Bot bundles the folder on
+your device and shows:
+
+- the files it read (and how many it left out),
+- the manifest as admins will see it, with every setup action,
+- a checklist: every line has to be ✓ before **Publish** unlocks.
+
+**Ready to publish** means it will publish. It doesn't mean it works. See the
+traps in [06](06-limits-and-workarounds.md).
+
+## 3. Publish a Draft
 
 **Publish** with visibility **Draft**. Only your academy sees it in the
 market.
 
-Published versions are frozen, so each new test needs a new `version`. Use
-patch numbers while testing (`0.1.0`, `0.1.1`, `0.1.2` ...). Save `1.0.0` for
-the first version other academies will see.
+Published versions are frozen, so each new test needs a new `version` in
+`manifest.json`. Use patch numbers while testing (`0.1.0`, `0.1.1`,
+`0.1.2` ...). Save `1.0.0` for the first version other academies will see.
 
-## 3. Install it somewhere harmless
+## 4. Install it somewhere harmless
 
 As an admin: **Tac-Ons → Market**, open your Tac-On, **Install** into one
-studio (not academy-wide), and fill in its settings.
+studio (not academy-wide). Check the install screen lists your setup actions
+the way you meant: required ones under "What will be created", optional ones
+as tickboxes with your `prompt` and `why`.
 
-## 4. Use it as each kind of person
+Then check what setup did: the positions on **Positions**, the wiki section in
+the **Wiki**. Install it once more somewhere else with the optional boxes
+unticked, and check your app copes (the "finish setting up" card).
 
-Check each of these. Use real accounts with those roles, or ask the user to:
+## 5. Use it as each kind of person
 
 | As | Check |
 | --- | --- |
-| **Admin** | Installing, settings, everything they're allowed to see and do |
-| **Learner** | Pages they should see. Forms that should say *denied* do. Lists show only what they should. |
-| **The position holder** | Appoint someone on **Positions**. Their **Your desk** card appears. Desk forms work. |
-| **Someone else in another studio** | A studio install doesn't appear for them at all |
+| **Admin** | Installing, setup, everything they're allowed to do, including admin-only tools in your app |
+| **Learner** | What they see. Anything they can't do is hidden, or fails with a clear message rather than a blank screen. |
+| **The position holder** | Appoint someone on **Positions**. Their tools appear in your app; the next person's do when the term changes. |
+| **Another learner** | They can't change or delete someone else's record. Your app shows Eagle Bot's message when they try. |
+| **Someone in another studio** | A studio install doesn't appear for them at all |
 | **Guide** | They aren't accidentally made the keeper of something learners should own |
 
 Then:
 
-- **Add real records** through every form. Check every `stat` and `ask` shows
-  the number you expect. A typo reads as 0.
-- **Trigger every `when`.** Certify a small test election, or hold a Town
-  Hall, then check the reaction's record appeared. For a `calendar.*`
-  reaction, ask a guide or admin to add, change and remove a test entry.
-- **Check every `calendar` block.** Save a record with a date this month and
-  open **Calendar**: it should be on the right day, in the right colour, with
-  the title you meant. Try one with an end date and one without, check the
-  `where` leaves out what it should, sign in as someone outside `show to` to
-  make sure they don't see it, and click it to check `open` goes to your page.
-- **Check the clock in the evening.** If you use `created`, `today` or
-  `this_week_start`, make sure the academy's time zone is set
-  (**Settings → Display → Time zone**) and save a record after dinner: it
-  should count as today and show on today's calendar square.
-- **Check what each person may remove and open.** As someone else, try
-  removing a row only its owner should (`allow remove own`), and open a
-  `link` from someone else's list. Both should be refused.
-- **Sign something.** For `confirm with code`, try a wrong code (refused,
-  nothing saved), then the right one. A person who hasn't set a code yet is
-  told where to set it.
-- **Watch `show if` change.** Make the test true and false and check the widget
-  appears and disappears, and that a `celebrate` plays its confetti once.
-- **Try the update path.** With records saved, bump the version, publish,
+- **Watch for the yellow box.** "This app hit an error" above your app means
+  an uncaught error. Fix every one.
+- **Try the narrow column** (a Chromebook, or a phone), and full screen if you
+  use it: **Exit full screen**, Escape, and **Open full screen** again.
+- **Type something nasty.** A topic called `<b>hi</b>` should show exactly
+  that, not bold text.
+- **Try the update path.** With records saved, raise the version, publish,
   press **Update** on the install, and check the old records still display
   correctly.
 
-## 5. Publish for real
+## 6. Publish for real
 
 Once it works:
 
-1. Set `version 1.0.0`, or the next proper version for an update.
+1. Set `version` to `1.0.0`, or the next proper version for an update.
 2. Publish as **Unlisted** (anyone with the link) to let one other academy try
    it, then **Public** for everyone.
-3. Fill in the listing's tagline and description, written for an admin
-   deciding whether to install it.
+3. Fill in the listing's blurb and details, written for an admin deciding
+   whether to install it.
 
 **Official Tac-Ons**, from Eagle Bot's maintainers, are published from the dev
-portal (Ctrl+D): **Tac-Ons → Publish official → Choose folder**. Select a folder
-with exactly one `.tacon` file. Only that file is published. READMEs and other
-files are ignored.
+portal (Ctrl+D): **Tac-Ons → Publish official**, then choose the folder or a
+`.taconapp` file. The server checks it before **Publish official** unlocks.
 
 ## Versioning rules
 
-- Bump `version` on every publish. Use patch for wording and fixes, minor for
-  new features, major when installs need care.
-- **Never rename or change the type of a field that already has records.** Add
-  a new field and keep the old one.
-- Dropping a store orphans its records. Dropping a `position` archives it on
-  update, and its history stays.
-- Changing a position's title, duties or seats resets them on every install
-  that updates. Say so in the changelog.
+- Raise `version` on every publish. Patch for wording and fixes, minor for new
+  features, major when installs need care.
+- **Never rename a store or a `data` key that already has records.** Add a new
+  key, keep reading the old one.
+- Keep `name` forever. A different name is a different Tac-On, with none of
+  the old one's records.
+- Changing a `createPosition` title makes a *new* position on update (titles
+  are how setup recognises them). Say so in the changelog, or keep the title.
 - Academies move to a new version only when they press **Update**. Tell them
   what changed and why it's worth it.
 - Never tell anyone to remove and reinstall. **Removing deletes every
@@ -105,6 +123,7 @@ files are ignored.
 
 ## Keep your source
 
-The live app is the only place a Tac-On exists. Keep every `.tacon` you write,
-with a short README (what it does, who sees what, settings, version history),
-in your own workspace, so you can publish the next version.
+The live app keeps only the bundled version. Keep the folder itself, with a
+short README (what it does, who sees what, setup, version history), in your
+own workspace, so you can publish the next version. An admin's **Export** gives
+back the bundled `.taconapp` if the folder is ever lost.

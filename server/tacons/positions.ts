@@ -18,6 +18,7 @@ import { db } from "../db";
 import { positionHolders, positions, taconInstalls, users, type Position, type TaconInstall } from "@shared/schema";
 import { studioPositionAudience, type Manifest, type Row } from "@shared/tacons";
 import { logActivity } from "../activity";
+import { setupPositionNames } from "./app-setup";
 
 /** What a Tac-On's expressions read as `position.<name>`. */
 export type PositionFacts = Record<string, Row>;
@@ -41,7 +42,8 @@ export async function syncPositions(options: {
 }): Promise<void> {
   const { install, taconName, manifest } = options;
   const existing = await ownedBy(install.id);
-  const declared = new Set(manifest.positions.map((def) => def.name));
+  // An app's setup positions are its own too; `runSetup` makes and adopts them.
+  const declared = new Set([...manifest.positions.map((def) => def.name), ...setupPositionNames(manifest)]);
 
   for (const def of manifest.positions) {
     const values = {
@@ -102,7 +104,7 @@ export async function syncPositions(options: {
 export async function setPositionsArchived(install: TaconInstall, manifest: Manifest, archived: boolean) {
   const rows = await ownedBy(install.id);
   // Only the ones the running version declares come back; a dropped one stays archived.
-  const declared = new Set(manifest.positions.map((def) => def.name));
+  const declared = new Set([...manifest.positions.map((def) => def.name), ...setupPositionNames(manifest)]);
   const ids = rows
     .filter((row) => archived || declared.has(row.taconPosition ?? ""))
     .map((row) => row.id);

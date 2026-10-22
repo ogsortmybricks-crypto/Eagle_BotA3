@@ -38,7 +38,7 @@ import {
   Stat,
 } from "@/components/ui";
 import { StudioPicker } from "@/components/StudioPicker";
-import { audiencePosition, audienceStudioPosition, type Manifest } from "@shared/tacons";
+import { actionKey, audiencePosition, audienceStudioPosition, describeAction, type Manifest } from "@shared/tacons";
 import { KIND_LABELS } from "@shared/calendar";
 import { describeExtensions } from "@shared/tacons/extension-registry";
 import { ProgramPermissions } from "@/tacons/ProgramPermissions";
@@ -210,6 +210,7 @@ type Detail = {
     studioName: string | null;
     enabled: boolean;
     settings: Record<string, unknown>;
+    display?: "inline" | "fullscreen";
     updateAvailable: boolean;
   }[];
 };
@@ -271,6 +272,20 @@ export function TaconDetail({ slug }: { slug: string }) {
       void queryClient.invalidateQueries({ queryKey: ["positions"] });
     },
     onError: (updateError: Error) => setError(updateError.message),
+  });
+
+  // Downloads the installed version as a package another academy can install.
+  const exportApp = useMutation({
+    mutationFn: async (installId: number) => {
+      const { file, package: pkg } = await apiGet<{ file: string; package: unknown }>(`/tacons/installs/${installId}/export`);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(pkg, null, 2)], { type: "application/json" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = file;
+      link.click();
+      URL.revokeObjectURL(url);
+    },
+    onError: (exportError: Error) => setError(exportError.message),
   });
 
   const toggle = useMutation({
@@ -358,6 +373,21 @@ export function TaconDetail({ slug }: { slug: string }) {
             <div className="card-pad">
               <h2 className="font-semibold text-gray-900">What it adds</h2>
               <ul className="mt-2 space-y-1.5 text-sm text-gray-600">
+                {manifest.app && (
+                  <>
+                    <li>
+                      <span className="font-medium text-gray-800">{manifest.name}</span> — an app in the sidebar,
+                      running in Eagle Bot's sandbox. It uses Eagle Bot only through the Tac-On SDK, with the
+                      permissions of whoever is using it.
+                    </li>
+                    {manifest.app.setup.map((action, index) => (
+                      <li key={`setup-${index}`}>
+                        On install: {action.prompt ?? describeAction(action)}
+                        {action.optional && " (you choose)"}
+                      </li>
+                    ))}
+                  </>
+                )}
                 {manifest.positions.map((position) => (
                   <li key={`position-${position.name}`}>
                     <span className="font-medium text-gray-800">{position.title}</span> — a position
@@ -366,7 +396,7 @@ export function TaconDetail({ slug }: { slug: string }) {
                     {position.widgets.length > 0 && ", with a desk only its holder sees"}
                   </li>
                 ))}
-                {manifest.pages.map((page) => (
+                {!manifest.app && manifest.pages.map((page) => (
                   <li key={page.name}>
                     <span className="font-medium text-gray-800">{page.title}</span> — a page
                     {page.nav ? " in the sidebar" : ", reachable by link"}
@@ -486,9 +516,12 @@ export function TaconDetail({ slug }: { slug: string }) {
                       <span className="text-sm font-medium text-gray-800">
                         {install.studioName ?? "Whole academy"}
                       </span>
-                      <Chip tone={install.enabled ? "green" : "neutral"}>
-                        {install.enabled ? "on" : "off"}
-                      </Chip>
+                      <span className="flex gap-1">
+                        {install.display === "fullscreen" && <Chip tone="brand">⛶ Full window</Chip>}
+                        <Chip tone={install.enabled ? "green" : "neutral"}>
+                          {install.enabled ? "on" : "off"}
+                        </Chip>
+                      </span>
                     </div>
                     {install.updateAvailable && (
                       <p className="mt-1.5 text-xs text-amber-700">
@@ -504,6 +537,16 @@ export function TaconDetail({ slug }: { slug: string }) {
                             disabled={update.isPending}
                           >
                             Update
+                          </button>
+                        )}
+                        {manifest?.app && (
+                          <button
+                            onClick={() => exportApp.mutate(install.id)}
+                            className="btn-secondary btn-sm"
+                            disabled={exportApp.isPending}
+                            title="Download it as a .taconapp file to share with another academy"
+                          >
+                            Export
                           </button>
                         )}
                         <button
@@ -595,12 +638,24 @@ function InstallModal({
     Object.fromEntries(manifest.settings.map((setting) => [setting.name, setting.default])),
   );
   const [error, setError] = useState<string | null>(null);
+  const setup = manifest.app?.setup ?? [];
+  // Optional setup actions are questions; each starts as its author's default.
+  const [ticked, setTicked] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(setup.map((action, index) => [actionKey(action, index), action.default ?? true])),
+  );
 
   const install = useMutation({
     mutationFn: () =>
       apiPost(`/tacons/market/${slug}/install`, {
         ...(target === undefined ? {} : { studioId: target }),
         settings,
+        ...(setup.length
+          ? {
+              setupSelection: setup
+                .map((action, index) => actionKey(action, index))
+                .filter((key, index) => !setup[index].optional || ticked[key]),
+            }
+          : {}),
       }),
     onSuccess: onDone,
     onError: (installError: Error) => setError(installError.message),
@@ -647,6 +702,42 @@ function InstallModal({
             you install it in gets its pages and buttons while they hold the seat. If the studio has no
             position by that title, nobody does.
           </Banner>
+        )}
+
+        {setup.some((action) => !action.optional) && (
+          <div>
+            <div className="label">What will be created on install</div>
+            <div className="flex flex-wrap gap-1.5">
+              {setup.filter((action) => !action.optional).map((action, index) => (
+                <Chip key={index}>{describeAction(action)}</Chip>
+              ))}
+            </div>
+          </div>
+        )}
+        {setup.some((action) => action.optional) && (
+          <fieldset>
+            <legend className="label">This Tac-On would also like to…</legend>
+            <div className="space-y-2">
+              {setup.map((action, index) => {
+                if (!action.optional) return null;
+                const key = actionKey(action, index);
+                return (
+                  <label key={key} className="flex items-start gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      checked={ticked[key] ?? false}
+                      onChange={(event) => setTicked((current) => ({ ...current, [key]: event.target.checked }))}
+                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-600"
+                    />
+                    <span>
+                      <span className="font-medium text-gray-800">{action.prompt ?? describeAction(action)}</span>
+                      {action.why && <span className="block text-xs text-gray-500">{action.why}</span>}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
         )}
 
         <StudioPicker

@@ -138,6 +138,21 @@ export type TaconView = {
   widgets: ViewWidget[];
   /** Everyone a `person` field can point at. Sent once, used by every field. */
   people: ViewPerson[];
+  /** Set when the Tac-On is an app: what the sandboxed frame runs. */
+  app?: ViewApp;
+};
+
+/** An app, ready for its sandboxed frame. */
+export type ViewApp = {
+  html: string;
+  display: "inline" | "fullscreen";
+  /** What `EagleBot.user`, `.academy`, `.studio` and `.tacon` say. No token, ever. */
+  identity: {
+    user: { id: number; name: string; email: string | null; role: string };
+    academy: { id: number; name: string };
+    studio: { id: number; name: string } | null;
+    tacon: { installId: number; name: string; version: string; icon: string };
+  };
 };
 
 export type TaconPanelView = {

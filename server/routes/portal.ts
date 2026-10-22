@@ -18,7 +18,7 @@ import { z } from "zod";
 import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "../db";
-import { compilePackage, codeFilesSchema } from "../tacons/program-build";
+import { TACSCRIPT_RETIRED, appBodySchema, prepareApp } from "../tacons/app-publish";
 import {
   TACON_VISIBILITIES,
   portalDevs,
@@ -31,7 +31,6 @@ import {
 } from "@shared/schema";
 import { hashPassword, verifyPassword } from "../auth";
 import { env } from "../env";
-import { compile } from "@shared/tacons";
 
 export const portalRouter = Router();
 
@@ -397,8 +396,9 @@ portalRouter.get("/tacons", requirePortal, async (_req, res) => {
 });
 
 const officialSchema = z.object({
-  codeFiles: codeFilesSchema,
-  source: z.string().min(10).max(200_000),
+  app: appBodySchema.optional(),
+  /** TacScript. Only here to say it's retired. */
+  source: z.string().optional(),
   tagline: z.string().max(200).optional(),
   description: z.string().max(20_000).optional(),
   changelog: z.string().max(2000).optional(),
@@ -407,19 +407,15 @@ const officialSchema = z.object({
 
 /** Check the selected package against the server's compiler without publishing. */
 portalRouter.post("/tacons/validate", requirePortal, async (req, res) => {
-  const parsed = officialSchema.pick({ source: true, codeFiles: true }).safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Choose a .tacon file." });
-  }
-  const result = await compilePackage(parsed.data.source, parsed.data.codeFiles);
+  if (!req.body?.app) return res.status(400).json({ error: TACSCRIPT_RETIRED });
+  const prepared = prepareApp(req.body.app);
   return res.json({
-    ok: result.ok,
-    diagnostics: result.diagnostics,
-    manifest: result.ok ? {
-      slug: result.manifest.slug,
-      name: result.manifest.name,
-      version: result.manifest.version,
-    } : null,
+    ok: prepared.ok,
+    checks: prepared.checks,
+    error: prepared.ok ? null : prepared.error,
+    manifest: prepared.ok
+      ? { slug: prepared.manifest.slug, name: prepared.manifest.name, version: prepared.manifest.version }
+      : null,
   });
 });
 
@@ -430,14 +426,10 @@ portalRouter.post("/tacons/publish", requirePortal, async (req, res) => {
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the form." });
   }
 
-  const result = await compilePackage(parsed.data.source, parsed.data.codeFiles);
-  if (!result.ok) {
-    return res.status(400).json({
-      error: "This Tac-On doesn't compile yet.",
-      diagnostics: result.diagnostics,
-    });
-  }
-  const manifest = result.manifest;
+  if (!parsed.data.app) return res.status(400).json({ error: TACSCRIPT_RETIRED });
+  const prepared = prepareApp(parsed.data.app);
+  if (!prepared.ok) return res.status(400).json({ error: prepared.error, checks: prepared.checks });
+  const manifest = prepared.manifest;
 
   const [existing] = await db.select().from(tacons).where(eq(tacons.slug, manifest.slug)).limit(1);
   if (existing && !existing.official) {
@@ -475,7 +467,7 @@ portalRouter.post("/tacons/publish", requirePortal, async (req, res) => {
   if (clash) {
     return res
       .status(409)
-      .json({ error: `Version ${manifest.version} is already published. Bump the version line.` });
+      .json({ error: `Version ${manifest.version} is already published. Raise "version" in manifest.json.` });
   }
 
   const [version] = await db
@@ -483,7 +475,7 @@ portalRouter.post("/tacons/publish", requirePortal, async (req, res) => {
     .values({
       taconId: tacon.id,
       version: manifest.version,
-      source: parsed.data.source,
+      source: prepared.source,
       manifest: manifest as unknown as Record<string, unknown>,
       changelog: parsed.data.changelog ?? null,
       publishedByPortalId: req.portalDev!.id,

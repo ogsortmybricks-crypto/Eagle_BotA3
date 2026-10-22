@@ -18,352 +18,411 @@ Eagle Bot's sweet spot is **self-government**: the Contract, Town Hall,
 elections, positions and the studio's shared record. Tac-Ons that extend those
 are the most valuable.
 
-### Ideas that fit the engine today
+### Ideas that fit
 
 - **Agenda box.** Anyone adds a Town Hall topic. An elected keeper records what
   was decided (worked example below).
 - **Promise log.** Commitments made at Town Hall, who made them and when
-  they're due, shown as a panel on the Town Hall page.
-- **Job check-ins.** Each position's holder logs their duty each week on their
-  desk, so the studio can see whether its jobs are being done.
-- **Appeals board.** A learner files an appeal, and an elected committee
-  position records the hearing and decision. Fits studios that run Hero Buck
-  appeals or Contract disputes.
-- **Rule spotlight.** A panel on the wiki listing rules whose section matches
-  a setting, for example the ROE before a Launch.
-- **Election thank-yous.** A `when election.certified` reaction that records
-  each winner, building a studio history of who served.
-- **Studio visitors / Exhibition sign-up.** A form that collects guests and a
-  list for the learner running the event.
-- **Commitments on the calendar.** Anything with a due date (a promise made at
-  Town Hall, a job's next check-in, a committee's report) gets a `calendar`
-  block, so it shows up next to the field trips instead of hiding on a page.
-- **Quest board.** A `panel on calendar` with `list from calendar.sessions`
-  showing the running Quest, and a form where learners log what they're
-  building for it.
+  they're due, with the overdue ones on top.
+- **Job check-ins.** Each position's holder logs their duty each week, so the
+  studio can see whether its jobs are being done. `positions.list()` tells you
+  who holds what.
+- **Appeals board.** A learner files an appeal; the elected committee records
+  the hearing and decision.
+- **Rule spotlight.** `wiki.search()` for the rules that matter this week (the
+  ROE before a Launch) and show them big.
+- **Election history.** `elections.list()` and `elections.get()` to show who
+  has served, term by term.
+- **Exhibition sign-up.** A form that collects guests and a list for the
+  learner running the event.
+- **Quest board.** `calendar.list()` for the running session and its Quest,
+  and a form where learners log what they're building for it.
+- **Boards.** A month grid, a kanban of studio projects, a goal board with a
+  row per learner — the kind of thing that wants `enableFullWindow`.
 
 ## 2. Design principles
 
-1. **A learner holds the job.** Use `position` for any role that keeps a
-   record, approves or runs a process, so the studio elects or appoints it.
-   Use `allow <position>` for its forms and `allow remove <position>` for
-   clean-up. Add `admin` as a backstop, not as the main audience.
-2. **The record is shared.** Default to lists the whole studio can read. Use
-   `show to` only for things that really are private (a holder's desk, a
-   staff-only page).
-3. **Make every academy's differences settings.** Numbers, names of things, and
-   which section of the Contract to read should all be `setting`s with sensible
-   defaults.
+1. **A learner holds the job.** Anything that keeps a record, approves or runs
+   a process belongs to a position the studio elects or appoints. Create it
+   with a `createPosition` setup action, and check who holds it with
+   `positions.list()`. Admins are a backstop, not the main audience.
+2. **The record is shared.** Every record is readable by everyone who uses
+   the app. Lean into it: the studio's shared record is the point. Never store
+   anything private.
+3. **Hide what people can't do, and handle refusals anyway.** Use
+   `EagleBot.user.role` and position holders to decide what to show. The
+   server decides what's allowed.
 4. **Words a twelve-year-old understands.** Titles say what something is
-   ("Agenda Box"), notes say what to do ("Say what you want the studio to
-   decide"), empty states say what will appear ("Nothing on the agenda yet.").
-5. **Explain the rule in the Tac-On.** A `note ... info` at the top of a page
-   saying how it works beats a README nobody opens.
-6. **One job per Tac-On.** Two small Tac-Ons that `use` each other beat one that
-   does everything. Keep `provides` small and stable, because others will
-   depend on it.
+   ("Agenda Box"), instructions say what to do ("Say what you want the studio
+   to decide"), empty states say what will appear ("Nothing on the agenda
+   yet.").
+5. **Explain the rule in the app.** A line at the top saying how it works beats
+   a README nobody opens.
+6. **One job per Tac-On.** Two small Tac-Ons beat one that does everything.
 7. **Design for updates from day one.** Records from version 1.0.0 will still
-   exist in version 3.0.0. Choose store and field names you won't need to
-   rename.
-8. **Comment the source.** Learner devs read published Tac-Ons to learn. A `#`
-   comment at the top saying what it's for, and one above any trick, helps the
-   next author.
+   exist in version 3.0.0. Choose store names and `data` keys you won't need
+   to rename, and read old records defensively (`record.data.kind ?? "idea"`).
+8. **Comment your code.** Learner devs read published Tac-Ons (Export gives
+   anyone the source) to learn. A comment at the top saying what it's for, and
+   one above any trick, helps the next author.
+9. **Work in a narrow column.** Unless you ask for full screen, your app sits
+   in the page's content column, from a Chromebook to a phone. Size to your
+   container.
 
 ## 3. Patterns that work
 
-### A position owns the record
+### A position owns the job
 
+Create the seat at install, then let whoever holds it do the job:
+
+```json
+{ "type": "createPosition", "title": "Agenda Keeper", "description": "Records what Town Hall decided.", "elected": true }
 ```
-position keeper {
-  title "Record Keeper"
-  seats 1
-  elected true
-  term "One session"
-  duties "Record every decision the same day"
-  form "Record a decision" {
-    into decision
-    ask summary
-  }
+
+```js
+async function holds(title) {
+  const positions = await EagleBot.positions.list();
+  const seat = positions.find((p) => p.title.toLowerCase() === title.toLowerCase());
+  return !!seat && seat.holders.some((h) => h.id === EagleBot.user.id);
 }
+
+const isKeeper = await holds("Agenda Keeper");
+document.getElementById("keeper-tools").hidden = !isKeeper;
 ```
 
-The form on the desk is only visible to the current holder. When their term
-ends, the next holder gets it.
+When the Keeper's term ends, the next holder gets the tools: nothing to
+change.
 
-### Append, don't edit
+### Append, don't overwrite
 
-TacScript can't change a saved record. Model changes as new records: a
-`decision` store next to a `topic` store, or a `status` row that the newest
-one wins. Let the record keeper remove rows that are finished
-(`allow remove keeper`). The history of what was decided lives in the second
-store.
+A learner can change only their own records. So when someone *else* needs to
+move something along (the Keeper deciding a topic, a committee ruling on an
+appeal), don't edit the original: add a new record that points at it.
 
-### "Mine" views
+```js
+await EagleBot.api.createRecord({ topicId: topic.id, result: "passed", note }, { store: "decision" });
 
-`byId` holds who saved the row, and `me.id` is the viewer. Unlike `by` (a
-name, which two people can share), it can't be wrong:
-
-```
-list topic {
-  title "Topics you added"
-  columns title, created
-  where topic.byId is me.id
-  allow remove own              # let people clear their own mistakes
-}
+// Later: a topic is decided if any decision points at it.
+const decided = new Set(decisions.map((d) => d.data.topicId));
+const waiting = topics.filter((t) => !decided.has(t.id));
 ```
 
-If a form needs to record someone *other* than the person submitting, that's
-a `person` field. If it should record the submitter, don't ask: `set who me.id`.
+The history of who decided what is kept, and nobody can quietly rewrite it.
 
-For a record *about* someone, use a `person` field and compare it with
-`me.id`:
+### "Mine"
 
+`created_by` is filled in by Eagle Bot, so it can't be faked:
+
+```js
+const mine = records.filter((r) => r.created_by === EagleBot.user.id);
 ```
-ask my_points sum of entry.amount where entry.hero is me.id
-```
+
+Use `created_by_name` to show who saved something. If a record is *about*
+someone else, store their id in `data` (pick them from `members.list()`).
 
 ### "This week" and "this session"
 
-To *show* the current session and its Quest, read the calendar the guides
-keep:
+Dates are just JavaScript:
 
-```
-list from calendar.sessions {
-  title "This session"
-  columns title, quest, ends
-  where row.status is "running"
-}
+```js
+const startOfWeek = new Date();
+startOfWeek.setHours(0, 0, 0, 0);
+startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());  // Sunday
+const thisWeek = records.filter((r) => new Date(r.created_at) >= startOfWeek);
 ```
 
-To count or list *your own records* from this week or this session, compare
-`created` with the clock — no button, no setting:
+For the session, ask the calendar:
 
+```js
+const today = new Date().toISOString().slice(0, 10);
+const items = await EagleBot.calendar.list({ from: today, to: today });
+const session = items.find((item) => item.kind === "session");
+const thisSession = session ? records.filter((r) => r.created_at.slice(0, 10) >= session.occurrenceStart) : [];
 ```
-ask calls_this_week count of call where call.byId is me.id and call.created above this_week_start
-ask calls_this_session count of call where call.created above session_start
-```
-
-For periods the calendar doesn't know about (a "sprint", a "launch"), put the
-period in a setting and stamp it on each record with `set period setting.period`
-in the form. Filter with `where entry.period is setting.period`.
-
-### Show what matters, when it matters
-
-Use `show if` so a page talks about what's true right now, and `progress` and
-`celebrate` for goals:
-
-```
-ask calls_left max of 0 and setting.calls_needed minus my.calls_this_week
-
-progress "Calls this week" my.calls_this_week of setting.calls_needed
-celebrate "Fun Friday earned!" {
-  show if my.calls_left is 0
-}
-note "Nobody holds this seat yet — hold an election." warning {
-  show if position.keeper.holders is 0
-}
-```
-
-### Checklists against posted items
-
-When learners mark things off a list someone posted (assignments, sign-ups,
-candidates), make the mark a `choice from` the posted store and read the rest
-through it, rather than asking for the same details again:
-
-```
-store finished {
-  field assignment choice from assignment.title, assignment.block where assignment.created above this_week_start
-  field block choice Quest, Civilization
-}
-
-form "I finished it" {
-  into finished
-  ask assignment
-  set block finished.assignment.block
-}
-
-ask done_early count of finished where finished.byId is me.id and finished.assignment.day is not "Friday"
-```
-
-One question instead of three, and nothing for a learner to get wrong.
 
 ### Boards: one row per person
 
-For "how is everyone doing", list the people and work out each one's numbers
-with `value` lines. `each` is the person in the row:
-
-```
-list from people {
-  title "Goal Board"
-  columns name, goal, done
-  where row.role is "learner"
-  value goal sum of core_goal.steps where core_goal.byId is each.id and core_goal.created above this_week_start
-  value done sum of core_log.steps where core_log.byId is each.id and core_log.created above this_week_start
-  progress done of goal
-}
+```js
+const [people, logs] = await Promise.all([EagleBot.members.list(), EagleBot.api.getRecords({ store: "log" })]);
+const learners = people.filter((p) => p.role === "learner");
+const steps = (id) => logs.filter((l) => l.created_by === id).reduce((sum, l) => sum + (l.data.steps ?? 0), 0);
+render(learners.map((p) => ({ name: p.name, done: steps(p.id) })));
 ```
 
-Or, from the records themselves, fold them by person and add them up:
-`group by by` with `total steps`.
+Everything an `ask` or a TacScript `value` line used to do is now a line of
+JavaScript.
 
-### Signed records
+### Settings without settings
 
-For anything that counts as a promise (a check-in, a vote tally, a ledger
-entry), `confirm with code` makes the person type their own six-digit
-confirmation code to save it. Pair it with a `link` column so anyone can be
-pointed at the signed record.
+An app has no install-time settings form. Keep academy choices as a record the
+admin edits from inside the app:
 
-### React to what the studio does
+```js
+const [config] = await EagleBot.api.getRecords({ store: "config" });
+const callsNeeded = config?.data.callsNeeded ?? 3;   // a sensible default
 
-```
-when election.certified {
-  only if event.winner above 0
-  add service {
-    who: event.winner
-    note: event.summary
-  }
-}
+// In an admin-only panel:
+if (config) await EagleBot.api.updateRecord(config.id, { callsNeeded: 4 });
+else await EagleBot.api.createRecord({ callsNeeded: 4 }, { store: "config" });
 ```
 
-Reactions run as the Tac-On. They can only add to its stores and write to the
-activity log, and they never break the event that triggered them.
+Admins and guides can change any record, so learners can read the setting but
+not change someone else's.
 
-### One job per page
+### Show what matters, when it matters
 
-When a Tac-On does more than one thing, give each its own `page` rather than
-one long page: "This week" for the daily task, "History" for browsing old
-records, a guide-only page for the people who check it. They appear as tabs
-on each page and fold into one sidebar entry, so more pages don't mean a
-longer sidebar. Two or three is usually right.
+Draw what's true right now: a "Nobody holds this seat yet — hold an election"
+banner when `holders` is empty, a progress bar towards a goal, a celebration
+when it's reached. Conditional display is just `if`.
 
-### Show up where people already are
+### One page, sections inside
 
-A `panel on town-hall` or `panel on wiki` puts the Tac-On in front of people
-during the meeting or while they read the Contract. That's often better than a
-page they have to remember to open.
+A Tac-On has one sidebar entry. If it does several things, give it tabs or
+sections inside the app ("This week", "History", "For the Keeper"), or ask for
+full screen if it needs the room.
+
+### Finish setting up from inside
+
+If an optional setup action was declined (`exists.position()` says no), show
+admins a one-time card offering to do it now.
 
 ## 4. Worked example: Agenda Box
 
-The whole file. It compiles on the current engine.
+A complete Tac-On. Anyone adds a topic for the next Town Hall; the elected
+Agenda Keeper records what the studio decided.
 
-```
-# Agenda Box: anyone can put a topic on the next Town Hall's agenda, and the
-# elected Agenda Keeper records what the studio decided. Topics can't be edited
-# once saved, so decisions go in their own store and the Keeper clears topics
-# that are done.
-tacon agenda-box {
-  name "Agenda Box"
-  version 1.0.0
-  about "Anyone can put a topic on the next Town Hall's agenda. The Agenda Keeper records what the studio decided."
-  icon megaphone
-  category governance
+**`manifest.json`**
 
-  store topic {
-    label "Agenda topic"
-    field title text required
-    field why longtext
-    field kind choice proposal, problem, idea, celebration
-  }
-
-  store outcome {
-    label "Decision"
-    field topic text required
-    field result choice passed, failed, tabled, resolved
-    field decision longtext required
-  }
-
-  ask waiting count of topic
-  ask decided count of outcome
-
-  page agenda {
-    title "Agenda Box"
-    icon megaphone
-    subtitle "Put a topic on the next Town Hall's agenda."
-    note "Everyone in the studio can see what you add. Say what you want the studio to decide." info
-
-    form "Add a topic" {
-      into topic
-      ask title "Topic"
-      ask why "Why it matters"
-      ask kind "What kind of topic"
-      submit "Add to the agenda"
+```json
+{
+  "name": "agenda-box",
+  "title": "Agenda Box",
+  "version": "1.0.0",
+  "description": "Anyone can put a topic on the next Town Hall's agenda. The Agenda Keeper records what the studio decided.",
+  "author": "Eagle Bot examples",
+  "icon": "📣",
+  "category": "governance",
+  "setup": [
+    {
+      "type": "createPosition",
+      "title": "Agenda Keeper",
+      "description": "Brings the Agenda Box to every Town Hall and records what the studio decided.",
+      "elected": true
+    },
+    {
+      "type": "createWikiPage",
+      "title": "The Agenda Box",
+      "content": "Anyone can add a topic to the Agenda Box before Town Hall. The Agenda Keeper reads every topic at Town Hall and records what the studio decided the same day.",
+      "optional": true,
+      "default": true,
+      "prompt": "Add a short wiki page explaining the Agenda Box?",
+      "why": "So everyone can find out how it works from the Contract.",
+      "id": "explainer"
     }
-
-    list topic {
-      title "On the agenda"
-      columns title, kind, why, by, created
-      sort oldest
-      empty "Nothing on the agenda yet."
-      allow remove agenda_keeper, admin
-    }
-
-    divider
-
-    list outcome {
-      title "What Town Hall decided"
-      columns topic, result, decision, created
-      sort newest
-      limit 20
-      empty "No decisions recorded yet."
-    }
-  }
-
-  panel on town-hall {
-    title "From the Agenda Box"
-    stat "Topics waiting" my.waiting
-    list topic {
-      columns title, kind, by
-      sort oldest
-      limit 10
-      empty "Nothing on the agenda."
-    }
-  }
-
-  position agenda_keeper {
-    title "Agenda Keeper"
-    about "Brings the Agenda Box to every Town Hall and records what the studio decided."
-    seats 1
-    elected true
-    term "One session"
-    duties "Read every topic at Town Hall", "Record each decision the same day", "Clear topics once they're decided"
-
-    note "{my.waiting} topics are waiting for Town Hall."
-    form "Record a decision" {
-      into outcome
-      ask topic "Which topic"
-      ask result "What happened"
-      ask decision "What the studio decided"
-      submit "Record it"
-    }
-  }
-
-  provides outcome, decided
+  ]
 }
+```
+
+**`index.html`**
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="ab">
+    <p class="ab-how">Add a topic you want the studio to decide at the next Town Hall. Everyone can see the agenda.</p>
+
+    <form id="ab-add" class="ab-card">
+      <label>Topic <input name="title" required maxlength="120"></label>
+      <label>Why it matters <textarea name="why" rows="2" maxlength="600"></textarea></label>
+      <label>Kind
+        <select name="kind">
+          <option value="proposal">A proposal</option>
+          <option value="problem">A problem</option>
+          <option value="idea">An idea</option>
+          <option value="celebration">A celebration</option>
+        </select>
+      </label>
+      <button type="submit">Add to the agenda</button>
+    </form>
+
+    <p id="ab-message" class="ab-message" role="status"></p>
+
+    <h2>On the agenda</h2>
+    <ul id="ab-waiting" class="ab-list"></ul>
+
+    <h2>What Town Hall decided</h2>
+    <ul id="ab-decided" class="ab-list"></ul>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
+```
+
+**`style.css`**
+
+```css
+.ab { max-width: 720px; }
+.ab-how { color: #475569; }
+.ab-card { display: grid; gap: 8px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; }
+.ab-card label { display: grid; gap: 4px; font-weight: 600; }
+.ab-card input, .ab-card textarea, .ab-card select { font-weight: 400; padding: 6px 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+.ab button { justify-self: start; padding: 6px 14px; border: 0; border-radius: 6px; background: #1d4ed8; color: #fff; cursor: pointer; }
+.ab-message { min-height: 1.2em; color: #15803d; }
+.ab-message.ab-error { color: #b91c1c; }
+.ab-list { list-style: none; padding: 0; display: grid; gap: 8px; }
+.ab-list li { padding: 10px 12px; border: 1px solid #e2e8f0; border-radius: 10px; }
+.ab-meta { color: #64748b; font-size: 12px; }
+.ab-decide { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ab-decide input { flex: 1; min-width: 160px; padding: 4px 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+```
+
+**`app.js`**
+
+```js
+// Agenda Box: topics go in the "topic" store; the Agenda Keeper's decisions go
+// in "decision", each pointing at its topic. Learners can't change each
+// other's records, so a topic is never edited - it's "decided" once a decision
+// points at it, and the decision keeps the history.
+
+const KEEPER = "Agenda Keeper";
+const $ = (id) => document.getElementById(id);
+
+function say(text, isError) {
+  $("ab-message").textContent = text;
+  $("ab-message").classList.toggle("ab-error", Boolean(isError));
+}
+
+function item(html) {
+  const li = document.createElement("li");
+  li.innerHTML = html;
+  return li;
+}
+
+// Text from people goes on the page as text, never as HTML.
+function escape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+}
+
+async function isKeeper() {
+  const positions = await EagleBot.positions.list();
+  const seat = positions.find((p) => p.title.toLowerCase() === KEEPER.toLowerCase());
+  return Boolean(seat && seat.holders.some((holder) => holder.id === EagleBot.user.id));
+}
+
+async function load() {
+  try {
+    const [topics, decisions, keeper] = await Promise.all([
+      EagleBot.api.getRecords({ store: "topic" }),
+      EagleBot.api.getRecords({ store: "decision" }),
+      isKeeper(),
+    ]);
+    const decidedIds = new Set(decisions.map((d) => d.data.topicId));
+    const titles = new Map(topics.map((t) => [t.id, t.data.title]));
+
+    const waiting = topics.filter((t) => !decidedIds.has(t.id)).reverse(); // oldest first
+    $("ab-waiting").replaceChildren(
+      ...(waiting.length
+        ? waiting.map((topic) => {
+            const li = item(
+              `<strong>${escape(topic.data.title)}</strong>` +
+                (topic.data.why ? `<div>${escape(topic.data.why)}</div>` : "") +
+                `<div class="ab-meta">${escape(topic.data.kind ?? "idea")} · added by ${escape(topic.created_by_name)}</div>`,
+            );
+            if (keeper) li.append(decideForm(topic));
+            return li;
+          })
+        : [item("Nothing on the agenda yet.")]),
+    );
+
+    $("ab-decided").replaceChildren(
+      ...(decisions.length
+        ? decisions.slice(0, 20).map((d) =>
+            item(
+              `<strong>${escape(titles.get(d.data.topicId) ?? "A topic")}</strong> — ${escape(d.data.result)}` +
+                (d.data.note ? `<div>${escape(d.data.note)}</div>` : "") +
+                `<div class="ab-meta">recorded by ${escape(d.created_by_name)} on ${new Date(d.created_at).toLocaleDateString()}</div>`,
+            ),
+          )
+        : [item("No decisions recorded yet.")]),
+    );
+  } catch (error) {
+    say("Couldn't load the agenda: " + error.message, true);
+  }
+}
+
+// Only the Agenda Keeper sees this; the decision is a new record, not an edit.
+function decideForm(topic) {
+  const box = document.createElement("div");
+  box.className = "ab-decide";
+  const note = document.createElement("input");
+  note.placeholder = "What the studio decided";
+  box.append(note);
+  for (const result of ["passed", "failed", "tabled", "resolved"]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = result[0].toUpperCase() + result.slice(1);
+    button.addEventListener("click", async () => {
+      try {
+        await EagleBot.api.createRecord({ topicId: topic.id, result, note: note.value.trim() }, { store: "decision" });
+        say("Decision recorded.");
+        load();
+      } catch (error) {
+        say("Couldn't record that: " + error.message, true);
+      }
+    });
+    box.append(button);
+  }
+  return box;
+}
+
+$("ab-add").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = Object.fromEntries(new FormData(form));
+  if (!String(values.title).trim()) return say("Give the topic a name.", true);
+  try {
+    await EagleBot.api.createRecord(
+      { title: String(values.title).trim(), why: String(values.why).trim(), kind: values.kind },
+      { store: "topic" },
+    );
+    form.reset();
+    say("Added to the agenda.");
+    load();
+  } catch (error) {
+    say("Couldn't add it: " + error.message, true);
+  }
+});
+
+load();
 ```
 
 Why it's built this way:
 
 - **Learners own it.** Anyone can add a topic, and an elected learner keeps
-  the record. Admins can only clear topics, as a backstop.
-- **It's in the meeting.** The Town Hall panel shows the agenda where the
-  Secretary is already working.
-- **It works around the missing "edit".** Decisions are separate records, and
-  finished topics are removed by the Keeper. The decision history stays.
-- **It's reusable.** `provides outcome, decided` lets another Tac-On, such as
-  a promise tracker, read the studio's decisions.
+  the record. The Keeper's seat is created at install.
+- **Nobody rewrites history.** Decisions are new records pointing at topics,
+  so the record of what the studio decided can't be quietly changed.
+- **The rule is in the app and in the Contract.** The first line says how it
+  works, and the optional wiki page puts it in the Contract.
+- **Text stays text.** Everything people typed goes through `escape()`, so a
+  topic called `<b>` shows as `<b>`.
 
 ## 5. Before you call it done
 
-- [ ] Compiles in the Dev menu with no errors, and you've read every warning.
-- [ ] Tested as an admin, a learner and the position holder (see
-      [06-testing-and-publishing.md](06-testing-and-publishing.md)).
-- [ ] Every form and button has a deliberate `allow`.
-- [ ] Every `where` reads the field you meant. Filters that name nothing match
-      nothing, silently.
-- [ ] No `or`, and no one-line `add { a: 1, b: 2 }`. See
-      [05](05-limits-and-workarounds.md).
-- [ ] The `about` line says what it does and which studios it's for.
-- [ ] Anything an academy might disagree about is a `setting`.
-- [ ] If this is an update: old records still read correctly, and nothing was
-      renamed.
+- [ ] The Dev menu checklist passes, and the app works when published as a
+      Draft (see [07-testing-and-publishing.md](07-testing-and-publishing.md)).
+- [ ] Tested as an admin, a learner and the position holder.
+- [ ] Every SDK call has a `catch` that tells the person what went wrong.
+- [ ] Everything people typed is shown as text (`textContent`, or escaped),
+      never pasted in as HTML.
+- [ ] It reads well in a narrow column, or it asks for full screen.
+- [ ] Nothing private is stored in records.
+- [ ] The `description` says what it does and which studios it's for.
+- [ ] Anything an academy might disagree about can be changed by an admin.
+- [ ] If this is an update: old records still read correctly, and no `data`
+      key or store was renamed.
 - [ ] Anything the engine stopped you doing is in `ENGINE-REQUESTS.md`.

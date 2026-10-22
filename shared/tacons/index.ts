@@ -10,6 +10,7 @@
 export * from "./types";
 export { parse, tokenize, type Node, type Token } from "./parse";
 export { compile } from "./compile";
+export * from "./app";
 export {
   display,
   evaluate,

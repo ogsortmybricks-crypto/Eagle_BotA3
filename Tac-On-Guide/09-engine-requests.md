@@ -8,54 +8,54 @@ workspace. Create it the first time you need it.
 
 Anything that would make Tac-Ons better, possible or easier:
 
-- **Bugs:** the engine behaves differently from the reference, or something
-  compiles but does the wrong thing.
-- **Language features:** actions (edit a record?), expressions (`or`, dates),
-  field types (uploads?), widgets, form options (fill in `me`), validation.
-- **Events and data:** a `when` event or a `list from` source that doesn't
-  exist yet.
-- **Display:** icons, links, layout.
+- **Bugs:** Eagle Bot behaves differently from this guide, or an SDK call does
+  the wrong thing.
+- **SDK features:** a call that doesn't exist yet (read Town Hall meetings,
+  cast a vote, add to the calendar), or an option on one that does (filter
+  records on the server).
+- **Format features:** a new setup action, a manifest field, something the
+  sandbox blocks that it could safely allow.
+- **Things TacScript could do that apps can't:** panels on Eagle Bot's pages,
+  calendar entries, reactions to events, private records. Say what you'd build.
+- **Display:** icons, layout, full screen.
 - **Docs:** something here that was wrong or missing.
 
 Good requests are **generic**: something every Tac-On author could use, not a
-feature for one Tac-On. "Let a reaction run on a schedule" is better than
-"remind the Agenda Keeper on Fridays".
+feature for one Tac-On. "Let an app react when an election is certified" is
+better than "remind the Agenda Keeper on Fridays".
 
-The limits in [05-limits-and-workarounds.md](05-limits-and-workarounds.md) are
+The limits in [06-limits-and-workarounds.md](06-limits-and-workarounds.md) are
 a good start. Request the ones that actually cost you something, and say what
 you'd build with them.
 
 ## Format
 
-Number every entry. Newest at the bottom.
+Number every entry, carrying on from the last number in the file. Newest at
+the bottom.
 
 ```markdown
-## ER-001: Let a form fill a field with the person submitting
+## ER-020: Let an app read Town Hall meetings
 
 - **Status:** open
-- **Kind:** language feature
+- **Kind:** SDK feature
 - **Priority:** blocks a Tac-On | workaround exists | nice to have
-- **Needed by:** promise-log (and any "my own records" Tac-On)
+- **Needed by:** promise-log (and any Tac-On built around Town Hall)
 
-**The problem.** Forms can only offer fields for the user to fill in. A
-`person` field can be set to anyone, so "my promises" can't be trusted. `by`
-holds a name, which isn't unique.
+**The problem.** Promises are made at Town Hall, but the SDK can't read
+meetings, so a learner has to type which meeting each promise came from.
 
-**What I tried.** Smallest snippet and what the Dev menu showed:
+**What I tried.** Smallest snippet and what happened:
 
-    form "Make a promise" {
-      into promise
-      ask text
-    }
+    const meetings = await EagleBot.meetings.list();
+    // TypeError: Cannot read properties of undefined (reading 'list')
 
-**What would fix it.** For example `set who me.id` inside a form, or a `by_id`
-column on every record.
+**What would fix it.** `EagleBot.meetings.list()` returning each meeting's id,
+title, date and status, for the studios the person can see.
 
-**What it unlocks.** Trustworthy personal records: promises, check-ins,
-appeals.
+**What it unlocks.** Promise logs, action-item trackers and attendance boards
+that link to the meeting they came from.
 
-**How to verify.** The snippet compiles, and a learner's record shows their
-own name in `who` whatever they send.
+**How to verify.** The snippet returns this studio's meetings, newest first.
 ```
 
 ## Status values
@@ -65,24 +65,21 @@ own name in `who` whatever they send.
 | `open` | you | Written, not yet handed over |
 | `shipped`, plus a note | maintainer | Done. The note says what changed if it differs from the request. |
 | `declined: <reason>` | maintainer | Won't be done. Design around it. |
-| `verified` | you | You re-tested in the Dev menu and it works |
+| `verified` | you | You re-tested and it works |
 | `reopened: <what failed>` | you | Re-tested, and it doesn't work. Add what you saw. |
+
+ER-001 to ER-019 were requests for TacScript, all shipped in October 2026.
+TacScript has since been retired; read those entries as history.
 
 ## When the user says the engine changed
 
-The October 2026 updates shipped ER-001 to ER-019; each entry in
-`ENGINE-REQUESTS.md` says what changed and anything that differs from what was
-asked. Versions published before it keep their old behaviour until you
-republish them.
-
-
 1. The change is only live once Eagle Bot has been published. Ask if you're
    not sure.
-2. For each `shipped` entry, run its **How to verify** steps in the Dev menu.
+2. For each `shipped` entry, run its **How to verify** steps.
 3. Mark each one `verified` or `reopened`.
-4. Remove workarounds that are no longer needed, bump those Tac-Ons' versions,
-   and republish.
-5. Update your copy of the reference if the language changed.
+4. Remove workarounds that are no longer needed, raise those Tac-Ons'
+   versions, and republish.
+5. Update your copy of this guide if the format or the SDK changed.
 
 Write every entry so someone with the engine code, but not your conversation,
 can act on it without asking you anything.

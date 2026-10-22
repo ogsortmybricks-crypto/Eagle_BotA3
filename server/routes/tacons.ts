@@ -28,7 +28,8 @@ import { requireAuth, requirePermission } from "../auth";
 import { logActivity } from "../activity";
 import { requireScope, writeStudioId, StudioChoiceError } from "../studio";
 import {
-  compile,
+  APP_FILE_EXTENSION,
+  packageOf,
   LINK_COLUMN,
   positionAudience,
   type Manifest,
@@ -71,7 +72,16 @@ import {
 import { checkVerifyCode, VerifyCodeError } from "../personal";
 import { heldNames, heldPositions, setPositionsArchived, syncPositions } from "../tacons/positions";
 import { registerExtensionRoutes } from "../tacons/extensions";
-import { compilePackage, codeFilesSchema } from "../tacons/program-build";
+import {
+  RecordError,
+  createRecord,
+  deleteRecord,
+  listRecords,
+  storeName,
+  updateRecord,
+} from "../tacons/app-records";
+import { TACSCRIPT_RETIRED, appBodySchema, prepareApp } from "../tacons/app-publish";
+import { displayModeOf, runSetup } from "../tacons/app-setup";
 
 export const taconsRouter = Router();
 registerExtensionRoutes(taconsRouter);
@@ -204,6 +214,23 @@ taconsRouter.get("/view/:installId/:page", requirePermission("tacons.use"), asyn
     install: entry,
   });
   const view: TaconView = await renderPage(runtime, page);
+  if (entry.manifest.app) {
+    view.app = {
+      html: entry.manifest.app.html,
+      display: displayModeOf(entry.install),
+      identity: {
+        user: { id: req.user!.id, name: req.user!.name, email: req.user!.email ?? null, role: req.user!.role },
+        academy: { id: req.academy!.id, name: req.academy!.name },
+        studio: entry.install.studioId !== null ? { id: entry.install.studioId, name: entry.studioName ?? "" } : null,
+        tacon: {
+          installId: entry.install.id,
+          name: entry.tacon.name,
+          version: entry.version.version,
+          icon: entry.manifest.icon,
+        },
+      },
+    };
+  }
   res.json({ view });
 });
 
@@ -498,6 +525,67 @@ taconsRouter.get(
 );
 
 /* -------------------------------------------------------------------------- */
+/*  An app's own records - what `EagleBot.api` reaches                         */
+/* -------------------------------------------------------------------------- */
+
+/** The install an app's SDK call is about, if this person may use the app. */
+async function openApp(req: Request): Promise<LoadedInstall> {
+  const entry = await openInstall(req);
+  if (!entry || !entry.install.enabled) throw new RecordError(404, "That Tac-On isn't installed here.");
+  if (!entry.manifest.app) throw new RecordError(404, "That Tac-On isn't an app.");
+  const page = entry.manifest.pages[0];
+  if (page && !audienceAllows(page.showTo, req.user!, await heldNames(req.user!.id, entry.install.id))) {
+    throw new RecordError(403, "This Tac-On isn't open to your role.");
+  }
+  return entry;
+}
+
+function recordFailure(res: import("express").Response, error: unknown) {
+  if (error instanceof RecordError) return res.status(error.status).json({ error: error.message });
+  throw error;
+}
+
+taconsRouter.get("/app/:installId/records", requirePermission("tacons.use"), async (req, res) => {
+  try {
+    const entry = await openApp(req);
+    const store = typeof req.query.store === "string" && req.query.store ? storeName(req.query.store) : null;
+    res.json({ records: await listRecords(entry.install, entry.tacon.name, store) });
+  } catch (error) {
+    recordFailure(res, error);
+  }
+});
+
+taconsRouter.post("/app/:installId/records", requirePermission("tacons.use"), async (req, res) => {
+  try {
+    const entry = await openApp(req);
+    const record = await createRecord(entry.install, entry.tacon.name, req.user!, req.body ?? {});
+    res.status(201).json({ record });
+  } catch (error) {
+    recordFailure(res, error);
+  }
+});
+
+taconsRouter.patch("/app/:installId/records/:recordId", requirePermission("tacons.use"), async (req, res) => {
+  try {
+    const entry = await openApp(req);
+    const record = await updateRecord(entry.install, entry.tacon.name, req.user!, Number(req.params.recordId), req.body ?? {});
+    res.json({ record });
+  } catch (error) {
+    recordFailure(res, error);
+  }
+});
+
+taconsRouter.delete("/app/:installId/records/:recordId", requirePermission("tacons.use"), async (req, res) => {
+  try {
+    const entry = await openApp(req);
+    await deleteRecord(entry.install, req.user!, Number(req.params.recordId));
+    res.json({ ok: true });
+  } catch (error) {
+    recordFailure(res, error);
+  }
+});
+
+/* -------------------------------------------------------------------------- */
 /*  The market                                                                 */
 /* -------------------------------------------------------------------------- */
 
@@ -583,6 +671,7 @@ taconsRouter.get("/market/:slug", requirePermission("tacons.market"), async (req
       enabled: row.install.enabled,
       versionId: row.install.versionId,
       settings: row.install.settings,
+      display: displayModeOf(row.install),
       updateAvailable: row.install.versionId !== tacon.latestVersionId,
     })),
   });
@@ -596,7 +685,15 @@ const installSchema = z.object({
   /** Omit for the studio being viewed; null installs it academy-wide. */
   studioId: z.number().int().nullable().optional(),
   settings: z.record(z.unknown()).default({}),
+  /** Which optional setup actions the admin left ticked: ids or indexes. Omit for each one's default. */
+  setupSelection: z.array(z.union([z.string().max(60), z.number().int().min(0)])).max(30).optional(),
+  setup_selection: z.array(z.union([z.string().max(60), z.number().int().min(0)])).max(30).optional(),
 });
+
+/** Settings an admin sends never include Eagle Bot's own `__` keys. */
+function adminSettings(settings: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(settings).filter(([key]) => !key.startsWith("__")));
+}
 
 taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), async (req, res) => {
   const parsed = installSchema.safeParse(req.body ?? {});
@@ -656,7 +753,7 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
         studioId,
         taconId: tacon.id,
         versionId: tacon.latestVersionId!,
-        settings: parsed.data.settings as Record<string, unknown>,
+        settings: adminSettings(parsed.data.settings as Record<string, unknown>),
         installedBy: req.user!.id,
       })
       .returning();
@@ -680,6 +777,16 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
   if (manifest) {
     await syncPositions({ install, taconName: tacon.name, manifest, actorUserId: req.user!.id });
   }
+  // An app's setup: positions, wiki sections, how it opens - as the admin answered.
+  const setupResults = manifest?.app
+    ? await runSetup({
+        install,
+        manifest,
+        taconName: tacon.name,
+        actorUserId: req.user!.id,
+        selection: parsed.data.setupSelection ?? parsed.data.setup_selection,
+      })
+    : [];
 
   await logActivity({
     academyId,
@@ -692,7 +799,7 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
     metadata: { slug: tacon.slug },
   });
 
-  res.status(201).json({ install });
+  res.status(201).json({ install, setup_results: setupResults });
 });
 
 const installPatchSchema = z.object({
@@ -709,7 +816,13 @@ taconsRouter.patch("/installs/:id", requirePermission("tacons.install"), async (
 
   const patch: Record<string, unknown> = { updatedAt: new Date() };
   if (parsed.data.enabled !== undefined) patch.enabled = parsed.data.enabled;
-  if (parsed.data.settings !== undefined) patch.settings = parsed.data.settings;
+  if (parsed.data.settings !== undefined) {
+    // Eagle Bot's own keys (how an app opens, its setup answers) survive an admin's edit.
+    const kept = Object.fromEntries(
+      Object.entries(entry.install.settings ?? {}).filter(([key]) => key.startsWith("__")),
+    );
+    patch.settings = { ...adminSettings(parsed.data.settings), ...kept };
+  }
 
   const [install] = await db
     .update(taconInstalls)
@@ -756,6 +869,12 @@ taconsRouter.post("/installs/:id/update", requirePermission("tacons.install"), a
       actorUserId: req.user!.id,
     });
   }
+  // Setup runs again with the answers given last time. A TacScript Tac-On
+  // moving to its app keeps every record it saved (same install), and a setup
+  // position with an old position's title takes it over, holders and all.
+  const setupResults = manifest?.app
+    ? await runSetup({ install: updated, manifest, taconName: entry.tacon.name, actorUserId: req.user!.id })
+    : [];
 
   await logActivity({
     academyId: req.user!.academyId,
@@ -767,7 +886,19 @@ taconsRouter.post("/installs/:id/update", requirePermission("tacons.install"), a
     summary: `${req.user!.name} updated "${entry.tacon.name}" to ${version.version}.`,
   });
 
-  res.json({ ok: true, version: version.version });
+  res.json({ ok: true, version: version.version, setup_results: setupResults });
+});
+
+/**
+ * The installed version as a package file another academy can install. Only
+ * apps export; a TacScript version has nothing to hand over but its source.
+ */
+taconsRouter.get("/installs/:id/export", requirePermission("tacons.install"), async (req, res) => {
+  const entry = await loadInstall(req.user!.academyId, Number(req.params.id), req.scope);
+  if (!entry) return res.status(404).json({ error: "That isn't installed here." });
+  const pkg = packageOf(entry.manifest);
+  if (!pkg) return res.status(409).json({ error: "This version was written in TacScript, so there's no app to export." });
+  res.json({ file: `${pkg.manifest.name}-${pkg.manifest.version}${APP_FILE_EXTENSION}`, package: pkg });
 });
 
 taconsRouter.delete("/installs/:id", requirePermission("tacons.install"), async (req, res) => {
@@ -907,17 +1038,10 @@ taconsRouter.get("/devs/:handle", requireAuth, async (req, res) => {
 /*  The dev menu                                                               */
 /* -------------------------------------------------------------------------- */
 
-/** Compiles without saving. This is what the editor calls as you type. */
+/** Checks an app package without saving: the same checklist publishing uses. */
 taconsRouter.post("/dev/check", requirePermission("tacons.develop"), async (req, res) => {
-  const parsed = z.object({ source: z.string().max(200_000), codeFiles: codeFilesSchema }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: "Send the source." });
-
-  const result = await compilePackage(parsed.data.source, parsed.data.codeFiles);
-  res.json({
-    ok: result.ok,
-    diagnostics: result.diagnostics,
-    manifest: result.manifest,
-  });
+  const prepared = prepareApp(req.body?.app);
+  res.json({ ok: prepared.ok, checks: prepared.checks, error: prepared.ok ? null : prepared.error });
 });
 
 taconsRouter.get("/dev/mine", requirePermission("tacons.develop"), async (req, res) => {
@@ -958,8 +1082,10 @@ taconsRouter.get("/dev/mine", requirePermission("tacons.develop"), async (req, r
         suspendedReason: row.tacon.suspendedReason,
         installCount: row.tacon.installCount,
         version: row.version?.version ?? null,
-        source: row.version?.source ?? "",
-        codeFiles: (row.version?.manifest as Manifest | undefined)?.codeFiles ?? {},
+        // The latest version as a package, to start the next one from. Null
+        // for a Tac-On last published in TacScript.
+        app: row.version ? packageOf(row.version.manifest as unknown as Manifest) : null,
+        legacySource: row.version && !(row.version.manifest as unknown as Manifest).app ? row.version.source : null,
         updatedAt: row.tacon.updatedAt,
         stats: {
           /** Installs still in place, across every academy on this Eagle Bot. */
@@ -977,8 +1103,9 @@ taconsRouter.get("/dev/mine", requirePermission("tacons.develop"), async (req, r
 });
 
 const publishSchema = z.object({
-  codeFiles: codeFilesSchema,
-  source: z.string().min(10).max(200_000),
+  app: appBodySchema.optional(),
+  /** TacScript. Only here to say it's retired. */
+  source: z.string().optional(),
   tagline: z.string().max(200).optional(),
   description: z.string().max(20_000).optional(),
   changelog: z.string().max(2000).optional(),
@@ -999,14 +1126,10 @@ taconsRouter.post("/dev/publish", requirePermission("tacons.develop"), async (re
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? "Check the form." });
   }
 
-  const result = await compilePackage(parsed.data.source, parsed.data.codeFiles);
-  if (!result.ok) {
-    return res.status(400).json({
-      error: "This Tac-On doesn't compile yet.",
-      diagnostics: result.diagnostics,
-    });
-  }
-  const manifest: Manifest = result.manifest;
+  if (!parsed.data.app) return res.status(400).json({ error: TACSCRIPT_RETIRED });
+  const prepared = prepareApp(parsed.data.app);
+  if (!prepared.ok) return res.status(400).json({ error: prepared.error, checks: prepared.checks });
+  const manifest: Manifest = prepared.manifest;
 
   const [existing] = await db.select().from(tacons).where(eq(tacons.slug, manifest.slug)).limit(1);
   if (existing && existing.authorUserId !== req.user!.id) {
@@ -1045,7 +1168,7 @@ taconsRouter.post("/dev/publish", requirePermission("tacons.develop"), async (re
     .limit(1);
   if (clash) {
     return res.status(409).json({
-      error: `Version ${manifest.version} is already published. Change the \`version\` line before publishing again.`,
+      error: `Version ${manifest.version} is already published. Raise "version" in manifest.json before publishing again.`,
     });
   }
 
@@ -1054,7 +1177,7 @@ taconsRouter.post("/dev/publish", requirePermission("tacons.develop"), async (re
     .values({
       taconId: tacon.id,
       version: manifest.version,
-      source: parsed.data.source,
+      source: prepared.source,
       manifest: manifest as unknown as Record<string, unknown>,
       changelog: parsed.data.changelog ?? null,
       publishedByUserId: req.user!.id,
@@ -1089,7 +1212,7 @@ taconsRouter.post("/dev/publish", requirePermission("tacons.develop"), async (re
   res.status(201).json({
     tacon: { id: tacon.id, slug: tacon.slug },
     version: { id: version.id, version: version.version },
-    diagnostics: result.diagnostics,
+    checks: prepared.checks,
   });
 });
 

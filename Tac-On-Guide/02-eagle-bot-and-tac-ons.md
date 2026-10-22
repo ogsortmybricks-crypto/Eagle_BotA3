@@ -15,9 +15,7 @@ Eagle Bot is where a studio's self-government lives:
   its assigned guides.
 - **Calendar.** The studio's year: sessions (runs of weeks, each with a
   Quest), breaks, field trips, Exhibitions, Launches and deadlines. Guides and
-  admins keep it; everyone reads it. It can be viewed for one studio, a studio
-  group or the whole academy, and it also shows Town Halls and election
-  deadlines.
+  admins keep it; everyone reads it.
 - **Activity log.** A record of everything that happened.
 
 An **academy** has several **studios** (Spark, Middle Studio, Launchpad and so
@@ -28,80 +26,86 @@ still learners.
 
 ## What a Tac-On is
 
-An add-on, like a browser extension. One `.tacon` file, written in TacScript,
-can add:
+A Tac-On is a small web app that adds something to Eagle Bot — like a VS Code
+extension, or a Minecraft data pack. It's a folder:
 
-| It can add | Where it shows up |
+```
+sign-in-sheet/
+  manifest.json      ← required: name, title, version, icon...
+  index.html         ← required: the app
+  style.css          ← optional, any depth of folders
+  app.js
+```
+
+Once an admin installs it, it gets:
+
+| It gets | Where it shows up |
 | --- | --- |
-| **Pages** | The sidebar, under a separate *Tac-Ons* heading |
-| **Panels** | Cards at the bottom of Eagle Bot's own pages: `wiki`, `town-hall`, `elections`, `positions`, `people`, `admin`, `calendar` |
-| **Calendar entries** (`calendar`) | Its own dated records, drawn on the studio calendar next to the guides' field trips and sessions |
-| **Positions** | Real positions on the Positions page, elected or appointed like any other, each with a private **desk** for whoever holds it |
-| **Reactions** (`when`) | Run by themselves when something happens, such as an election being certified |
-| **Stores** | Its own tables of records |
-| **Settings** | Questions the installing admin answers, such as a number or a choice |
+| **A page** | The sidebar, under a separate *Tac-Ons* heading. It opens inside the page, or full screen if it asks to. |
+| **Its own records** | A data store for this install: `EagleBot.api.getRecords()`, `createRecord()` and so on |
+| **The SDK** | Read people, positions, the wiki, elections and the calendar; write to them when the person using it is allowed to |
+| **Setup at install** | Positions and wiki pages it creates when installed, some of them as questions the admin answers |
 
-It can **read** Eagle Bot's wiki rules and sections, positions, elections,
-meetings, people, activity log and studio calendar (what's coming up, and the
-sessions with their Quests). It can **write** only to its own stores and
-to the activity log.
-
-## The safety model
+## The sandbox
 
 This is why an academy can install a Tac-On written by a fourteen-year-old at
-another school. The engine enforces every rule. Don't design anything that
+another school. Eagle Bot enforces every rule. Don't design anything that
 depends on getting around one.
 
-- **Nothing executes.** A Tac-On describes what to show and record. The server
-  compiles and renders it. No code from a Tac-On ever runs.
-- **Reads are scoped to the viewer.** Every read uses the permissions and
-  studio of the person looking, not the author's or the installer's. A learner
-  who can't see the activity log gets an empty list with a note saying why.
-- **Writes are limited to its own records.** A Tac-On can't edit the wiki,
-  create elections, change people, add to or change the studio calendar, send
-  email or reach another academy. Its `calendar` entries are its own records,
-  drawn on the calendar read-only.
-- **Reach is declared.** Every Eagle Bot source a Tac-On lists is shown to the
-  admin before they install it.
-- **Failures are quiet.** A broken reaction fails silently and never breaks
-  somebody's election.
-- **Borrowing is read-only.** One Tac-On can read what another `provides`, in
-  the same academy. If the other isn't installed, its lists come back empty and
-  its numbers read zero.
+- **The app runs in a sandbox.** Its HTML runs in a frame with no access to
+  Eagle Bot's page, cookies or login. It can't make network requests, load
+  scripts or images from the internet, open pop-ups, or navigate away (an app
+  that tries is stopped).
+- **Everything goes through the SDK.** `window.EagleBot` is the app's only way
+  into Eagle Bot. There is **no token**: an app never holds anyone's login.
+- **Every call is made as the person using it.** Eagle Bot checks each SDK call
+  against that person's role and studio, exactly as if they'd clicked the
+  button themselves. A learner using your app can't create a position, however
+  the app is written; an admin can.
+- **An app's records are shared.** Everyone who can open the app can read all
+  its records. People can change and delete only the records they saved
+  (admins and guides can change any).
+- **Setup is shown first.** The admin sees what an app will create before
+  installing it, and can untick anything marked optional.
 
 ## Who's who
 
 | Person | What they do with Tac-Ons |
 | --- | --- |
-| **Learner with dev status** | Writes and publishes Tac-Ons in the **Dev menu**. An admin grants dev status from the person's profile. It's not a role and changes nothing about voting or reading. |
-| **Admin** | Browses **Tac-Ons → Market**, installs, configures, updates and removes them |
-| **Everyone else** | Uses installed Tac-Ons' pages, panels, forms and desks |
+| **Learner with dev status** | Builds and publishes Tac-Ons in the **Dev menu**. An admin grants dev status from the person's profile. It's not a role and changes nothing about voting or reading. |
+| **Admin** | Browses **Tac-Ons → Market**, installs, answers setup questions, updates, exports and removes them |
+| **Everyone else** | Opens installed Tac-Ons from the sidebar and uses them |
 | **Portal devs** | Eagle Bot's maintainers. They publish **official** Tac-Ons (with a badge) from the dev portal (Ctrl+D). |
 
 ## Lifecycle
 
-**Publish.** From the Dev menu (or the dev portal for official ones), choose:
+**Publish.** In the Dev menu choose **New Tac-On**, then **Choose folder** (or
+open a `.taconapp` file). Eagle Bot bundles the folder and shows a checklist.
+Once it passes, choose who can find it:
 
 - **Draft:** only your own academy sees it in the market.
 - **Unlisted:** anyone with the link.
 - **Public:** every academy on this Eagle Bot.
 
-The `version` line decides the version. **A published version is frozen:**
-publishing the same version again is refused. The slug (`tacon my-slug`)
-belongs to whoever publishes it first.
+The manifest's `version` decides the version. **A published version is
+frozen:** publishing the same version again is refused. The `name` belongs to
+whoever publishes it first.
 
-**Install.** An admin installs it **for one studio** or **academy-wide**.
-Two studio installs keep completely separate records. Studios in a group share
-one install's records. Settings are filled in at install and can be changed
-later.
+**Install.** An admin installs it **for one studio** or **academy-wide**, and
+answers its setup questions. Two studio installs keep completely separate
+records. Studios in a group share one install's records.
 
 **Update.** Nothing changes for an academy until its admin presses **Update**.
 A Town Hall must never find a page changed mid-meeting. So **every new version
-must work with records saved by older versions.**
+must read records saved by older versions.** Updating runs the setup again,
+with the answers the admin gave last time.
 
 **Turn off / remove.** *Turn off* hides it and keeps its records. *Remove*
-**deletes every record it made**. Positions it added are archived, and their
+**deletes every record it made**. Positions it created are archived, and their
 history is kept.
+
+**Export.** An installed app can be exported as a `.taconapp` file from its
+Market page, to share with a dev somewhere else.
 
 **Stats.** The Dev menu shows installs over time and which versions academies
 are running.

@@ -10,17 +10,14 @@
  * this academy can install, and the stats tab shows how many took it.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { Link } from "wouter";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   BarChart3,
-  Check,
-  CircleAlert,
   Code2,
   FileCode,
-  FolderOpen,
   Plus,
   Rocket,
   Upload,
@@ -37,10 +34,8 @@ import {
   Spinner,
   Stat,
 } from "@/components/ui";
-import { compile, type Diagnostic, type Manifest } from "@shared/tacons";
-import { TaconPackagePicker } from "@/tacons/TaconPackagePicker";
-import { CodeFilesEditor } from "@/tacons/CodeFilesEditor";
-import type { CodeFiles } from "@shared/tacons/programs";
+import type { AppCheck, AppPackage } from "@shared/tacons";
+import { AppPackagePicker } from "@/tacons/AppPackagePicker";
 
 type MyTacon = {
   id: number;
@@ -55,8 +50,10 @@ type MyTacon = {
   suspendedReason: string | null;
   installCount: number;
   version: string | null;
-  source: string;
-  codeFiles?: CodeFiles;
+  /** The latest version as an app package; null if it was TacScript. */
+  app: AppPackage | null;
+  /** The latest version's TacScript, for a Tac-On not yet rebuilt as an app. */
+  legacySource: string | null;
   updatedAt: string;
   stats: {
     active: number;
@@ -66,44 +63,6 @@ type MyTacon = {
   };
 };
 
-const STARTER_SOURCE = `# Your first Tac-On. Change the name and make it yours.
-tacon my-tac-on {
-  name "My Tac-On"
-  version 0.1.0
-  about "What this is for, in one sentence."
-  icon sparkles
-  category general
-
-  store idea {
-    field title text required
-    field who person
-    field notes longtext
-  }
-
-  page ideas {
-    title "Ideas"
-    nav true
-    subtitle "Somewhere to put them."
-
-    stat "Ideas so far" count of idea
-
-    form "Add an idea" {
-      into idea
-      ask title
-      ask who "Whose idea?"
-      ask notes
-      submit "Add it"
-    }
-
-    list idea {
-      columns title, who, created
-      sort newest
-      empty "Nothing yet. Go first."
-      allow remove admin
-    }
-  }
-}
-`;
 
 export function DevMenu() {
   const { user, can } = useSession();
@@ -133,7 +92,7 @@ export function DevMenu() {
     <>
       <PageHeader
         title="Dev menu"
-        subtitle="Write a Tac-On, publish it, and watch who installs it."
+        subtitle="Build a Tac-On app, publish it, and watch who installs it."
       >
         {user?.devHandle && (
           <Link href={`/devs/${user.devHandle}`} className="btn-secondary">
@@ -142,9 +101,6 @@ export function DevMenu() {
         )}
         <button onClick={() => setEditing("new")} className="btn-primary">
           <Plus className="h-4 w-4" /> New Tac-On
-        </button>
-        <button onClick={() => setEditing("new")} className="btn-secondary">
-          <FolderOpen className="h-4 w-4" /> Upload folder
         </button>
       </PageHeader>
 
@@ -158,8 +114,8 @@ export function DevMenu() {
             </button>
           }
         >
-          A Tac-On is a small program that adds something to Eagle Bot — a page, a panel, or a rule
-          about what happens when the studio does something. Start from the example and change it.
+          A Tac-On is a small web app that adds something to Eagle Bot: a folder with a manifest.json
+          and an index.html. The Tac-On Guide has a complete example to start from.
         </EmptyState>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
@@ -257,30 +213,17 @@ export function DevMenu() {
 
 function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void }) {
   const queryClient = useQueryClient();
-  const [source, setSource] = useState(tacon?.source || STARTER_SOURCE);
-  const [codeFiles, setCodeFiles] = useState<CodeFiles>(tacon?.codeFiles ?? {});
+  const [pkg, setPkg] = useState<AppPackage | null>(null);
   const [tagline, setTagline] = useState(tacon?.tagline ?? "");
   const [description, setDescription] = useState(tacon?.description ?? "");
   const [changelog, setChangelog] = useState("");
   const [visibility, setVisibility] = useState(tacon?.visibility ?? "draft");
   const [error, setError] = useState<string | null>(null);
-  const [serverDiagnostics, setServerDiagnostics] = useState<Diagnostic[]>([]);
-  const [importError, setImportError] = useState<string | null>(null);
-  const [importPending, setImportPending] = useState(false);
-
-  // The compiler is in `shared/`, so the editor checks the exact same rules the
-  // publish endpoint will. No round trip, and no chance of the two disagreeing.
-  const checked = useMemo(() => compile(source), [source]);
-  const errors = checked.diagnostics.filter((entry) => entry.severity === "error");
-  const warnings = checked.diagnostics.filter((entry) => entry.severity === "warning");
-
-  useEffect(() => setServerDiagnostics([]), [source]);
 
   const publish = useMutation({
     mutationFn: () =>
       apiPost<{ version: { version: string } }>("/tacons/dev/publish", {
-        source,
-        codeFiles,
+        app: pkg,
         tagline: tagline.trim() || undefined,
         description: description.trim() || undefined,
         changelog: changelog.trim() || undefined,
@@ -292,11 +235,9 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
       onClose();
     },
     onError: (publishError: Error) => {
-      setError(publishError.message);
-      // The server runs the same compiler, so a refusal comes back with the
-      // same diagnostics the editor shows - worth surfacing if they differ.
-      const payload = publishError instanceof ApiError ? publishError.payload : undefined;
-      setServerDiagnostics((payload?.diagnostics as Diagnostic[] | undefined) ?? []);
+      const checks = publishError instanceof ApiError ? (publishError.payload?.checks as AppCheck[] | undefined) : undefined;
+      const failed = checks?.filter((check) => !check.ok).map((check) => check.message).join(" ");
+      setError(failed ? `${publishError.message} ${failed}` : publishError.message);
     },
   });
 
@@ -313,8 +254,9 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
     onError: (saveError: Error) => setError(saveError.message),
   });
 
-  const manifest: Manifest | null = checked.ok ? checked.manifest : null;
-  const slugMismatch = !!tacon && !!manifest && manifest.slug !== tacon.slug;
+  // A new version has to keep the Tac-On's name, or it would be a different Tac-On.
+  const nameMismatch = !!tacon && !!pkg && pkg.manifest.name !== tacon.slug;
+  const sameVersion = !!tacon && !!pkg && pkg.manifest.version === tacon.version;
 
   return (
     <Modal
@@ -322,7 +264,7 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
       wide
       onClose={onClose}
       title={tacon ? `Edit ${tacon.name}` : "New Tac-On"}
-      description="Tac-Script connects your pages and permissions. Optional JS/TS files provide isolated custom logic and UI."
+      description="A Tac-On is a small web app: a folder with manifest.json and index.html. It runs in a sandbox and uses Eagle Bot through the EagleBot SDK."
       footer={
         <>
           {tacon && (
@@ -339,139 +281,53 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
           </button>
           <button
             onClick={() => publish.mutate()}
-            disabled={publish.isPending || importPending || !!importError || !checked.ok || slugMismatch}
+            disabled={publish.isPending || !pkg || nameMismatch || sameVersion}
             className="btn-primary"
             title={
-              importError
-                ? "Clear the package import error first"
-                : importPending
-                  ? "Wait for the package source to finish reading"
-                  : slugMismatch
-                    ? "Restore this Tac-On's slug or create a new Tac-On"
-                    : checked.ok
-                      ? undefined
-                      : "Fix the errors first"
+              !pkg
+                ? "Choose an app that passes its checks first"
+                : nameMismatch
+                  ? "Keep this Tac-On's name, or use New Tac-On"
+                  : sameVersion
+                    ? "Raise the version in manifest.json first"
+                    : undefined
             }
           >
             {publish.isPending ? <Spinner /> : <Rocket className="h-4 w-4" />} Publish
-            {manifest ? ` ${manifest.version}` : ""}
+            {pkg ? ` ${pkg.manifest.version}` : ""}
           </button>
         </>
       }
     >
       <div className="space-y-4">
         {error && <Banner tone="error">{error}</Banner>}
-        {importError && (
-          <div
-            className="flex flex-col gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900 sm:flex-row sm:items-center sm:justify-between"
-            role="alert"
-          >
-            <span>
-              {importError} The current source has been kept; publishing is blocked until this is
-              cleared or a package is successfully selected.
-            </span>
-            <button
-              type="button"
-              className="btn-secondary btn-sm shrink-0"
-              onClick={() => setImportError(null)}
-            >
-              Clear import error
-            </button>
-          </div>
+
+        {tacon?.legacySource && (
+          <Banner tone="info" title="This Tac-On was written in TacScript">
+            TacScript has been retired. Rebuild it as an app with <code>"name": "{tacon.slug}"</code> in its
+            manifest and publish that as the next version. When an academy updates, every record it saved
+            comes with it — <code>EagleBot.api.getRecords()</code> returns them, tagged with the store they
+            were saved in. The installs running it now keep working until then.
+            <details className="mt-2">
+              <summary className="cursor-pointer text-xs font-medium">See the TacScript source</summary>
+              <pre className="mt-2 max-h-64 overflow-auto rounded bg-white p-2 text-[11px]">{tacon.legacySource}</pre>
+            </details>
+          </Banner>
         )}
 
-        <TaconPackagePicker
-          blocked={publish.isPending}
-          onReadingChange={setImportPending}
-          onImported={(result) => {
-            setSource(result.source);
-            setCodeFiles(result.codeFiles);
-            setImportError(null);
-            setError(null);
-            publish.reset();
-          }}
-          onImportError={setImportError}
-        />
+        <AppPackagePicker current={tacon?.app ?? null} onChange={setPkg} disabled={publish.isPending} />
 
-        <div className="grid gap-4 lg:grid-cols-[1.35fr_1fr]">
-          <div>
-            <CodeFilesEditor files={codeFiles} onChange={setCodeFiles} disabled={publish.isPending || importPending} />
-            <label className="label" htmlFor="source">
-              Source
-            </label>
-            <textarea
-              id="source"
-              spellCheck={false}
-              value={source}
-              disabled={importPending || publish.isPending}
-              onChange={(event) => setSource(event.target.value)}
-              className="input min-h-[360px] font-mono text-[13px] leading-relaxed"
-            />
-            <p className="hint">
-              Lines look like <code>keyword argument</code>, and blocks use braces. The reference is
-              in the docs under Tac-Ons.
-            </p>
-          </div>
-
-          <div className="space-y-3">
-            <div
-              className={`rounded-lg border p-3 text-sm ${
-                checked.ok
-                  ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                  : "border-red-200 bg-red-50 text-red-900"
-              }`}
-            >
-              <div className="flex items-center gap-2 font-semibold">
-                {checked.ok ? <Check className="h-4 w-4" /> : <CircleAlert className="h-4 w-4" />}
-                {checked.ok ? "Compiles" : `${errors.length} thing${errors.length === 1 ? "" : "s"} to fix`}
-              </div>
-              {(errors.length > 0 || warnings.length > 0 || serverDiagnostics.length > 0) && (
-                <ul className="mt-2 space-y-1 text-xs">
-                  {[...errors, ...warnings, ...serverDiagnostics].map((entry, index) => (
-                    <li key={index}>
-                      <span className="font-medium">Line {entry.line}</span>
-                      {entry.severity === "warning" && " (warning)"}: {entry.message}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            {manifest && (
-              <div className="rounded-lg border border-gray-200 p-3 text-sm">
-                <div className="font-semibold text-gray-900">{manifest.name}</div>
-                <div className="text-xs text-gray-500">
-                  {manifest.slug} · {manifest.version}
-                </div>
-                <ul className="mt-2 space-y-1 text-xs text-gray-600">
-                  <li>
-                    {manifest.pages.length} page{manifest.pages.length === 1 ? "" : "s"},{" "}
-                    {manifest.panels.length} panel{manifest.panels.length === 1 ? "" : "s"},{" "}
-                    {manifest.positions.length} position{manifest.positions.length === 1 ? "" : "s"},{" "}
-                    {manifest.hooks.length} reaction{manifest.hooks.length === 1 ? "" : "s"}
-                  </li>
-                  <li>
-                    Stores: {manifest.stores.map((store) => store.name).join(", ") || "none"}
-                  </li>
-                  <li>Reads: {manifest.needs.join(", ") || "nothing outside itself"}</li>
-                  {manifest.provides.length > 0 && (
-                    <li>Other Tac-Ons may read: {manifest.provides.join(", ")}</li>
-                  )}
-                  {manifest.uses.length > 0 && (
-                    <li>Uses: {manifest.uses.map((use) => use.slug).join(", ")}</li>
-                  )}
-                </ul>
-              </div>
-            )}
-            {slugMismatch && (
-              <Banner tone="error" title="This source belongs to a different Tac-On">
-                This editor is for <code>{tacon.slug}</code>, but the source declares{" "}
-                <code>{manifest.slug}</code>. Change the source slug back to{" "}
-                <code>{tacon.slug}</code>, or use New Tac-On to publish it as a separate listing.
-              </Banner>
-            )}
-          </div>
-        </div>
+        {nameMismatch && (
+          <Banner tone="error" title="This app belongs to a different Tac-On">
+            This editor is for <code>{tacon.slug}</code>, but the manifest says <code>{pkg.manifest.name}</code>.
+            Change the manifest's name back, or use New Tac-On to publish it as a separate listing.
+          </Banner>
+        )}
+        {sameVersion && (
+          <Banner tone="warning" title="That version is already published">
+            Raise <code>version</code> in manifest.json — Eagle Bot never overwrites a version an academy is running.
+          </Banner>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
@@ -527,10 +383,7 @@ function Editor({ tacon, onClose }: { tacon: MyTacon | null; onClose: () => void
             onChange={(event) => setChangelog(event.target.value)}
             placeholder="Fixed the total counting spends twice."
           />
-          <p className="hint">
-            Publishing needs a new <code>version</code> line in the source — Eagle Bot never
-            overwrites a version an academy is already running.
-          </p>
+          <p className="hint">Admins see this when they decide whether to update.</p>
         </div>
       </div>
     </Modal>
