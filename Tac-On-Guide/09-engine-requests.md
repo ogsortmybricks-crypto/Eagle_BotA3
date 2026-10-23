@@ -69,7 +69,9 @@ that link to the meeting they came from.
 | `reopened: <what failed>` | you | Re-tested, and it doesn't work. Add what you saw. |
 
 ER-001 to ER-019 were requests for TacScript, all shipped in October 2026.
-TacScript has since been retired; read those entries as history.
+TacScript has since been retired. The note at the top of
+`ENGINE-REQUESTS.md` says where each of those needs is met in an app; check
+there before asking again for something that already exists.
 
 ## When the user says the engine changed
 

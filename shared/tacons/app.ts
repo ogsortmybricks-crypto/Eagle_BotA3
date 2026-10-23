@@ -18,7 +18,22 @@
  */
 
 import { z } from "zod";
-import type { Manifest, PageDef } from "./types";
+import { parseTemplate } from "./expr";
+import {
+  AUDIENCES,
+  CALENDAR_FEED_KINDS,
+  HOOK_EVENTS,
+  PANEL_HOSTS,
+  studioPositionAudience,
+  type CalendarFeedDef,
+  type CalendarFeedKind,
+  type HookEvent,
+  type Manifest,
+  type PageDef,
+  type PanelDef,
+  type PanelHost,
+  type StoreDef,
+} from "./types";
 
 /* -------------------------------------------------------------------------- */
 /*  Limits                                                                     */
@@ -77,6 +92,132 @@ export type SetupAction = z.infer<typeof setupActionSchema>;
 export const SETUP_ACTION_TYPES = ["createPosition", "createWikiPage", "enableFullWindow"] as const;
 
 /* -------------------------------------------------------------------------- */
+/*  Who: audiences                                                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * An audience entry: `"everyone"`, a role (`"admin"`, `"guide"`, `"secretary"`,
+ * `"learner"`, `"dev"`), or `"position:<title>"` - whoever holds a position
+ * with that title in the studio the app is installed in, right now.
+ */
+export type AudienceEntry = string;
+const POSITION_PREFIX = "position:";
+
+function audienceProblem(entries: unknown, where: string): string | null {
+  if (!Array.isArray(entries) || entries.length === 0 || entries.length > 20) {
+    return `${where} has to be a list of 1 to 20 entries, like ["learner", "position:Agenda Keeper"].`;
+  }
+  for (const entry of entries) {
+    if (typeof entry !== "string") return `${where}: every entry has to be text.`;
+    if (entry.toLowerCase().startsWith(POSITION_PREFIX)) {
+      const title = entry.slice(POSITION_PREFIX.length).trim();
+      if (!title || title.length > 120) return `${where}: "${entry}" needs a position title after "position:".`;
+      continue;
+    }
+    if (!(AUDIENCES as readonly string[]).includes(entry.toLowerCase())) {
+      return `${where}: "${entry}" isn't an audience. Use everyone, admin, guide, secretary, learner, dev, or "position:<title>".`;
+    }
+  }
+  return null;
+}
+
+/**
+ * An audience as the engine stores it. Empty means everyone. Admins are always
+ * in it: an app can't lock the academy that runs it out of it.
+ */
+export function compileAudience(entries: AudienceEntry[] | undefined): string[] {
+  if (!entries || entries.some((entry) => entry.toLowerCase() === "everyone")) return [];
+  const compiled = entries.map((entry) =>
+    entry.toLowerCase().startsWith(POSITION_PREFIX)
+      ? studioPositionAudience(entry.slice(POSITION_PREFIX.length))
+      : entry.toLowerCase(),
+  );
+  return compiled.includes("admin") ? compiled : [...compiled, "admin"];
+}
+
+function positionTitles(entries: AudienceEntry[] | undefined): string[] {
+  return (entries ?? [])
+    .filter((entry) => entry.toLowerCase().startsWith(POSITION_PREFIX))
+    .map((entry) => entry.slice(POSITION_PREFIX.length).trim());
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Stores, calendar, panels, reactions                                        */
+/* -------------------------------------------------------------------------- */
+
+export const STORE_NAME = /^[A-Za-z][A-Za-z0-9_-]{0,59}$/;
+
+/** `"stores": { "decision": { "write": ["position:Agenda Keeper", "admin"] } }` */
+export type StoreRule = {
+  /** Who may read this store's records. Everyone who can open the app, if left out. */
+  read?: AudienceEntry[];
+  /** Who may add to it. Everyone who can open the app, if left out. */
+  write?: AudienceEntry[];
+  /** Every record has to be signed with the saver's six-digit confirmation code. */
+  sign?: boolean;
+};
+
+/** `"calendar": [{ "store": "trip", "on": "day", "title": "Trip: {place}" }]` */
+export type AppCalendar = {
+  store: string;
+  /** `"created"`, or a key in each record's data holding a day ("2026-10-23"). */
+  on: string;
+  /** A key holding the last day, for an entry spanning several days. */
+  until?: string;
+  /** What the entry says. `{key}` is a value from the record's data; `{by}` who saved it. */
+  title: string;
+  kind?: CalendarFeedKind;
+  color?: string;
+  /** Only show each person the records they saved. */
+  mine?: boolean;
+  audience?: AudienceEntry[];
+};
+
+/** `"panels": [{ "host": "town-hall", "title": "From the Agenda Box" }]` */
+export type AppPanel = { host: PanelHost; title?: string; audience?: AudienceEntry[] };
+
+/**
+ * `"reactions": [{ "on": "election.certified", "store": "service",
+ *   "data": { "who": "{event.winner}", "note": "{event.summary}" } }]`
+ */
+export type AppReaction = {
+  on: HookEvent;
+  /** Only when every one of these `event.*` values matches. */
+  when?: Record<string, string | number | boolean>;
+  store: string;
+  /** The record to add. Text with `{event.x}` in it is filled in; `"{event.x}"` alone keeps the value's type. */
+  data: Record<string, string | number | boolean | null>;
+};
+
+const calendarSchema = z.object({
+  store: z.string().regex(STORE_NAME),
+  on: z.string().min(1).max(60),
+  until: z.string().min(1).max(60).optional(),
+  title: z.string().min(1).max(200),
+  kind: z.enum(CALENDAR_FEED_KINDS).optional(),
+  color: z.string().regex(/^#[0-9a-f]{6}$/i).optional(),
+  mine: z.boolean().optional(),
+  audience: z.array(z.string()).optional(),
+});
+const panelSchema = z.object({
+  host: z.enum(PANEL_HOSTS),
+  title: z.string().min(1).max(100).optional(),
+  audience: z.array(z.string()).optional(),
+});
+const scalar = z.union([z.string().max(2000), z.number(), z.boolean(), z.null()]);
+const reactionSchema = z.object({
+  on: z.enum(HOOK_EVENTS),
+  when: z.record(z.union([z.string().max(200), z.number(), z.boolean()])).optional(),
+  store: z.string().regex(STORE_NAME),
+  data: z.record(scalar),
+});
+const storeRuleSchema = z.object({
+  read: z.array(z.string()).optional(),
+  write: z.array(z.string()).optional(),
+  sign: z.boolean().optional(),
+});
+
+/* -------------------------------------------------------------------------- */
 /*  manifest.json                                                              */
 /* -------------------------------------------------------------------------- */
 
@@ -89,6 +230,11 @@ export const appManifestSchema = z.object({
   icon: z.string(),
   category: z.string().max(40).optional(),
   setup: z.array(z.unknown()).max(30).optional(),
+  audience: z.unknown().optional(),
+  stores: z.unknown().optional(),
+  calendar: z.unknown().optional(),
+  panels: z.unknown().optional(),
+  reactions: z.unknown().optional(),
 });
 
 export type AppManifest = {
@@ -100,6 +246,12 @@ export type AppManifest = {
   icon: string;
   category?: string;
   setup?: SetupAction[];
+  /** Who can open it. Everyone in the studio, if left out. */
+  audience?: AudienceEntry[];
+  stores?: Record<string, StoreRule>;
+  calendar?: AppCalendar[];
+  panels?: AppPanel[];
+  reactions?: AppReaction[];
 };
 
 /** A published app: its manifest and its bundled HTML. */
@@ -110,6 +262,11 @@ export type AppDef = {
   html: string;
   author: string;
   setup: SetupAction[];
+  audience?: AudienceEntry[];
+  stores?: Record<string, StoreRule>;
+  calendar?: AppCalendar[];
+  panels?: AppPanel[];
+  reactions?: AppReaction[];
 };
 
 export type AppCheck = { label: string; ok: boolean; message?: string };
@@ -189,6 +346,80 @@ export function checkApp(input: { manifest: unknown; html: string | null }): {
   }
   add("setup", setupProblems.length ? setupProblems.join(" ") : null);
 
+  // Who can open it.
+  const audience = raw.audience === undefined ? undefined : (raw.audience as AudienceEntry[]);
+  if (raw.audience !== undefined) add("audience", audienceProblem(raw.audience, "audience"));
+
+  // Per-store rules.
+  const stores: Record<string, StoreRule> = {};
+  if (raw.stores !== undefined) {
+    const problems: string[] = [];
+    if (!raw.stores || typeof raw.stores !== "object" || Array.isArray(raw.stores)) {
+      problems.push('stores has to be an object, like { "decision": { "write": ["admin"] } }.');
+    } else {
+      const entries = Object.entries(raw.stores as Record<string, unknown>);
+      if (entries.length > 30) problems.push("Keep stores to 30 or fewer.");
+      for (const [name, rule] of entries) {
+        if (!STORE_NAME.test(name) || name.startsWith("__")) {
+          problems.push(`stores: "${name}" isn't a store name. Use letters, numbers, _ or -, starting with a letter.`);
+          continue;
+        }
+        const parsedRule = storeRuleSchema.strict().safeParse(rule);
+        if (!parsedRule.success) {
+          problems.push(`stores.${name}: use "read", "write" (audiences) and "sign" (true or false).`);
+          continue;
+        }
+        for (const key of ["read", "write"] as const) {
+          const problem = parsedRule.data[key] !== undefined ? audienceProblem(parsedRule.data[key], `stores.${name}.${key}`) : null;
+          if (problem) problems.push(problem);
+        }
+        stores[name] = parsedRule.data;
+      }
+    }
+    add("stores", problems.length ? problems.join(" ") : null);
+  }
+
+  const listOf = <T,>(key: string, schema: z.ZodType<T>, max: number, extra: (item: T, where: string) => string | null): T[] => {
+    const value = raw[key];
+    if (value === undefined) return [];
+    const problems: string[] = [];
+    const items: T[] = [];
+    if (!Array.isArray(value)) problems.push(`${key} has to be a list.`);
+    else if (value.length > max) problems.push(`Keep ${key} to ${max} or fewer.`);
+    else {
+      value.forEach((entry, index) => {
+        const where = `${key}[${index}]`;
+        const parsedItem = schema.safeParse(entry);
+        if (!parsedItem.success) {
+          problems.push(`${where}: ${parsedItem.error.issues.map((issue) => `${issue.path.join(".") || "entry"} ${issue.message.toLowerCase()}`).join("; ")}.`);
+          return;
+        }
+        const problem = extra(parsedItem.data, where);
+        if (problem) problems.push(problem);
+        else items.push(parsedItem.data);
+      });
+    }
+    add(key, problems.length ? problems.join(" ") : null);
+    return items;
+  };
+
+  const calendar = listOf("calendar", calendarSchema as z.ZodType<AppCalendar>, 10, (entry, where) =>
+    entry.audience !== undefined ? audienceProblem(entry.audience, `${where}.audience`) : null,
+  );
+  const panels = listOf("panels", panelSchema as z.ZodType<AppPanel>, PANEL_HOSTS.length, (entry, where) =>
+    entry.audience !== undefined ? audienceProblem(entry.audience, `${where}.audience`) : null,
+  );
+  if (new Set(panels.map((panel) => panel.host)).size !== panels.length) {
+    add("panels", "Only one panel per Eagle Bot page.");
+  }
+  const reactions = listOf("reactions", reactionSchema as z.ZodType<AppReaction>, 20, (entry, where) => {
+    const keys = Object.keys(entry.when ?? {});
+    if (keys.some((key) => !key.startsWith("event."))) return `${where}.when: every key has to start with "event.", like "event.kind".`;
+    if (Object.keys(entry.data).length === 0) return `${where}.data: say what to save.`;
+    if (JSON.stringify(entry.data).length > 10_000) return `${where}.data is too large.`;
+    return null;
+  });
+
   const html = input.html ?? "";
   add(
     "index.html",
@@ -216,6 +447,11 @@ export function checkApp(input: { manifest: unknown; html: string | null }): {
             icon,
             ...(text("category") ? { category: text("category").toLowerCase() } : {}),
             ...(setup.length ? { setup } : {}),
+            ...(audience ? { audience } : {}),
+            ...(Object.keys(stores).length ? { stores } : {}),
+            ...(calendar.length ? { calendar } : {}),
+            ...(panels.length ? { panels } : {}),
+            ...(reactions.length ? { reactions } : {}),
           },
           html,
         }
@@ -229,35 +465,91 @@ export function checkApp(input: { manifest: unknown; html: string | null }): {
  * sidebar and records all work off this exactly as they did for TacScript.
  */
 export function manifestForApp(pkg: AppPackage): Manifest {
+  const app = pkg.manifest;
   const page: PageDef = {
     name: "app",
-    title: pkg.manifest.title,
-    icon: pkg.manifest.icon,
+    title: app.title,
+    icon: app.icon,
     nav: true,
     subtitle: null,
-    showTo: [],
+    showTo: compileAudience(app.audience),
     widgets: [],
   };
+
+  // Stores the engine itself reads (the calendar, reactions) have to be named.
+  const storeNames = new Set<string>([
+    ...Object.keys(app.stores ?? {}),
+    ...(app.calendar ?? []).map((entry) => entry.store),
+    ...(app.reactions ?? []).map((entry) => entry.store),
+  ]);
+  const stores: StoreDef[] = [...storeNames].map((name) => ({ name, label: name, fields: [] }));
+
+  const panels: PanelDef[] = (app.panels ?? []).map((panel) => ({
+    host: panel.host,
+    title: panel.title ?? app.title,
+    // A panel is never shown to someone who couldn't open the app.
+    showTo: panel.audience ? compileAudience(panel.audience) : page.showTo,
+    widgets: [],
+  }));
+
+  const calendars: CalendarFeedDef[] = (app.calendar ?? []).map((entry) => ({
+    store: [entry.store],
+    title: parseTemplate(entry.title, 1, []),
+    on: entry.on,
+    until: entry.until ?? null,
+    at: null,
+    kind: entry.kind ?? "event",
+    color: entry.color ?? null,
+    where: entry.mine
+      ? { all: [{ left: { kind: "path", parts: ["row", "byId"] }, op: "is", right: { kind: "path", parts: ["me", "id"] } }] }
+      : null,
+    // Entries show a store's records, so by default only to whoever may read that store.
+    showTo: entry.audience
+      ? compileAudience(entry.audience)
+      : app.stores?.[entry.store]?.read
+        ? compileAudience(app.stores[entry.store].read)
+        : page.showTo,
+    open: null,
+    openApp: true,
+  }));
+
+  const titles = new Set<string>([
+    ...positionTitles(app.audience),
+    ...Object.values(app.stores ?? {}).flatMap((rule) => [...positionTitles(rule.read), ...positionTitles(rule.write)]),
+    ...(app.calendar ?? []).flatMap((entry) => positionTitles(entry.audience)),
+    ...(app.panels ?? []).flatMap((panel) => positionTitles(panel.audience)),
+  ]);
+
   return {
-    slug: pkg.manifest.name,
-    name: pkg.manifest.title,
-    version: pkg.manifest.version,
-    about: pkg.manifest.description,
-    icon: pkg.manifest.icon,
-    category: pkg.manifest.category ?? "general",
-    author: pkg.manifest.author,
+    slug: app.name,
+    name: app.title,
+    version: app.version,
+    about: app.description,
+    icon: app.icon,
+    category: app.category ?? "general",
+    author: app.author,
     needs: [],
     provides: [],
     uses: [],
     settings: [],
-    stores: [],
+    stores,
     pages: [page],
-    panels: [],
+    panels,
     positions: [],
     hooks: [],
     computes: [],
-    calendars: [],
-    app: { html: pkg.html, author: pkg.manifest.author, setup: pkg.manifest.setup ?? [] },
+    calendars,
+    ...(titles.size ? { studioPositions: [...titles] } : {}),
+    app: {
+      html: pkg.html,
+      author: app.author,
+      setup: app.setup ?? [],
+      ...(app.audience ? { audience: app.audience } : {}),
+      ...(app.stores ? { stores: app.stores } : {}),
+      ...(app.calendar ? { calendar: app.calendar } : {}),
+      ...(app.panels ? { panels: app.panels } : {}),
+      ...(app.reactions ? { reactions: app.reactions } : {}),
+    },
   };
 }
 
@@ -274,6 +566,11 @@ export function packageOf(manifest: Manifest): AppPackage | null {
       icon: manifest.icon,
       ...(manifest.category && manifest.category !== "general" ? { category: manifest.category } : {}),
       ...(manifest.app.setup.length ? { setup: manifest.app.setup } : {}),
+      ...(manifest.app.audience ? { audience: manifest.app.audience } : {}),
+      ...(manifest.app.stores ? { stores: manifest.app.stores } : {}),
+      ...(manifest.app.calendar ? { calendar: manifest.app.calendar } : {}),
+      ...(manifest.app.panels ? { panels: manifest.app.panels } : {}),
+      ...(manifest.app.reactions ? { reactions: manifest.app.reactions } : {}),
     },
     html: manifest.app.html,
   };
@@ -312,6 +609,41 @@ export function describeAction(action: SetupAction): string {
     case "enableFullWindow":
       return action.mode === "inline" ? "Open inside the page" : "Open full screen";
   }
+}
+
+/** An audience in words: `["learner", "position:Agenda Keeper"]` -> "learners and the Agenda Keeper". */
+export function audienceWords(entries: AudienceEntry[] | undefined): string {
+  if (!entries || entries.some((entry) => entry.toLowerCase() === "everyone")) return "everyone";
+  const withAdmins = entries.some((entry) => entry.toLowerCase() === "admin") ? entries : [...entries, "admin"];
+  const words = withAdmins.map((entry) =>
+    entry.toLowerCase().startsWith(POSITION_PREFIX)
+      ? `the ${entry.slice(POSITION_PREFIX.length).trim()}`
+      : `${entry.toLowerCase()}s`,
+  );
+  return words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
+}
+
+/**
+ * What an app does beyond its own page, in sentences an admin reads before
+ * installing it: who can open it, private stores, panels, calendar entries and
+ * reactions.
+ */
+export function describeApp(app: Pick<AppManifest, "audience" | "stores" | "calendar" | "panels" | "reactions">): string[] {
+  const lines: string[] = [];
+  if (app.audience) lines.push(`Only ${audienceWords(app.audience)} can open it.`);
+  for (const [store, rule] of Object.entries(app.stores ?? {})) {
+    const parts: string[] = [];
+    if (rule.read) parts.push(`only ${audienceWords(rule.read)} can read them`);
+    if (rule.write) parts.push(`only ${audienceWords(rule.write)} can add to them`);
+    if (rule.sign) parts.push("each one is signed with the saver's confirmation code");
+    if (parts.length) lines.push(`Its "${store}" records: ${parts.join("; ")}.`);
+  }
+  for (const panel of app.panels ?? []) lines.push(`Adds a card to the ${panel.host} page${panel.title ? `: "${panel.title}"` : ""}.`);
+  for (const entry of app.calendar ?? []) {
+    lines.push(`Puts its "${entry.store}" records on the studio calendar${entry.mine ? " (each person sees their own)" : ""}.`);
+  }
+  for (const reaction of app.reactions ?? []) lines.push(`Saves a "${reaction.store}" record by itself when ${reaction.on} happens.`);
+  return lines;
 }
 
 /* -------------------------------------------------------------------------- */

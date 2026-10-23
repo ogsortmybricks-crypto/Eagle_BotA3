@@ -29,11 +29,23 @@ app makes requests far faster than a person could (a runaway loop).
 
 ```js
 EagleBot.user      // { id, name, email, role } — the person using the app
-EagleBot.academy   // { id, name }
+EagleBot.academy   // { id, name, timeZone } — timeZone like "America/New_York", or null
 EagleBot.studio    // { id, name } — the studio it's installed in, or null if academy-wide
 EagleBot.tacon     // { installId, name, version, icon }
+EagleBot.clock     // { today: "2026-10-23", weekStart: "2026-10-18", weekday: "Friday" }
 EagleBot.display   // "inline" or "fullscreen"
+EagleBot.place     // "page", or "panel:town-hall" when it's running as a panel
+EagleBot.params    // the page address's parameters: { record: "42" } for ...?record=42
+EagleBot.stores    // { decision: { read: true, write: false, sign: true } } — for stores with rules
 ```
+
+`clock` is the academy's own day, in its time zone (Settings → Display), so
+"today" and "this week" mean the same for everyone, whatever their laptop's
+clock says. `weekStart` is the Sunday the week began.
+
+`stores` lists only stores your manifest gives rules (see
+[03](03-app-format.md)), with what *this person* may do. Use it to hide a form
+they can't use.
 
 `role` is `"admin"`, `"guide"`, `"secretary"` or `"learner"`. Use it to decide
 what to *show*:
@@ -59,12 +71,13 @@ Records are plain JSON objects you shape yourself.
 
 | Who | Can |
 | --- | --- |
-| Anyone who can open the app | Read every record, and add records |
+| Anyone who can open the app | Read and add records — narrowed store by store by the manifest's `stores` rules |
 | The person who saved a record | Change or delete it |
 | Admins and guides | Change or delete any record |
 
-Everyone using the app can read every record, so **don't store anything
-private** in them.
+Everyone using the app can read every record **unless** the manifest's
+`stores` gives that store a `read` rule. Then only that audience gets those
+records; for everyone else they simply aren't in `getRecords()`.
 
 ### `EagleBot.api.getRecords(options?)`
 
@@ -83,27 +96,65 @@ Returns the newest 5,000 records, newest first:
 | `created_at`, `updated_at` | ISO timestamps |
 | `created_by` | The id of who saved it (null if a TacScript reaction wrote it) |
 | `created_by_name` | Their name — trustworthy, because Eagle Bot fills it in |
+| `signed` | `{ by, by_name, at }` when it was signed with a confirmation code, otherwise `null` |
 
 ### `EagleBot.api.createRecord(data, options?)`
 
 ```js
 const record = await EagleBot.api.createRecord({ date: "2026-10-22", present: true });
 const goal = await EagleBot.api.createRecord({ steps: 5 }, { store: "goal" });
+const call = await EagleBot.api.createRecord({ partner: 37 }, { store: "call", sign: true, prompt: "Sign this AP call?" });
 ```
 
 `data` must be a plain object under 30 KB. `store` is a word of letters,
 numbers, `_` or `-`, starting with a letter. Use stores to keep different
 kinds of record apart (goals and check-ins, say). Returns the new record.
 
+**Signing.** When the store has `"sign": true` in the manifest, or you pass
+`sign: true`, Eagle Bot shows its own box asking for the person's six-digit
+confirmation code (with your `prompt` as its question). Your app never sees
+the code. If they cancel, or the code is wrong, nothing is saved and the call
+fails with the reason. A person who hasn't set a code yet is told where to set
+it. A signed record's `signed` field says who signed it and when, and it can't
+be changed afterwards (deleting it is still allowed).
+
+Refused when the store's `write` rule leaves this person out.
+
 ### `EagleBot.api.updateRecord(id, data)`
 
 Replaces the record's `data` (send the whole object, not just the changed
 part). Returns the record. Refused unless it's the person's own record, or
-they're an admin or guide.
+they're an admin or guide — and always refused for a signed record.
 
 ### `EagleBot.api.deleteRecord(id)`
 
 Same rule as `updateRecord`.
+
+---
+
+## Links to a place in your app
+
+Your app has one address, `/t/<install>/app`. Parameters after it
+(`?record=42&tab=history`) are `EagleBot.params`, so a link can open your app
+exactly where you want — on one record, on a tab.
+
+```js
+// When the app opens: show the record a link (or a calendar entry) pointed at.
+if (EagleBot.params.record) showRecord(Number(EagleBot.params.record));
+
+const url = await EagleBot.linkTo({ record: 42 });     // "https://.../t/12/app?record=42"
+const { ok, link } = await EagleBot.copyLink({ record: 42 });
+if (!ok) showText("Copy this link: " + link);         // some browsers won't copy from an app
+await EagleBot.navigate({ tab: "history" });           // reopens the app at that address
+```
+
+`navigate` reloads your app at the new address, so the back button works.
+From a panel, it takes the person to your app's page. Clicking one of your
+calendar entries opens `?record=<id>`. Anyone who follows a link still needs
+to be allowed to open your app, and to read that record's store.
+
+Parameter names are letters, numbers, `_` and `-`; values are text (up to 10
+parameters).
 
 ---
 
@@ -212,13 +263,21 @@ apart; by default today and the next 60 days). Each item has `title`, `kind`
 `deadline`), `occurrenceStart`, `occurrenceEnd`, `startTime`, `endTime`,
 `location`, `quest` and `description`. Read-only.
 
+```js
+const session = await EagleBot.calendar.currentSession();
+// { title, quest, starts: "2026-09-08", ends: "2026-10-31" }, or null between sessions
+```
+
+To put *your* records on the calendar, use the manifest's `calendar` section
+([03](03-app-format.md)).
+
 ---
 
 ## Quick reference
 
 | Call | Who may |
 | --- | --- |
-| `api.getRecords`, `api.createRecord` | Anyone who can open the app |
+| `api.getRecords`, `api.createRecord` | Anyone who can open the app, unless the store's `read` / `write` rule says otherwise |
 | `api.updateRecord`, `api.deleteRecord` | The record's author, admins, guides |
 | `members.list` | Everyone |
 | `positions.list`, `exists.position` | Everyone |
@@ -227,7 +286,8 @@ apart; by default today and the next 60 days). Each item has `title`, `kind`
 | `wiki.create`, `wiki.update` | Admins, secretaries, and learners if the academy allows |
 | `elections.list`, `.get` | Everyone |
 | `elections.create` | Admins, and secretaries if the academy allows |
-| `calendar.list` | Everyone |
+| `calendar.list`, `calendar.currentSession` | Everyone |
+| `linkTo`, `copyLink`, `navigate` | Everyone |
 
 Everything is limited to the studios the person can see, the same as in
 Eagle Bot itself.

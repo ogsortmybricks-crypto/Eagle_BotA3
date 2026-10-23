@@ -47,10 +47,170 @@ files are read. Hidden folders, `node_modules` and `dist` are left out. Limits:
 | `author` | Yes | Your name or your team's. |
 | `icon` | Yes | A single emoji, like `"📋"`. |
 | `category` | No | `governance`, `tracking`, `community`, `quests`, `fun` or `general` (the default). |
+| `audience` | No | Who can open it. Everyone in the studio, if left out. See below. |
+| `stores` | No | Who may read and add to each store, and which need signing. See below. |
+| `calendar` | No | Records drawn on the studio calendar. See below. |
+| `panels` | No | The app as a card on Eagle Bot's own pages. See below. |
+| `reactions` | No | Records saved by themselves when something happens. See below. |
 | `setup` | No | Things to do when the Tac-On is installed. See below. |
 
 The Dev menu won't publish anything missing a required field, a `name` that
 isn't kebab-case, or a `version` that isn't `x.y.z`.
+
+---
+
+## Audiences: who
+
+Several sections take an **audience**: a list of who it's for.
+
+| Entry | Means |
+| --- | --- |
+| `"everyone"` | Everyone who can see the studio (the same as leaving it out) |
+| `"admin"`, `"guide"`, `"secretary"`, `"learner"` | That role |
+| `"dev"` | Learners with dev status |
+| `"position:Agenda Keeper"` | Whoever holds a position with that title, right now, in the studio the Tac-On is installed in (or one shared with it, or academy-wide). Matched without regard to capitals. They drop out when their term ends. |
+
+**Admins are always included**, whatever the list says. An app can't lock
+the academy that runs it out of its own data.
+
+### `audience`: who can open it
+
+```json
+{ "audience": ["learner", "guide", "position:Agenda Keeper"] }
+```
+
+Everyone else doesn't see it in their sidebar, and can't open it or reach its
+records. Leave it out and everyone in the studio can.
+
+---
+
+## `stores`: who reads and writes what
+
+Records go into named **stores** (see `createRecord` in
+[04](04-sdk-reference.md)). By default everyone who can open the app can read
+every store and add to it. `stores` narrows that, store by store, and **Eagle
+Bot enforces it**, whatever your app's code does:
+
+```json
+{
+  "stores": {
+    "decision": { "write": ["position:Agenda Keeper"], "sign": true },
+    "appeal":   { "read": ["position:Appeals Chair", "guide"] }
+  }
+}
+```
+
+| Rule | What it does |
+| --- | --- |
+| `read` | Only this audience gets these records. Everyone else's `getRecords()` simply leaves them out, and asking for the store by name is refused. |
+| `write` | Only this audience can add to the store. |
+| `sign` | Every record must be **signed**: the person types their own six-digit confirmation code, in a box Eagle Bot draws (your app never sees the code). A signed record shows who signed it and can't be changed afterwards. |
+
+Stores you don't list are open to everyone using the app. Changing and
+deleting are always limited to the person who saved a record, plus admins and
+guides.
+
+---
+
+## `calendar`: records on the studio calendar
+
+Draws records on the studio calendar, next to the guides' field trips and
+sessions. Clicking an entry opens your app at that record
+(`EagleBot.params.record`).
+
+```json
+{
+  "calendar": [
+    { "store": "trip", "on": "day", "until": "back", "title": "Trip: {place}", "kind": "field_trip" },
+    { "store": "call", "on": "created", "title": "AP call with {partnerName}", "mine": true }
+  ]
+}
+```
+
+| Field | Required | What it does |
+| --- | --- | --- |
+| `store` | Yes | Which store's records to draw |
+| `on` | Yes | `"created"` (the day it was saved), or a key in the record's `data` holding a day like `"2026-10-23"` |
+| `until` | No | A key holding the last day, for an entry spanning several days |
+| `title` | Yes | What the entry says. `{key}` is a value from the record's `data`; `{by}` is who saved it. |
+| `kind` | No | `event` (the default), `field_trip`, `exhibition`, `launch` or `deadline`: how it's drawn |
+| `color` | No | A hex colour like `"#0ea5e9"` |
+| `mine` | No | `true`: each person sees only the records they saved |
+| `audience` | No | Who sees these entries. By default, whoever may read the store. |
+
+`"created"` puts a record on the day it was saved **in the academy's time
+zone** (Settings → Display), so something saved at 9pm is on that day. Up to
+10 calendar entries.
+
+---
+
+## `panels`: a card on Eagle Bot's own pages
+
+Your app can also appear as a card at the bottom of one of Eagle Bot's pages:
+`wiki`, `town-hall`, `elections`, `positions`, `people`, `admin` or
+`calendar`.
+
+```json
+{ "panels": [{ "host": "town-hall", "title": "From the Agenda Box" }] }
+```
+
+It's the **same app**, run again in the card. `EagleBot.place` tells it where
+it is (`"page"` or `"panel:town-hall"`), so it can draw something smaller
+there — the agenda list without the form, say. A panel is shown to the app's
+`audience` unless you give it its own `audience`. One panel per page.
+
+---
+
+## `reactions`: things that happen by themselves
+
+When something happens in Eagle Bot, a reaction saves a record — even if
+nobody has your app open.
+
+```json
+{
+  "reactions": [
+    {
+      "on": "election.certified",
+      "when": { "event.kind": "position" },
+      "store": "service",
+      "data": { "who": "{event.winner}", "note": "Elected: {event.summary}" }
+    }
+  ]
+}
+```
+
+| Field | What it does |
+| --- | --- |
+| `on` | The event (list below) |
+| `when` | Optional: only when every `event.*` value matches |
+| `store` | Where the record goes |
+| `data` | The record. In text, `{event.x}` is filled in; a value that is exactly `"{event.x}"` keeps its type (a person's id stays a number). |
+
+The record is saved as the Tac-On: `created_by` is `null` and
+`created_by_name` is your Tac-On's name. A studio install only hears its own
+studio's events; an academy-wide install hears all of them. A reaction that
+fails does so quietly and never breaks the thing that triggered it.
+
+**Events:** `townhall.created`, `townhall.processed`, `election.created`,
+`election.nomination`, `election.vote.cast`, `election.closed`,
+`election.certified`, `wiki.built`, `wiki.rule.created`, `wiki.rule.amended`,
+`wiki.rule.repealed`, `position.created`, `position.appointed`,
+`position.term_ended`, `document.uploaded`, `invite.accepted`, `auth.login`,
+`calendar.event.created`, `calendar.event.updated`, `calendar.event.removed`.
+
+**What `event` holds:**
+
+| Field | What it is |
+| --- | --- |
+| `event.actor`, `event.actorName` | Who did it |
+| `event.summary` | The sentence in the activity log |
+| `event.winner`, `event.winnerName`, `event.votes` | On a certified election: who won, and with how many votes |
+| `event.entityId`, `event.studioId` | Which thing, in which studio |
+| `event.kind` | On a certified election: its type, `position` or `rule`. On a calendar event: its kind (`session`, `field_trip`...). |
+| `event.title` | On a certified election or a calendar event: its title |
+| `event.starts`, `event.ends`, `event.quest` | On a calendar event: its first and last day, and a session's Quest |
+
+Up to 20 reactions.
 
 ---
 

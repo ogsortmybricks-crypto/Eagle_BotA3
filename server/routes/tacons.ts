@@ -74,6 +74,7 @@ import { heldNames, heldPositions, setPositionsArchived, syncPositions } from ".
 import { registerExtensionRoutes } from "../tacons/extensions";
 import {
   RecordError,
+  type StoreAccess,
   createRecord,
   deleteRecord,
   listRecords,
@@ -82,6 +83,7 @@ import {
 } from "../tacons/app-records";
 import { TACSCRIPT_RETIRED, appBodySchema, prepareApp } from "../tacons/app-publish";
 import { displayModeOf, runSetup } from "../tacons/app-setup";
+import { appView, storeAccess } from "../tacons/app-view";
 
 export const taconsRouter = Router();
 registerExtensionRoutes(taconsRouter);
@@ -148,7 +150,12 @@ taconsRouter.get("/panels/:host", requirePermission("tacons.use"), async (req, r
       install: entry,
     });
     for (const panel of matching) {
-      panels.push(await renderPanel(runtime, panel));
+      const view = await renderPanel(runtime, panel);
+      // An app's panel runs the app itself, told which page it's on.
+      if (entry.manifest.app) {
+        view.app = appView({ entry, runtime, user: req.user!, academy: req.academy!, place: `panel:${panel.host}` });
+      }
+      panels.push(view);
     }
   }
 
@@ -215,21 +222,7 @@ taconsRouter.get("/view/:installId/:page", requirePermission("tacons.use"), asyn
   });
   const view: TaconView = await renderPage(runtime, page);
   if (entry.manifest.app) {
-    view.app = {
-      html: entry.manifest.app.html,
-      display: displayModeOf(entry.install),
-      identity: {
-        user: { id: req.user!.id, name: req.user!.name, email: req.user!.email ?? null, role: req.user!.role },
-        academy: { id: req.academy!.id, name: req.academy!.name },
-        studio: entry.install.studioId !== null ? { id: entry.install.studioId, name: entry.studioName ?? "" } : null,
-        tacon: {
-          installId: entry.install.id,
-          name: entry.tacon.name,
-          version: entry.version.version,
-          icon: entry.manifest.icon,
-        },
-      },
-    };
+    view.app = appView({ entry, runtime, user: req.user!, academy: req.academy!, place: "page" });
   }
   res.json({ view });
 });
@@ -529,15 +522,18 @@ taconsRouter.get(
 /* -------------------------------------------------------------------------- */
 
 /** The install an app's SDK call is about, if this person may use the app. */
-async function openApp(req: Request): Promise<LoadedInstall> {
+async function openApp(req: Request): Promise<{ entry: LoadedInstall; access: StoreAccess }> {
   const entry = await openInstall(req);
   if (!entry || !entry.install.enabled) throw new RecordError(404, "That Tac-On isn't installed here.");
   if (!entry.manifest.app) throw new RecordError(404, "That Tac-On isn't an app.");
+  const held = await heldNames(req.user!.id, entry.install.id);
   const page = entry.manifest.pages[0];
-  if (page && !audienceAllows(page.showTo, req.user!, await heldNames(req.user!.id, entry.install.id))) {
+  // Seeing one of its panels is opening it too.
+  const panelOpen = entry.manifest.panels.some((panel) => audienceAllows(panel.showTo, req.user!, held));
+  if (page && !audienceAllows(page.showTo, req.user!, held) && !panelOpen) {
     throw new RecordError(403, "This Tac-On isn't open to your role.");
   }
-  return entry;
+  return { entry, access: storeAccess(entry.manifest, req.user!, held) };
 }
 
 function recordFailure(res: import("express").Response, error: unknown) {
@@ -547,9 +543,9 @@ function recordFailure(res: import("express").Response, error: unknown) {
 
 taconsRouter.get("/app/:installId/records", requirePermission("tacons.use"), async (req, res) => {
   try {
-    const entry = await openApp(req);
+    const { entry, access } = await openApp(req);
     const store = typeof req.query.store === "string" && req.query.store ? storeName(req.query.store) : null;
-    res.json({ records: await listRecords(entry.install, entry.tacon.name, store) });
+    res.json({ records: await listRecords(entry.install, entry.tacon.name, store, access) });
   } catch (error) {
     recordFailure(res, error);
   }
@@ -557,8 +553,10 @@ taconsRouter.get("/app/:installId/records", requirePermission("tacons.use"), asy
 
 taconsRouter.post("/app/:installId/records", requirePermission("tacons.use"), async (req, res) => {
   try {
-    const entry = await openApp(req);
-    const record = await createRecord(entry.install, entry.tacon.name, req.user!, req.body ?? {});
+    const { entry, access } = await openApp(req);
+    const record = await createRecord(entry.install, entry.tacon.name, req.user!, req.body ?? {}, access, (code) =>
+      checkVerifyCode(req.user!.id, code),
+    );
     res.status(201).json({ record });
   } catch (error) {
     recordFailure(res, error);
@@ -567,7 +565,7 @@ taconsRouter.post("/app/:installId/records", requirePermission("tacons.use"), as
 
 taconsRouter.patch("/app/:installId/records/:recordId", requirePermission("tacons.use"), async (req, res) => {
   try {
-    const entry = await openApp(req);
+    const { entry } = await openApp(req);
     const record = await updateRecord(entry.install, entry.tacon.name, req.user!, Number(req.params.recordId), req.body ?? {});
     res.json({ record });
   } catch (error) {
@@ -577,7 +575,7 @@ taconsRouter.patch("/app/:installId/records/:recordId", requirePermission("tacon
 
 taconsRouter.delete("/app/:installId/records/:recordId", requirePermission("tacons.use"), async (req, res) => {
   try {
-    const entry = await openApp(req);
+    const { entry } = await openApp(req);
     await deleteRecord(entry.install, req.user!, Number(req.params.recordId));
     res.json({ ok: true });
   } catch (error) {

@@ -795,7 +795,8 @@ electionsRouter.post("/:id/certify", requirePermission("elections.manage"), asyn
       entityType: "election",
       entityId: id,
       summary: `"${election.title}" certified. ${seated.map((w) => w.label).join(", ") || "No one"} seated.`,
-      metadata: { ranked },
+      // `kind` is what a Tac-On reaction reads as `event.kind`: "position" or "rule".
+      metadata: { ranked, kind: election.type, title: election.title },
     });
 
     return res.json({ election: updated, winners, jobId: null });
@@ -824,7 +825,7 @@ electionsRouter.post("/:id/certify", requirePermission("elections.manage"), asyn
     entityType: "election",
     entityId: id,
     summary: `"${election.title}" certified. Winner: ${winners[0]?.label ?? "none"}.`,
-    metadata: { ranked },
+    metadata: { ranked, kind: election.type, title: election.title },
   });
 
   res.json({ election: updated, winners, jobId });

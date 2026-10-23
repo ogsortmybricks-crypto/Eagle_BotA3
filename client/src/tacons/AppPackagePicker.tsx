@@ -16,6 +16,7 @@ import {
   bundleAppFolder,
   checkApp,
   describeAction,
+  describeApp,
   type AppCheck,
   type AppPackage,
 } from "@shared/tacons";
@@ -240,6 +241,13 @@ export function AppPackagePicker({
                 </div>
               </div>
               <p className="mt-2 text-xs text-gray-600">{shown.description}</p>
+              {describeApp(shown).length > 0 && (
+                <ul className="mt-2 space-y-1 text-xs text-gray-600">
+                  {describeApp(shown).map((line) => (
+                    <li key={line}>• {line}</li>
+                  ))}
+                </ul>
+              )}
               {(shown.setup?.length ?? 0) > 0 && (
                 <div className="mt-3">
                   <div className="text-xs font-semibold text-gray-700">On install</div>

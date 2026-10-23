@@ -508,6 +508,8 @@ export type CalendarFeedDef = {
    * Takes the place of `open <page>`.
    */
   openRecord?: string[] | null;
+  /** Clicking the entry opens the Tac-On's app at that record (`?record=<id>`). */
+  openApp?: boolean;
 };
 
 export type Manifest = {

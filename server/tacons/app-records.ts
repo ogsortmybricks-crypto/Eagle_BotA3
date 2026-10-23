@@ -9,17 +9,30 @@
  * `ap_call`, ...), who saved it and when. New rows go in the store `records`
  * unless the app names another.
  *
- * Anyone who can open the app may read its records and add to them, because
- * the app decides what to show. Changing or removing a row is for whoever
- * saved it, or an admin or guide - an app can't let one learner wipe out
- * another's work, whatever its code says.
+ * Anyone who can open the app may read its records and add to them, unless
+ * the manifest's `stores` narrows who may read or write a store - which the
+ * server enforces, whatever the app's code does. Changing or removing a row
+ * is for whoever saved it, or an admin or guide: an app can't let one learner
+ * wipe out another's work.
+ *
+ * A store marked `sign` takes only records signed with the saver's six-digit
+ * confirmation code. The signature is a row in Eagle Bot's own `__signatures`
+ * store, which no app can write, and a signed record can't be changed.
  */
 
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { taconRecords, users, type User } from "@shared/schema";
 
 export const DEFAULT_STORE = "records";
+export const SIGNATURES = "__signatures";
+
+/** What this person may do with each store, worked out from the manifest by the caller. */
+export type StoreAccess = {
+  mayRead(store: string): boolean;
+  mayWrite(store: string): boolean;
+  mustSign(store: string): boolean;
+};
 /** Rows one `getRecords()` returns, newest first. */
 export const MAX_APP_RECORDS = 5000;
 export const MAX_RECORD_BYTES = 30_000;
@@ -33,6 +46,8 @@ export type AppRecord = {
   updated_at: string;
   created_by: number | null;
   created_by_name: string;
+  /** Set when the saver confirmed it with their own code. */
+  signed: { by: number; by_name: string; at: string } | null;
 };
 
 export class RecordError extends Error {
@@ -63,10 +78,13 @@ export function recordData(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+type Signature = { by: number; at: Date };
+
 function shape(
   row: typeof taconRecords.$inferSelect,
   names: Map<number, string>,
   taconName: string,
+  signature?: Signature,
 ): AppRecord {
   return {
     id: row.id,
@@ -76,7 +94,24 @@ function shape(
     updated_at: row.updatedAt.toISOString(),
     created_by: row.createdBy,
     created_by_name: row.createdBy ? (names.get(row.createdBy) ?? "Someone") : taconName,
+    signed: signature
+      ? { by: signature.by, by_name: names.get(signature.by) ?? "Someone", at: signature.at.toISOString() }
+      : null,
   };
+}
+
+/** Every signature on this install's records, by record id. */
+async function signaturesFor(installId: number): Promise<Map<number, Signature>> {
+  const rows = await db
+    .select()
+    .from(taconRecords)
+    .where(and(eq(taconRecords.installId, installId), eq(taconRecords.store, SIGNATURES)));
+  const map = new Map<number, Signature>();
+  for (const row of rows) {
+    const recordId = Number((row.data as { recordId?: unknown }).recordId);
+    if (Number.isInteger(recordId) && row.createdBy) map.set(recordId, { by: row.createdBy, at: row.createdAt });
+  }
+  return map;
 }
 
 async function namesFor(academyId: number): Promise<Map<number, string>> {
@@ -88,7 +123,9 @@ export async function listRecords(
   install: { id: number; academyId: number },
   taconName: string,
   store: string | null,
+  access: StoreAccess,
 ): Promise<AppRecord[]> {
+  if (store && !access.mayRead(store)) throw new RecordError(403, `You can't read the "${store}" records.`);
   const rows = await db
     .select()
     .from(taconRecords)
@@ -99,24 +136,55 @@ export async function listRecords(
     )
     .orderBy(desc(taconRecords.createdAt), desc(taconRecords.id))
     .limit(MAX_APP_RECORDS);
-  const names = await namesFor(install.academyId);
-  // `__`-stores are Eagle Bot's own bookkeeping, never an app's data.
-  return rows.filter((row) => !row.store.startsWith("__")).map((row) => shape(row, names, taconName));
+  const [names, signatures] = await Promise.all([namesFor(install.academyId), signaturesFor(install.id)]);
+  // `__`-stores are Eagle Bot's own bookkeeping, never an app's data; stores
+  // this person may not read are left out entirely.
+  return rows
+    .filter((row) => !row.store.startsWith("__") && access.mayRead(row.store))
+    .map((row) => shape(row, names, taconName, signatures.get(row.id)));
 }
 
 export async function createRecord(
   install: { id: number; academyId: number },
   taconName: string,
   user: User,
-  body: { data?: unknown; store?: unknown },
+  body: { data?: unknown; store?: unknown; code?: unknown; sign?: unknown },
+  access: StoreAccess,
+  /** Checks the person's own confirmation code; throws with a message if it's wrong. */
+  checkCode: (code: string) => Promise<void>,
 ): Promise<AppRecord> {
   const data = recordData(body.data);
   const store = storeName(body.store);
-  const [row] = await db
-    .insert(taconRecords)
-    .values({ academyId: install.academyId, installId: install.id, store, data, createdByType: "user", createdBy: user.id })
-    .returning();
-  return shape(row, new Map([[user.id, user.name]]), taconName);
+  if (!access.mayWrite(store)) throw new RecordError(403, `You can't add to the "${store}" records.`);
+  const signing = access.mustSign(store) || body.sign === true;
+  if (signing) {
+    if (typeof body.code !== "string" || !body.code) {
+      throw new RecordError(400, "This has to be signed with your six-digit confirmation code.");
+    }
+    try {
+      await checkCode(body.code);
+    } catch (error) {
+      throw new RecordError(400, error instanceof Error ? error.message : "That confirmation code doesn't match.");
+    }
+  }
+  const row = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(taconRecords)
+      .values({ academyId: install.academyId, installId: install.id, store, data, createdByType: "user", createdBy: user.id })
+      .returning();
+    if (signing) {
+      await tx.insert(taconRecords).values({
+        academyId: install.academyId,
+        installId: install.id,
+        store: SIGNATURES,
+        data: { recordId: created.id },
+        createdByType: "user",
+        createdBy: user.id,
+      });
+    }
+    return created;
+  });
+  return shape(row, new Map([[user.id, user.name]]), taconName, signing ? { by: user.id, at: row.createdAt } : undefined);
 }
 
 /** The row, if this person may change it: its author, an admin or a guide. */
@@ -142,6 +210,9 @@ export async function updateRecord(
 ): Promise<AppRecord> {
   const data = recordData(body.data);
   await ownedRow(install, user, recordId);
+  if ((await signaturesFor(install.id)).has(recordId)) {
+    throw new RecordError(409, "A signed record can't be changed. Add a new record instead.");
+  }
   const [row] = await db
     .update(taconRecords)
     .set({ data, updatedAt: new Date() })
@@ -152,5 +223,17 @@ export async function updateRecord(
 
 export async function deleteRecord(install: { id: number }, user: User, recordId: number): Promise<void> {
   await ownedRow(install, user, recordId);
-  await db.delete(taconRecords).where(eq(taconRecords.id, recordId));
+  await db.transaction(async (tx) => {
+    await tx.delete(taconRecords).where(eq(taconRecords.id, recordId));
+    // Its signature goes with it.
+    await tx
+      .delete(taconRecords)
+      .where(
+        and(
+          eq(taconRecords.installId, install.id),
+          eq(taconRecords.store, SIGNATURES),
+          sql`(${taconRecords.data}->>'recordId')::int = ${recordId}`,
+        ),
+      );
+  });
 }

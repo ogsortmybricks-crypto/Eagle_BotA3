@@ -6,9 +6,11 @@ Town Halls, elections and positions.
 
 A Tac-On is a **small web app**. It's a folder with a `manifest.json` and an
 `index.html`, plus any CSS and JavaScript you like. An academy installs it from
-the Tac-On Market, and it appears in that studio's sidebar. It runs in a
+the Tac-On Market, and it appears in that studio's sidebar — and, if it asks,
+as a card on Town Hall or the wiki, and on the studio calendar. It runs in a
 sandbox and works with Eagle Bot through the **`EagleBot` SDK**: its own
-records, people, positions, the wiki, elections and the calendar.
+records (with rules about who reads, writes and signs them), people,
+positions, the wiki, elections and the calendar.
 
 > **TacScript has been retired.** Tac-Ons used to be written in a small
 > language called TacScript (`.tacon` files). New Tac-Ons, and new versions of

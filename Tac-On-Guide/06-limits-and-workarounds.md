@@ -17,56 +17,62 @@ The sandbox is stricter than a normal web page. Check for these every time.
 | **Images from the internet** | Blocked. | Put small images in as `data:` URLs, or draw them with CSS or SVG. |
 | **A `.json` file you `fetch`** | It isn't in the bundle, and `fetch` is blocked anyway. | Turn it into a `.js` file that sets a variable. |
 | **Showing what people typed with `innerHTML`** | It renders as HTML: a topic called `<img onerror=...>` runs in everyone's copy of your app. | Use `textContent`, or escape it first (see the worked example). |
-| **Hiding a button and calling it security** | The server doesn't know about your button; but it does check every call. | Fine for tidiness, as long as you also handle the refusal when a call fails. |
+| **Hiding a button and calling it security** | Anyone using the app can still call the SDK themselves; a hidden "Record decision" button stops nobody. | Put the rule in the manifest: a `write` (or `read`) rule on the store, or the app's `audience`. Then hide the button for tidiness. |
+| **The `hidden` attribute on something your CSS gives `display`** | `display: grid` (or `flex`, `block`) in your CSS beats `hidden`, so it still shows. | Set `element.style.display = "none"`, or add `[hidden] { display: none !important; }` to your CSS. |
+| **`new Date()` for "today"** | The person's laptop clock and time zone, which may not be the academy's. Evening records land on the wrong day. | `EagleBot.clock.today` and `EagleBot.academy.timeZone`. |
 | **Trusting `data` for "who did this"** | Anyone can save any `data`. | Use `created_by` / `created_by_name`, which Eagle Bot fills in. |
 | **A fixed height**: `height: 100vh` inside an inline app | The frame grows to fit, so `100vh` keeps growing with it. | Size to your content inline; use `enableFullWindow` for a full-height layout. |
 
 ## Missing features, and how to build around them
 
-### No private records
+### Privacy is per store, and admins see everything
 
-Everyone who can open your app can read all its records through the SDK, even
-ones your app never shows them.
+A store with a `read` rule is private to that audience: others never receive
+its records. But **admins can always read every store**, so an app can't keep
+anything from the academy that runs it, and the person who saved a record
+can't hide it from admins either.
 
-- Don't build anything that needs secrecy: votes that must be secret belong in
-  Eagle Bot's own Elections (`elections.create`).
-- For "only the Keeper should see this", accept that it's hidden, not secret,
-  and say so in the app.
+- Secret ballots belong in Eagle Bot's own Elections (`elections.create`),
+  not in records.
+- Say in your app who can see what ("Only the Appeals Chair and admins read
+  appeals").
 
 ### Changing other people's records
 
 Learners can change and delete only what they saved. Admins and guides can
-change anything.
+change anything. Signed records can't be changed by anyone.
 
 - **Append instead of edit**: the Keeper adds a decision record that points at
   the topic (see the worked example).
 - **A status record wins**: the newest `status` record for a thing is its
   current state.
 
-### Nothing happens unless someone opens the app
+### Reactions only save records
 
-Apps only run while someone has them open. There are no reactions to events
-(an election certified, a Town Hall processed), no schedules and no reminders.
+A `reaction` saves one record when an event happens, as the Tac-On. It can't
+message anyone, change Eagle Bot, or run your code. There are no schedules or
+reminders ("every Friday"), and a calendar date arriving doesn't fire
+anything.
 
 - Show what's due when someone opens it: "3 promises are overdue".
 - Let the position holder press a button ("Close the week") that writes a
   summary record.
 
-### One page in the sidebar
+### Where an app can appear
 
-An app has one sidebar entry, opened inline or full screen. It can't put a
-panel on Eagle Bot's own pages (Town Hall, the wiki), draw entries on the
-studio calendar, or give a position holder a desk on the Positions page.
+Its own page (inline or full screen), one card on each of Eagle Bot's pages
+(`panels`), and entries on the studio calendar. It can't give a position
+holder a desk on the Positions page, and it can't change Eagle Bot's own
+pages beyond its card.
 
-- Build tabs or sections inside the app.
-- Tell people where to find it: a `createWikiPage` setup action can explain it
-  in the Contract.
+- For "the Keeper's desk", show Keeper-only tools inside your app, gated by a
+  `write` rule (`EagleBot.stores.decision.write`).
 
 ### No settings form at install
 
 The only install-time questions are optional setup actions. Academy choices
-(a number of calls, a name for a thing) are a `config` record that an admin
-changes from inside the app. See "Settings without settings" in
+(a number of calls, a name for a thing) are a `config` record in a store only
+admins may write. See "Settings without settings" in
 [05](05-designing-great-tac-ons.md).
 
 ### Limits on records
@@ -80,8 +86,9 @@ changes from inside the app. See "Settings without settings" in
 
 The SDK reads people, positions, the wiki, elections and the calendar. It
 can't read Town Hall meetings or the activity log, can't vote, can't nominate,
-and can't write to the calendar. Writes it can do (positions, the wiki,
-elections) need the person using the app to have that power in Eagle Bot.
+and can't add to the guides' calendar (your own records can appear on it, via
+`calendar`). Writes it can do (positions, the wiki, elections) need the person
+using the app to have that power in Eagle Bot.
 
 ### Other Tac-Ons
 
@@ -98,5 +105,5 @@ decides at install time, so say in `description` which you intend.
 
 If you can get 80% of the value inside these limits, **ship it now** and
 request the rest. If a limit makes the idea pointless (it fundamentally needs
-reactions, privacy or a panel on Town Hall), write the engine request first
-and say what you'd build with it.
+reminders, a desk on the Positions page, or a secret ballot), write the engine
+request first and say what you'd build with it.

@@ -46,12 +46,14 @@ are the most valuable.
    a process belongs to a position the studio elects or appoints. Create it
    with a `createPosition` setup action, and check who holds it with
    `positions.list()`. Admins are a backstop, not the main audience.
-2. **The record is shared.** Every record is readable by everyone who uses
-   the app. Lean into it: the studio's shared record is the point. Never store
-   anything private.
-3. **Hide what people can't do, and handle refusals anyway.** Use
-   `EagleBot.user.role` and position holders to decide what to show. The
-   server decides what's allowed.
+2. **The record is shared.** By default every record is readable by everyone
+   who uses the app. Lean into it: the studio's shared record is the point.
+   When something really is private (an appeal, a Keeper's notes), give its
+   store a `read` rule — don't just hide it in your app.
+3. **Put the rules in the manifest, not only in your code.** "Only the Keeper
+   records decisions" is a `write` rule on the `decision` store; Eagle Bot
+   enforces it. Then use `EagleBot.stores` to hide what someone can't do, and
+   handle refusals anyway.
 4. **Words a twelve-year-old understands.** Titles say what something is
    ("Agenda Box"), instructions say what to do ("Say what you want the studio
    to decide"), empty states say what will appear ("Nothing on the agenda
@@ -78,6 +80,16 @@ Create the seat at install, then let whoever holds it do the job:
 ```json
 { "type": "createPosition", "title": "Agenda Keeper", "description": "Records what Town Hall decided.", "elected": true }
 ```
+
+Then give the job its powers in the manifest, so they're real:
+
+```json
+{ "stores": { "decision": { "write": ["position:Agenda Keeper"] } } }
+```
+
+In the app, `EagleBot.stores.decision.write` is `true` for whoever holds the
+seat right now (and admins), so that's all you need to show their tools. To
+show *who* holds it:
 
 ```js
 async function holds(title) {
@@ -108,6 +120,7 @@ const waiting = topics.filter((t) => !decided.has(t.id));
 ```
 
 The history of who decided what is kept, and nobody can quietly rewrite it.
+With a `write` rule on `decision`, nobody but the Keeper can add one either.
 
 ### "Mine"
 
@@ -122,23 +135,21 @@ someone else, store their id in `data` (pick them from `members.list()`).
 
 ### "This week" and "this session"
 
-Dates are just JavaScript:
+Use the academy's clock, not the laptop's, so everyone agrees what day it is:
 
 ```js
-const startOfWeek = new Date();
-startOfWeek.setHours(0, 0, 0, 0);
-startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());  // Sunday
-const thisWeek = records.filter((r) => new Date(r.created_at) >= startOfWeek);
+// The day a record was saved, in the academy's time zone.
+const dayOf = (iso) =>
+  new Intl.DateTimeFormat("en-CA", { timeZone: EagleBot.academy.timeZone ?? undefined }).format(new Date(iso));
+
+const thisWeek = records.filter((r) => dayOf(r.created_at) >= EagleBot.clock.weekStart);
+const today = records.filter((r) => dayOf(r.created_at) === EagleBot.clock.today);
+
+const session = await EagleBot.calendar.currentSession();
+const thisSession = session ? records.filter((r) => dayOf(r.created_at) >= session.starts) : [];
 ```
 
-For the session, ask the calendar:
-
-```js
-const today = new Date().toISOString().slice(0, 10);
-const items = await EagleBot.calendar.list({ from: today, to: today });
-const session = items.find((item) => item.kind === "session");
-const thisSession = session ? records.filter((r) => r.created_at.slice(0, 10) >= session.occurrenceStart) : [];
-```
+(`en-CA` formats a date as `YYYY-MM-DD`, which compares correctly as text.)
 
 ### Boards: one row per person
 
@@ -155,19 +166,23 @@ JavaScript.
 ### Settings without settings
 
 An app has no install-time settings form. Keep academy choices as a record the
-admin edits from inside the app:
+admin edits from inside the app, in a store only admins may write:
+
+```json
+{ "stores": { "config": { "write": ["admin"] } } }
+```
 
 ```js
 const [config] = await EagleBot.api.getRecords({ store: "config" });
 const callsNeeded = config?.data.callsNeeded ?? 3;   // a sensible default
 
-// In an admin-only panel:
+// Shown only when EagleBot.stores.config.write is true:
 if (config) await EagleBot.api.updateRecord(config.id, { callsNeeded: 4 });
 else await EagleBot.api.createRecord({ callsNeeded: 4 }, { store: "config" });
 ```
 
-Admins and guides can change any record, so learners can read the setting but
-not change someone else's.
+Without the `write` rule, any learner could add a newer `config` record of
+their own.
 
 ### Show what matters, when it matters
 
@@ -179,7 +194,73 @@ when it's reached. Conditional display is just `if`.
 
 A Tac-On has one sidebar entry. If it does several things, give it tabs or
 sections inside the app ("This week", "History", "For the Keeper"), or ask for
-full screen if it needs the room.
+full screen if it needs the room. Keep the tab in the address
+(`EagleBot.navigate({ tab: "history" })`, read back from `EagleBot.params.tab`)
+so the back button and shared links land on the right one.
+
+### Links to one record
+
+Learners want to point someone at one thing: "Ben confirmed Ava did this."
+Open the record named in the address, and offer a link to it:
+
+```js
+if (EagleBot.params.record) showRecord(Number(EagleBot.params.record));
+
+shareButton.onclick = async () => {
+  const { ok, link } = await EagleBot.copyLink({ record: record.id });
+  say(ok ? "Link copied." : "Copy this link: " + link);
+};
+```
+
+### Signed records
+
+For anything that counts as a promise (an AP call, a ledger entry, a check-in
+someone else confirms), mark the store `"sign": true`. Each record then needs
+the saver's own six-digit confirmation code, entered in Eagle Bot's box, and
+shows `signed.by_name` from then on. A signed record can't be edited, so a
+correction is a new record.
+
+### On the calendar
+
+Anything with a date belongs where the studio already looks. Add a `calendar`
+entry to the manifest rather than building your own calendar:
+
+```json
+{ "calendar": [{ "store": "promise", "on": "due", "title": "Due: {text} ({by})", "kind": "deadline" }] }
+```
+
+Clicking it opens your app at `?record=<id>`, so handle `EagleBot.params.record`.
+
+### In the meeting: panels
+
+A `panel` on `town-hall` or `wiki` puts the Tac-On in front of people during
+the meeting, or while they read the Contract. It's your app again; check
+`EagleBot.place` and draw the small version:
+
+```js
+if (EagleBot.place.startsWith("panel:")) {
+  drawAgendaOnly();     // no form, no history: just what's waiting
+} else {
+  drawEverything();
+}
+```
+
+### React to what the studio does
+
+A `reactions` entry saves a record when something happens, even if nobody has
+your app open — every certified position election, every new calendar session:
+
+```json
+{
+  "reactions": [
+    { "on": "election.certified", "when": { "event.kind": "position" },
+      "store": "service", "data": { "who": "{event.winner}", "election": "{event.title}" } }
+  ]
+}
+```
+
+Your app then reads `service` like any other store. Reactions only save
+records; anything more happens when someone opens the app.
 
 ### Finish setting up from inside
 
@@ -202,6 +283,12 @@ Agenda Keeper records what the studio decided.
   "author": "Eagle Bot examples",
   "icon": "📣",
   "category": "governance",
+  "stores": {
+    "decision": { "write": ["position:Agenda Keeper"] }
+  },
+  "panels": [
+    { "host": "town-hall", "title": "From the Agenda Box" }
+  ],
   "setup": [
     {
       "type": "createPosition",
@@ -284,12 +371,16 @@ Agenda Keeper records what the studio decided.
 
 ```js
 // Agenda Box: topics go in the "topic" store; the Agenda Keeper's decisions go
-// in "decision", each pointing at its topic. Learners can't change each
-// other's records, so a topic is never edited - it's "decided" once a decision
-// points at it, and the decision keeps the history.
+// in "decision", each pointing at its topic. Only the Keeper (and admins) may
+// write to "decision" - the manifest says so and Eagle Bot enforces it. A topic
+// is never edited: it's "decided" once a decision points at it, and the
+// decision keeps the history.
 
-const KEEPER = "Agenda Keeper";
 const $ = (id) => document.getElementById(id);
+// On Town Hall's page, the same app runs as a small panel: just the agenda.
+const inPanel = EagleBot.place.startsWith("panel:");
+// True for whoever holds the Agenda Keeper seat right now, and for admins.
+const isKeeper = Boolean(EagleBot.stores.decision && EagleBot.stores.decision.write);
 
 function say(text, isError) {
   $("ab-message").textContent = text;
@@ -307,18 +398,11 @@ function escape(value) {
   return String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 }
 
-async function isKeeper() {
-  const positions = await EagleBot.positions.list();
-  const seat = positions.find((p) => p.title.toLowerCase() === KEEPER.toLowerCase());
-  return Boolean(seat && seat.holders.some((holder) => holder.id === EagleBot.user.id));
-}
-
 async function load() {
   try {
-    const [topics, decisions, keeper] = await Promise.all([
+    const [topics, decisions] = await Promise.all([
       EagleBot.api.getRecords({ store: "topic" }),
       EagleBot.api.getRecords({ store: "decision" }),
-      isKeeper(),
     ]);
     const decidedIds = new Set(decisions.map((d) => d.data.topicId));
     const titles = new Map(topics.map((t) => [t.id, t.data.title]));
@@ -332,7 +416,7 @@ async function load() {
                 (topic.data.why ? `<div>${escape(topic.data.why)}</div>` : "") +
                 `<div class="ab-meta">${escape(topic.data.kind ?? "idea")} · added by ${escape(topic.created_by_name)}</div>`,
             );
-            if (keeper) li.append(decideForm(topic));
+            if (isKeeper && !inPanel) li.append(decideForm(topic));
             return li;
           })
         : [item("Nothing on the agenda yet.")]),
@@ -379,6 +463,13 @@ function decideForm(topic) {
   return box;
 }
 
+if (inPanel) {
+  // The panel shows only what's waiting. (style.display, because the CSS's
+  // `display: grid` would beat the `hidden` attribute.)
+  const hide = (element) => (element.style.display = "none");
+  [$("ab-add"), $("ab-decided"), document.querySelector(".ab-how"), document.querySelectorAll(".ab h2")[1]].forEach(hide);
+}
+
 $("ab-add").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -403,7 +494,10 @@ load();
 Why it's built this way:
 
 - **Learners own it.** Anyone can add a topic, and an elected learner keeps
-  the record. The Keeper's seat is created at install.
+  the record. The Keeper's seat is created at install, and only whoever holds
+  it can record decisions: that's a `write` rule, enforced by Eagle Bot.
+- **It's in the meeting.** The Town Hall panel shows the agenda where the
+  Secretary is already working.
 - **Nobody rewrites history.** Decisions are new records pointing at topics,
   so the record of what the studio decided can't be quietly changed.
 - **The rule is in the app and in the Contract.** The first line says how it
@@ -420,7 +514,8 @@ Why it's built this way:
 - [ ] Everything people typed is shown as text (`textContent`, or escaped),
       never pasted in as HTML.
 - [ ] It reads well in a narrow column, or it asks for full screen.
-- [ ] Nothing private is stored in records.
+- [ ] Every "only X can..." is a `stores` rule or an `audience`, not just a
+      hidden button; anything private has a `read` rule.
 - [ ] The `description` says what it does and which studios it's for.
 - [ ] Anything an academy might disagree about can be changed by an admin.
 - [ ] If this is an update: old records still read correctly, and no `data`

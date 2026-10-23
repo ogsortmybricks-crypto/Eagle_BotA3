@@ -41,8 +41,11 @@ Once an admin installs it, it gets:
 
 | It gets | Where it shows up |
 | --- | --- |
-| **A page** | The sidebar, under a separate *Tac-Ons* heading. It opens inside the page, or full screen if it asks to. |
-| **Its own records** | A data store for this install: `EagleBot.api.getRecords()`, `createRecord()` and so on |
+| **A page** | The sidebar, under a separate *Tac-Ons* heading, for everyone or only its `audience`. It opens inside the page, or full screen if it asks to. |
+| **Its own records** | Stores of records for this install, with rules about who reads, writes and signs each one |
+| **Panels** | The same app as a card on Eagle Bot's own pages: Town Hall, the wiki, elections... |
+| **Calendar entries** | Its dated records drawn on the studio calendar, opening the app at that record |
+| **Reactions** | Records it saves by itself when something happens, such as an election being certified |
 | **The SDK** | Read people, positions, the wiki, elections and the calendar; write to them when the person using it is allowed to |
 | **Setup at install** | Positions and wiki pages it creates when installed, some of them as questions the admin answers |
 
@@ -62,9 +65,10 @@ depends on getting around one.
   against that person's role and studio, exactly as if they'd clicked the
   button themselves. A learner using your app can't create a position, however
   the app is written; an admin can.
-- **An app's records are shared.** Everyone who can open the app can read all
-  its records. People can change and delete only the records they saved
-  (admins and guides can change any).
+- **Rules about records are Eagle Bot's, not the app's.** The manifest says
+  who may read, add to and sign each store, and the server enforces it. People
+  change and delete only the records they saved (admins and guides can change
+  any); nobody changes a signed record. Admins can always read everything.
 - **Setup is shown first.** The admin sees what an app will create before
   installing it, and can untick anything marked optional.
 

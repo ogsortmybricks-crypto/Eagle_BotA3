@@ -1416,7 +1416,9 @@ export async function calendarFeed(runtime: Runtime, from: string, to: string): 
         color: feed.color,
         installId: runtime.install.install.id,
         taconName: runtime.install.tacon.name,
-        href: feed.openRecord
+        href: feed.openApp
+          ? `/t/${runtime.install.install.id}/app?record=${encodeURIComponent(String(row.id))}`
+          : feed.openRecord
           ? recordHref(runtime, row.id, { calendar: index })
           : feed.open
             ? `/t/${runtime.install.install.id}/${feed.open}`

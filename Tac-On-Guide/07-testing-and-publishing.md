@@ -75,7 +75,7 @@ unticked, and check your app copes (the "finish setting up" card).
 | --- | --- |
 | **Admin** | Installing, setup, everything they're allowed to do, including admin-only tools in your app |
 | **Learner** | What they see. Anything they can't do is hidden, or fails with a clear message rather than a blank screen. |
-| **The position holder** | Appoint someone on **Positions**. Their tools appear in your app; the next person's do when the term changes. |
+| **The position holder** | Appoint someone on **Positions**. Their tools appear in your app (`EagleBot.stores`), and move to the next holder when the term changes. |
 | **Another learner** | They can't change or delete someone else's record. Your app shows Eagle Bot's message when they try. |
 | **Someone in another studio** | A studio install doesn't appear for them at all |
 | **Guide** | They aren't accidentally made the keeper of something learners should own |
@@ -88,6 +88,20 @@ Then:
   use it: **Exit full screen**, Escape, and **Open full screen** again.
 - **Type something nasty.** A topic called `<b>hi</b>` should show exactly
   that, not bold text.
+- **Test every rule from the wrong side.** As someone outside a store's
+  `write` rule, try saving to it (refused); outside its `read` rule, check its
+  records never arrive. As someone outside the app's `audience`, check it's not
+  in their sidebar. End the position holder's term and check they lose access.
+- **Sign something.** For a signed store: cancel the code box (nothing saved),
+  a wrong code (refused), then the right one; then try editing the signed
+  record (refused). A person without a code is told where to set one.
+- **Follow your links.** Copy a link to a record and open it in another
+  window; click one of your calendar entries; both should land on that record.
+- **Check your panel and calendar.** Open the page your panel is on, and the
+  Calendar: entries on the right day (save one after dinner), with the title
+  you meant.
+- **Trigger every reaction.** Certify a small test election or hold a Town
+  Hall, then check the record appeared.
 - **Try the update path.** With records saved, raise the version, publish,
   press **Update** on the install, and check the old records still display
   correctly.

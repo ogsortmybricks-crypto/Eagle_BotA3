@@ -85,35 +85,24 @@ Tac-On's name as `created_by_name`.
 | `stat`, `progress`, `celebrate`, `note`, `heading`, `show if` | Your own HTML and CSS |
 | `page` (several), tabs | Sections or tabs inside the app, or `enableFullWindow` for room |
 | `position` and its desk | A `createPosition` setup action, and tools you show to whoever `positions.list()` says holds it |
-| `show to`, `allow` | `EagleBot.user.role` and position holders, to decide what to show. Only changing and deleting records is enforced: see the warning below. |
+| `page ... { show to ... }` | The manifest's `audience` |
+| `allow` on a form | A `write` rule on that store in the manifest's `stores` (enforced by Eagle Bot) |
+| `show to` on a private list | A `read` rule on that store |
 | `allow remove own` | Built in: people can delete their own records |
-| `setting` | A `config` record an admin edits in the app |
+| `confirm with code` | `"sign": true` on the store, or `createRecord(data, { sign: true })` |
+| `show to position "Town Hall Leader"` | `"position:Town Hall Leader"` in any audience |
+| `setting` | A `config` record in a store only admins may write |
 | `name of` | `members.list()` |
-| `today`, `this_week_start`, `weekday` | JavaScript `Date` |
-| `session_start` | `calendar.list()` and the item whose `kind` is `"session"` |
+| `today`, `this_week_start`, `weekday` | `EagleBot.clock` (the academy's own day) |
+| `session_start` | `EagleBot.calendar.currentSession()` |
 | `list from wiki.rules`, `positions`, `elections`, `people`, `calendar` | `wiki.list()`, `positions.list()`, `elections.list()`, `members.list()`, `calendar.list()` |
-| `link`, `open record` | A section of your app that shows one record (there's no separate address for it) |
-| `confirm with code` | Not available in apps |
-| `panel on ...` | Not available. Explain where to find your app (a `createWikiPage`). |
-| `calendar` blocks | Not available. Show dates in your app instead. |
-| `when` reactions, `notify` | Not available. Apps run only while open. |
+| `link`, `open record` | `EagleBot.params.record` to open one record, and `linkTo` / `copyLink` to share it |
+| `panel on town-hall` | `"panels": [{ "host": "town-hall" }]`, and `EagleBot.place` to draw the small version |
+| `calendar` blocks | The manifest's `calendar` section (`{field}` placeholders, `mine` for "each person's own") |
+| `when` reactions with `add` | The manifest's `reactions` |
+| `notify` | Not available: the activity log is Eagle Bot's own. Save a record and show it. |
+| Position desks | Keeper-only tools inside the app, gated by a `write` rule |
 | `provides`, `use` | Not available. One app can't read another's records. |
 
-**`allow` isn't enforced for adding records.** In TacScript, `allow` on a
-form stopped other roles saving to it. In an app, anyone who can open it can
-add records to any store; what you control is what your app *shows* them. If
-a store must only be written by a position holder, check `created_by` against
-the holders when you *read* it, and ignore records from anyone else:
-
-```js
-const keepers = new Set(seat.holders.map((h) => h.id));   // and admins, if you like
-const decisions = (await EagleBot.api.getRecords({ store: "decision" }))
-  .filter((d) => keepers.has(d.created_by));
-```
-
-(That trusts whoever holds the seat *now*; keep a list of past holders if a
-term ends mid-session.)
-
-If losing a feature makes your Tac-On pointless (it lives in a Town Hall
-panel, or runs on a reaction), keep the TacScript version installed, and write
-an engine request saying what you'd build with that feature in apps.
+If losing a feature makes your Tac-On pointless, keep the TacScript version
+installed, and write an engine request saying what you'd build with it.

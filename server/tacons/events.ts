@@ -12,9 +12,9 @@
 
 import { eq } from "drizzle-orm";
 import { db } from "../db";
-import { academies, users, type Academy, type User } from "@shared/schema";
+import { academies, taconRecords, users, type Academy, type User } from "@shared/schema";
 import { resolveSettings } from "@shared/settings";
-import { HOOK_EVENTS, matches, type Row } from "@shared/tacons";
+import { HOOK_EVENTS, display, matches, type Row } from "@shared/tacons";
 import { studioCircle } from "../studio";
 import { allInstalls, type LoadedInstall } from "./registry";
 import { buildRuntime, contextFor, runActions } from "./runtime";
@@ -97,7 +97,8 @@ export async function dispatchTaconEvent(event: TaconEvent): Promise<void> {
   const circle = await studioCircle(event.studioId);
   const relevant = installs.filter(
     (entry) =>
-      entry.manifest.hooks.some((hook) => hook.event === event.action) &&
+      (entry.manifest.hooks.some((hook) => hook.event === event.action) ||
+        (entry.manifest.app?.reactions ?? []).some((reaction) => reaction.on === event.action)) &&
       (entry.install.studioId === null || circle.includes(entry.install.studioId)),
   );
   if (relevant.length === 0) return;
@@ -108,6 +109,10 @@ export async function dispatchTaconEvent(event: TaconEvent): Promise<void> {
 
   for (const install of relevant) {
     try {
+      if (install.manifest.app) {
+        await runReactions(install, row, event);
+        continue;
+      }
       await runHooks(academy, settings, install, row, event);
     } catch (error) {
       console.error(`[tacon] ${install.tacon.slug} failed on ${event.action}`, error);
@@ -149,6 +154,41 @@ async function runHooks(
       actorUserId: null,
       studioId: install.install.studioId ?? event.studioId,
       reason: event.action,
+    });
+  }
+}
+
+/**
+ * An app's `reactions`: when the event matches, save the record it describes,
+ * with `{event.x}` filled in. Written as the Tac-On, not as whoever triggered
+ * the event - the same rule TacScript reactions followed.
+ */
+async function runReactions(install: LoadedInstall, row: Row, event: TaconEvent): Promise<void> {
+  const read = (key: string) => (key.startsWith("event.") ? row[key.slice("event.".length)] : undefined);
+  for (const reaction of install.manifest.app?.reactions ?? []) {
+    if (reaction.on !== event.action) continue;
+    const when = Object.entries(reaction.when ?? {});
+    if (!when.every(([key, wanted]) => String(read(key) ?? "") === String(wanted))) continue;
+
+    const data: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(reaction.data)) {
+      if (typeof value !== "string") {
+        data[key] = value;
+        continue;
+      }
+      // "{event.winner}" on its own keeps the value as it is (a number stays a number).
+      const whole = value.match(/^\{(event\.[A-Za-z0-9_]+)\}$/);
+      data[key] = whole
+        ? (read(whole[1]) ?? null)
+        : value.replace(/\{(event\.[A-Za-z0-9_]+)\}/g, (_match, path: string) => display(read(path)));
+    }
+    await db.insert(taconRecords).values({
+      academyId: install.install.academyId,
+      installId: install.install.id,
+      store: reaction.store,
+      data,
+      createdByType: "tacon",
+      createdBy: null,
     });
   }
 }

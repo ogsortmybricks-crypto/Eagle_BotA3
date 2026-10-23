@@ -1,6 +1,24 @@
 # Engine requests
 
 Requests for Eagle Bot's maintainers, from Tac-On authors. Newest at the bottom.
+
+> **October 2026: TacScript is retired; Tac-Ons are apps.** ER-001 to ER-019
+> were TacScript requests, all shipped. Here is where each need lives in an
+> app (see the Tac-On Guide, 03 and 04):
+>
+> | Request | In an app |
+> | --- | --- |
+> | ER-001 `id` / `byId` | `record.id`, `record.created_by`, `record.created_by_name` |
+> | ER-002 `my.*` in notify / calendar | The manifest's `calendar` (`mine: true` for each person's own) |
+> | ER-003, ER-004, ER-006, ER-008, ER-012, ER-013, ER-014, ER-015, ER-018, ER-019 | Plain JavaScript over `getRecords()` and `members.list()` |
+> | ER-005 existing positions as an audience | `"position:Town Hall Leader"` in any audience |
+> | ER-007, ER-016 dates and time zones | `EagleBot.clock`, `EagleBot.academy.timeZone`, `calendar.currentSession()`; calendar entries use the academy's day |
+> | ER-009 remove own | Built in, for every record |
+> | ER-010 confirm with code | `"sign": true` on a store, or `createRecord(data, { sign: true })` |
+> | ER-011 a link to one record | `EagleBot.params`, `linkTo`, `copyLink`; calendar entries open `?record=<id>` |
+> | ER-017 repeated `where` | Not applicable |
+>
+> Number new requests from ER-020.
 Each entry was checked against the engine source on `origin/main` at
 `5e4baff` (`shared/tacons/*.ts`, `server/tacons/runtime.ts`,
 `server/routes/tacons.ts`, `server/routes/calendar.ts`), October 2026.

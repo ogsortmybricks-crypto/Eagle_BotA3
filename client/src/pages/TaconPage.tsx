@@ -8,9 +8,9 @@
  */
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useSearch } from "wouter";
+import { Link, useLocation, useSearch } from "wouter";
 import { ArrowLeft, Maximize2, PlugZap, Puzzle } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppFrame } from "@/tacons/AppFrame";
 import { apiGet } from "@/lib/api";
 import { useDateFormat, useSession } from "@/lib/session";
@@ -24,6 +24,17 @@ export function TaconPage({ installId, page }: { installId: number; page: string
   // An app installed to open full screen does, until its Exit button is pressed.
   const [exitedFullWindow, setExitedFullWindow] = useState(false);
   const exitFullWindow = useCallback(() => setExitedFullWindow(true), []);
+  // `?record=42` and friends: what an app reads as `EagleBot.params`.
+  const search = useSearch();
+  const [, navigate] = useLocation();
+  const params = useMemo(() => Object.fromEntries(new URLSearchParams(search)), [search]);
+  const goTo = useCallback(
+    (next: Record<string, string>) => {
+      const query = new URLSearchParams(next).toString();
+      navigate(`/t/${installId}/${page}${query ? `?${query}` : ""}`);
+    },
+    [installId, page, navigate],
+  );
   useEffect(() => setExitedFullWindow(false), [installId, page]);
 
   const query = useQuery<{ view: TaconView }>({
@@ -78,6 +89,8 @@ export function TaconPage({ installId, page }: { installId: number; page: string
             app={view.app}
             fullWindow={view.app.display === "fullscreen" && !exitedFullWindow}
             onExitFullWindow={exitFullWindow}
+            params={params}
+            onNavigate={goTo}
           />
         </>
       ) : (
@@ -228,7 +241,9 @@ export function TaconPanels({ host }: { host: string }) {
             <h2 className="font-semibold text-gray-900">{panel.title}</h2>
             <Chip>{panel.taconName}</Chip>
           </div>
-          {panel.widgets.length === 0 ? (
+          {panel.app ? (
+            <AppFrame app={panel.app} />
+          ) : panel.widgets.length === 0 ? (
             <Banner tone="info">This panel has nothing to show right now.</Banner>
           ) : (
             <Widgets
@@ -316,4 +331,5 @@ type TaconPanelData = {
   title: string;
   widgets: TaconView["widgets"];
   people: TaconView["people"];
+  app?: TaconView["app"];
 };

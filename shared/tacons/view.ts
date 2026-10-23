@@ -146,12 +146,18 @@ export type TaconView = {
 export type ViewApp = {
   html: string;
   display: "inline" | "fullscreen";
-  /** What `EagleBot.user`, `.academy`, `.studio` and `.tacon` say. No token, ever. */
+  /** Where it's drawn: its own page, or a panel on one of Eagle Bot's pages. */
+  place: "page" | `panel:${string}`;
+  /** For each store with rules: what this person may do. Stores not listed are open. */
+  stores: Record<string, { read: boolean; write: boolean; sign: boolean }>;
+  /** What `EagleBot.user`, `.academy`, `.studio`, `.tacon` and `.clock` say. No token, ever. */
   identity: {
     user: { id: number; name: string; email: string | null; role: string };
-    academy: { id: number; name: string };
+    academy: { id: number; name: string; timeZone: string | null };
     studio: { id: number; name: string } | null;
     tacon: { installId: number; name: string; version: string; icon: string };
+    /** The academy's day, in its own time zone: "2026-10-23". */
+    clock: { today: string; weekStart: string; weekday: string };
   };
 };
 
@@ -162,6 +168,8 @@ export type TaconPanelView = {
   icon: string;
   widgets: ViewWidget[];
   people: ViewPerson[];
+  /** Set when the Tac-On is an app: the app runs in the panel. */
+  app?: ViewApp;
 };
 
 /** What a Tac-On shows the holder of one of its positions, on the Positions page. */

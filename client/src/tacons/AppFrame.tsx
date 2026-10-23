@@ -25,7 +25,30 @@ import type { ViewApp } from "@shared/tacons/view";
 /* -------------------------------------------------------------------------- */
 
 type Json = unknown;
-type Call = (args: Json[], app: ViewApp) => Promise<Json>;
+
+/** What the host page does for a call that needs more than the API. */
+type Host = {
+  /** Shows Eagle Bot's own code box; resolves with the code, or rejects if cancelled. */
+  askCode: (prompt: string) => Promise<string>;
+  /** The app page's address with these parameters. */
+  link: (params: Record<string, string>) => string;
+  navigate: (params: Record<string, string>) => void;
+};
+type Call = (args: Json[], app: ViewApp, host: Host) => Promise<Json>;
+
+/** `{ record: 42 }` -> `{ record: "42" }`: link parameters are always text. */
+function linkParams(value: Json): Record<string, string> {
+  if (value === undefined || value === null) return {};
+  const input = object(value, "The link's parameters");
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(input)) {
+    if (!/^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(key)) throw new Error(`"${key}" can't be a link parameter.`);
+    if (entry === undefined || entry === null) continue;
+    out[key] = String(entry).slice(0, 200);
+  }
+  if (Object.keys(out).length > 10) throw new Error("A link can carry at most 10 parameters.");
+  return out;
+}
 
 const base = (app: ViewApp) => `/tacons/app/${app.identity.tacon.installId}/records`;
 const object = (value: Json, what: string): Record<string, unknown> => {
@@ -107,9 +130,15 @@ const METHODS: Record<string, Call> = {
     const query = typeof store === "string" ? `?store=${encodeURIComponent(store)}` : "";
     return (await apiGet<{ records: Json[] }>(`${base(app)}${query}`)).records;
   },
-  "api.createRecord": async ([data, options], app) => {
-    const store = options && typeof options === "object" ? (options as { store?: unknown }).store : undefined;
-    return (await apiPost<{ record: Json }>(base(app), { data: object(data, "data"), store })).record;
+  "api.createRecord": async ([data, options], app, host) => {
+    const input = (options && typeof options === "object" ? options : {}) as { store?: unknown; sign?: unknown; prompt?: unknown };
+    const store = typeof input.store === "string" ? input.store : "records";
+    // Signing asks for the person's code in Eagle Bot's own box: the app never sees it.
+    const sign = app.stores[store]?.sign || input.sign === true;
+    const code = sign
+      ? await host.askCode(typeof input.prompt === "string" ? input.prompt.slice(0, 200) : `Sign this for ${app.identity.tacon.name}.`)
+      : undefined;
+    return (await apiPost<{ record: Json }>(base(app), { data: object(data, "data"), store: input.store, sign: input.sign === true, code })).record;
   },
   "api.updateRecord": async ([recordId, data], app) =>
     (await apiPatch<{ record: Json }>(`${base(app)}/${id(recordId, "The record id")}`, { data: object(data, "data") })).record,
@@ -260,6 +289,23 @@ const METHODS: Record<string, Call> = {
     return election;
   },
 
+  /* Links to a place in the app: `?record=42`. */
+  "link.to": async ([params], _app, host) => host.link(linkParams(params)),
+  "link.navigate": async ([params], _app, host) => {
+    host.navigate(linkParams(params));
+    return { ok: true };
+  },
+  "link.copy": async ([params], _app, host) => {
+    const link = host.link(linkParams(params));
+    try {
+      await navigator.clipboard.writeText(link);
+      return { ok: true, link };
+    } catch {
+      // Some browsers only let the page copy right after a click on the page itself.
+      return { ok: false, link };
+    }
+  },
+
   /* The studio calendar, read-only. */
   "calendar.list": async ([options]) => {
     const input = (options && typeof options === "object" ? options : {}) as { from?: unknown; to?: unknown };
@@ -270,6 +316,15 @@ const METHODS: Record<string, Call> = {
     const { items } = await apiGet<{ items: Json[] }>(`/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
     return items;
   },
+  "calendar.currentSession": async (_args, app) => {
+    const today = app.identity.clock.today;
+    type Item = { kind: string; title: string; quest: string | null; occurrenceStart: string; occurrenceEnd: string };
+    const { items } = await apiGet<{ items: Item[] }>(`/calendar?from=${today}&to=${today}`);
+    const session = items.find((item) => item.kind === "session");
+    return session
+      ? { title: session.title, quest: session.quest ?? "", starts: session.occurrenceStart, ends: session.occurrenceEnd }
+      : null;
+  },
 };
 
 /* -------------------------------------------------------------------------- */
@@ -277,7 +332,14 @@ const METHODS: Record<string, Call> = {
 /* -------------------------------------------------------------------------- */
 
 /** Runs inside the sandbox. Plain ES2020; keep it free of anything this file imports. */
-function sdkBoot(init: { channel: string; identity: ViewApp["identity"]; display: string }) {
+function sdkBoot(init: {
+  channel: string;
+  identity: ViewApp["identity"];
+  display: string;
+  place: string;
+  params: Record<string, string>;
+  stores: ViewApp["stores"];
+}) {
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   let sequence = 0;
   const post = (message: Record<string, unknown>) => parent.postMessage({ ...message, channel: init.channel }, "*");
@@ -314,7 +376,14 @@ function sdkBoot(init: { channel: string; identity: ViewApp["identity"]; display
     academy: Object.freeze({ ...init.identity.academy }),
     studio: init.identity.studio ? Object.freeze({ ...init.identity.studio }) : null,
     tacon: Object.freeze({ ...init.identity.tacon }),
+    clock: Object.freeze({ ...init.identity.clock }),
     display: init.display,
+    place: init.place,
+    params: Object.freeze({ ...init.params }),
+    stores: Object.freeze(Object.fromEntries(Object.entries(init.stores).map(([name, rule]) => [name, Object.freeze({ ...rule })]))),
+    linkTo: call("link.to"),
+    navigate: call("link.navigate"),
+    copyLink: call("link.copy"),
     // There is deliberately no `token`: an app never holds the viewer's login.
     api: {
       getRecords: call("api.getRecords"),
@@ -341,7 +410,7 @@ function sdkBoot(init: { channel: string; identity: ViewApp["identity"]; display
       update: call("wiki.update"),
     },
     elections: { list: call("elections.list"), get: call("elections.get"), create: call("elections.create") },
-    calendar: { list: call("calendar.list") },
+    calendar: { list: call("calendar.list"), currentSession: call("calendar.currentSession") },
     exists: { position: call("exists.position"), wikiPage: call("exists.wikiPage") },
   };
   Object.defineProperty(window, "EagleBot", { value: Object.freeze(sdk), writable: false, configurable: false });
@@ -374,8 +443,15 @@ const CSP = [
 ].join("; ");
 
 /** The whole document the frame loads. */
-function frameDocument(app: ViewApp, channel: string): string {
-  const init = JSON.stringify({ channel, identity: app.identity, display: app.display }).replace(/</g, "\\u003c");
+function frameDocument(app: ViewApp, channel: string, params: Record<string, string>): string {
+  const init = JSON.stringify({
+    channel,
+    identity: app.identity,
+    display: app.display,
+    place: app.place,
+    params,
+    stores: app.stores,
+  }).replace(/</g, "\\u003c");
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -399,19 +475,33 @@ ${app.html}
 
 const MAX_MESSAGE = 300_000;
 
+const NO_PARAMS: Record<string, string> = {};
+
 export function AppFrame({
   app,
-  fullWindow,
-  onExitFullWindow,
+  fullWindow = false,
+  onExitFullWindow = () => {},
+  params = NO_PARAMS,
+  onNavigate,
 }: {
   app: ViewApp;
   /** Drawn over the whole window, with a bar and an Exit button. */
-  fullWindow: boolean;
-  onExitFullWindow: () => void;
+  fullWindow?: boolean;
+  onExitFullWindow?: () => void;
+  /** The page address's parameters (`?record=42`), as `EagleBot.params`. */
+  params?: Record<string, string>;
+  /** Opens the app's page with these parameters. */
+  onNavigate?: (params: Record<string, string>) => void;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
-  const channel = useMemo(() => crypto.randomUUID(), [app]);
-  const srcDoc = useMemo(() => frameDocument(app, channel), [app, channel]);
+  const paramsKey = JSON.stringify(params);
+  const channel = useMemo(() => crypto.randomUUID(), [app, paramsKey]);
+  const srcDoc = useMemo(() => frameDocument(app, channel, params), [app, channel]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [codeRequest, setCodeRequest] = useState<{
+    prompt: string;
+    resolve: (code: string) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
   const [height, setHeight] = useState(240);
   const [error, setError] = useState<string | null>(null);
   const [stopped, setStopped] = useState(false);
@@ -454,14 +544,31 @@ export function AppFrame({
         const handler = Object.hasOwn(METHODS, message.method) ? METHODS[message.method] : null;
         if (!handler) throw new Error(`EagleBot.${message.method} isn't something an app can do.`);
         const args = Array.isArray(message.args) ? message.args : [];
-        reply(true, await handler(args, app));
+        const appPath = `/t/${app.identity.tacon.installId}/app`;
+        const host: Host = {
+          askCode: (prompt) =>
+            new Promise<string>((resolve, reject) => setCodeRequest({ prompt, resolve, reject })),
+          link: (next) => {
+            const query = new URLSearchParams(next).toString();
+            return `${window.location.origin}${appPath}${query ? `?${query}` : ""}`;
+          },
+          navigate: (next) => {
+            if (onNavigate) onNavigate(next);
+            else {
+              const query = new URLSearchParams(next).toString();
+              window.history.pushState(null, "", `${appPath}${query ? `?${query}` : ""}`);
+              window.dispatchEvent(new PopStateEvent("popstate"));
+            }
+          },
+        };
+        reply(true, await handler(args, app, host));
       } catch (failure) {
         reply(false, null, failure instanceof Error ? failure.message : "That didn't work.");
       }
     };
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
-  }, [app, channel, fullWindow, onExitFullWindow]);
+  }, [app, channel, fullWindow, onExitFullWindow, onNavigate]);
 
   // Escape works from the host page too, when the frame doesn't have focus.
   useEffect(() => {
@@ -506,11 +613,26 @@ export function AppFrame({
     </div>
   );
 
+  const codeBox = codeRequest && (
+    <CodeBox
+      prompt={codeRequest.prompt}
+      onSubmit={(code) => {
+        codeRequest.resolve(code);
+        setCodeRequest(null);
+      }}
+      onCancel={() => {
+        codeRequest.reject(new Error("Signing was cancelled, so nothing was saved."));
+        setCodeRequest(null);
+      }}
+    />
+  );
+
   if (!fullWindow) {
     return (
       <div>
         {problem}
         {iframe}
+        {codeBox}
       </div>
     );
   }
@@ -527,6 +649,55 @@ export function AppFrame({
       </div>
       {problem && <div className="px-4 pt-2">{problem}</div>}
       <div className="min-h-0 flex-1">{iframe}</div>
+      {codeBox}
+    </div>
+  );
+}
+
+/**
+ * Eagle Bot's own box for a confirmation code. It's drawn by Eagle Bot, not
+ * the app, so the code goes straight to the server and the app never sees it.
+ */
+function CodeBox({ prompt, onSubmit, onCancel }: { prompt: string; onSubmit: (code: string) => void; onCancel: () => void }) {
+  const [code, setCode] = useState("");
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" role="dialog" aria-modal="true" aria-labelledby="tacon-code-title">
+      <form
+        className="card-pad w-full max-w-sm space-y-3 bg-white"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (code.length === 6) onSubmit(code);
+        }}
+      >
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wide text-brand-700">Sign with your code</div>
+          <h2 id="tacon-code-title" className="mt-1 font-semibold text-gray-900">
+            {prompt}
+          </h2>
+          <p className="mt-1 text-xs text-gray-500">
+            Your private six-digit confirmation code, from your profile. Eagle Bot checks it; the Tac-On never sees it.
+          </p>
+        </div>
+        <input
+          className="input tracking-widest"
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          autoFocus
+          maxLength={6}
+          value={code}
+          onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+          aria-label="Your six-digit confirmation code"
+        />
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn-secondary" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={code.length !== 6}>
+            Sign and save
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

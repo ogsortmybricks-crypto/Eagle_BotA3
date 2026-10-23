@@ -78,3 +78,51 @@ test("a package survives being published and exported", () => {
   assert.equal(manifest.pages.length, 1);
   assert.deepEqual(packageOf(manifest), pkg);
 });
+
+test("audience, stores, calendar, panels and reactions", () => {
+  const manifest = {
+    ...MANIFEST,
+    audience: ["learner", "guide", "position:Agenda Keeper"],
+    stores: { decision: { write: ["position:Agenda Keeper", "admin"], sign: true }, private: { read: ["admin"] } },
+    calendar: [{ store: "trip", on: "day", until: "back", title: "Trip: {place} ({by})", kind: "field_trip", mine: true }],
+    panels: [{ host: "town-hall", title: "From the Agenda Box" }],
+    reactions: [{ on: "election.certified", when: { "event.kind": "position" }, store: "service", data: { who: "{event.winner}", note: "Won: {event.summary}" } }],
+  };
+  const result = checkApp({ manifest, html: "<p>x</p>" });
+  assert.equal(result.ok, true, JSON.stringify(result.checks.filter((check) => !check.ok)));
+  const engine = manifestForApp(result.pkg!);
+  assert.deepEqual(engine.pages[0].showTo, ["learner", "guide", "studio-position:agenda keeper", "admin"]);
+  assert.deepEqual(engine.studioPositions, ["Agenda Keeper"]);
+  assert.deepEqual(engine.stores.map((store) => store.name).sort(), ["decision", "private", "service", "trip"]);
+  assert.equal(engine.panels[0].host, "town-hall");
+  assert.deepEqual(engine.panels[0].showTo, engine.pages[0].showTo, "a panel defaults to the app's audience");
+  const feed = engine.calendars![0];
+  assert.equal(feed.openApp, true);
+  assert.equal(feed.on, "day");
+  assert.ok(feed.where, "mine filters to the viewer's own records");
+  assert.deepEqual(packageOf(engine)?.manifest.reactions, manifest.reactions);
+
+  const bad = checkApp({
+    manifest: {
+      ...MANIFEST,
+      audience: ["teachers"],
+      stores: { __x: {} },
+      panels: [{ host: "lunchroom" }],
+      reactions: [{ on: "election.certified", when: { kind: "x" }, store: "s", data: { a: 1 } }],
+      calendar: [{ store: "trip", title: "x" }],
+    },
+    html: "<p>x</p>",
+  });
+  assert.deepEqual(
+    bad.checks.filter((check) => !check.ok).map((check) => check.label).sort(),
+    ["audience", "calendar", "panels", "reactions", "stores"],
+  );
+});
+
+test("a calendar entry shows a private store only to its readers", () => {
+  const pkg = checkApp({
+    manifest: { ...MANIFEST, stores: { appeal: { read: ["position:Appeals Chair"] } }, calendar: [{ store: "appeal", on: "created", title: "{title}" }] },
+    html: "<p>x</p>",
+  }).pkg!;
+  assert.deepEqual(manifestForApp(pkg).calendars![0].showTo, ["studio-position:appeals chair", "admin"]);
+});

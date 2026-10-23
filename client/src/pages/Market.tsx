@@ -38,7 +38,7 @@ import {
   Stat,
 } from "@/components/ui";
 import { StudioPicker } from "@/components/StudioPicker";
-import { actionKey, audiencePosition, audienceStudioPosition, describeAction, type Manifest } from "@shared/tacons";
+import { actionKey, audiencePosition, audienceStudioPosition, describeAction, describeApp, type Manifest } from "@shared/tacons";
 import { KIND_LABELS } from "@shared/calendar";
 import { describeExtensions } from "@shared/tacons/extension-registry";
 import { ProgramPermissions } from "@/tacons/ProgramPermissions";
@@ -380,6 +380,9 @@ export function TaconDetail({ slug }: { slug: string }) {
                       running in Eagle Bot's sandbox. It uses Eagle Bot only through the Tac-On SDK, with the
                       permissions of whoever is using it.
                     </li>
+                    {describeApp(manifest.app).map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
                     {manifest.app.setup.map((action, index) => (
                       <li key={`setup-${index}`}>
                         On install: {action.prompt ?? describeAction(action)}
@@ -442,7 +445,13 @@ export function TaconDetail({ slug }: { slug: string }) {
           {manifest && (
             <div className="card-pad">
               <h2 className="font-semibold text-gray-900">What it can read</h2>
-              {manifest.needs.length === 0 ? (
+              {manifest.app ? (
+                <p className="mt-2 text-sm text-gray-600">
+                  Through the Tac-On SDK it can read people, positions, the wiki, elections and the calendar, and
+                  change them only where the person using it is allowed to. It runs in a sandbox with no internet
+                  access and never holds anyone's login.
+                </p>
+              ) : manifest.needs.length === 0 ? (
                 <p className="mt-2 text-sm text-gray-600">
                   Nothing outside its own records.
                 </p>
