@@ -8,6 +8,7 @@ import { Banner, Chip, EmptyState, LoadingPage, Modal, PageHeader, Spinner } fro
 import { StudioTag } from "@/components/StudioSwitcher";
 import { StudioPicker } from "@/components/StudioPicker";
 import { TaconPanels } from "@/pages/TaconPage";
+import { RunGraph } from "@/townhall/RunGraph";
 
 type MeetingRow = {
   meeting: {
@@ -36,6 +37,7 @@ const STATUS_TONE: Record<string, "neutral" | "brand" | "amber" | "green"> = {
   draft: "neutral",
   in_progress: "brand",
   processing: "amber",
+  in_review: "amber",
   processed: "green",
   archived: "neutral",
 };
@@ -44,6 +46,7 @@ const STATUS_LABEL: Record<string, string> = {
   draft: "Draft",
   in_progress: "In session",
   processing: "AI is reading",
+  in_review: "Waiting for approvals",
   processed: "In the wiki",
   archived: "Archived",
 };
@@ -152,6 +155,8 @@ export function TownHall() {
         </div>
       )}
 
+      <RunGraph />
+
       {rows.length === 0 ? (
         <EmptyState
           icon={Gavel}
@@ -170,8 +175,8 @@ export function TownHall() {
             ) : undefined
           }
         >
-          When the studio meets, the secretary takes notes here. When the meeting ends, one button
-          folds every decision into the wiki and strikes out whatever it contradicts.
+          When the studio meets, the secretary takes notes here. When the meeting ends, the AI drafts
+          the changes to the wiki, and once three people have checked them the secretary pushes them in.
         </EmptyState>
       ) : (
         <div className="card divide-y divide-gray-100">

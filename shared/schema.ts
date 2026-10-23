@@ -81,7 +81,8 @@ export const STUDIO_PRESETS = [
 export const RULE_STATUSES = ["active", "proposed", "repealed"] as const;
 export const FINDING_TYPES = ["contradiction", "gap", "ambiguity", "election_needed"] as const;
 export const FINDING_STATUSES = ["open", "resolved", "dismissed"] as const;
-export const MEETING_STATUSES = ["draft", "in_progress", "processing", "processed", "archived"] as const;
+/** `in_review`: processed by the AI, waiting for approvals before it's pushed into the wiki. */
+export const MEETING_STATUSES = ["draft", "in_progress", "processing", "in_review", "processed", "archived"] as const;
 export const ELECTION_STATUSES = ["draft", "open", "closed", "certified", "cancelled"] as const;
 export const JOB_STATUSES = ["queued", "running", "awaiting_input", "succeeded", "failed"] as const;
 
@@ -659,6 +660,85 @@ export const meetings = pgTable(
     studioIdx: index("meetings_studio_idx").on(t.studioId),
   }),
 );
+
+/**
+ * A Town Hall's processing, held for review before it touches the Contract -
+ * a commit waiting to be pushed.
+ *
+ * When the Secretary processes a meeting, the AI's wiki changes are saved here
+ * instead of applied. People in the studio review the run; once enough of
+ * them approve it (and nobody is still asking for changes), the Secretary
+ * pushes it, and only then is the Contract changed. Pushed runs form the
+ * studio's main line, each pointing at the run that was the head when it was
+ * made (`baseRunId`); runs that were closed or replaced stay as branches off
+ * it, so the history of what was proposed is never lost.
+ */
+export const RUN_STATUSES = ["pending", "pushed", "closed", "superseded"] as const;
+export type RunStatus = (typeof RUN_STATUSES)[number];
+
+export const meetingRuns = pgTable(
+  "meeting_runs",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    /** The studio whose Contract this would change. Null is academy-wide. */
+    studioId: integer("studio_id").references(() => studios.id, { onDelete: "set null" }),
+    meetingId: integer("meeting_id").notNull().references(() => meetings.id, { onDelete: "cascade" }),
+    /** The AI job that produced it; wiki revisions made by the push carry this id, so "Undo" still works. */
+    jobId: integer("job_id"),
+    submittedBy: integer("submitted_by").references(() => users.id, { onDelete: "set null" }),
+    /** The studio's last pushed run when this one was made: its parent on the graph. */
+    baseRunId: integer("base_run_id"),
+    /** An earlier run of the same meeting this one replaced. */
+    replacesRunId: integer("replaces_run_id"),
+    status: text("status").$type<RunStatus>().notNull().default("pending"),
+    /** Approvals needed to push, fixed when the run was made. */
+    approvalsRequired: integer("approvals_required").notNull().default(3),
+    summary: text("summary").notNull().default(""),
+    /** The AI's output, applied only on push. */
+    operations: jsonb("operations").$type<unknown[]>().notNull().default([]),
+    findings: jsonb("findings").$type<unknown[]>().notNull().default([]),
+    newPositions: jsonb("new_positions").$type<unknown[]>().notNull().default([]),
+    proposedElections: jsonb("proposed_elections").$type<unknown[]>().notNull().default([]),
+    unresolvedQuestions: jsonb("unresolved_questions").$type<string[]>().notNull().default([]),
+    /** What pushing did: counts and anything skipped. */
+    outcome: jsonb("outcome").$type<Record<string, unknown> | null>(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    pushedAt: timestamp("pushed_at"),
+    pushedBy: integer("pushed_by").references(() => users.id, { onDelete: "set null" }),
+    closedAt: timestamp("closed_at"),
+    closedBy: integer("closed_by").references(() => users.id, { onDelete: "set null" }),
+    closeNote: text("close_note"),
+  },
+  (t) => ({
+    studioIdx: index("meeting_runs_studio_idx").on(t.academyId, t.studioId, t.createdAt),
+    meetingIdx: index("meeting_runs_meeting_idx").on(t.meetingId),
+  }),
+);
+
+/** One person's review of a run. One per person; changing your mind replaces it. */
+export const RUN_VERDICTS = ["approve", "changes"] as const;
+export type RunVerdict = (typeof RUN_VERDICTS)[number];
+
+export const meetingRunReviews = pgTable(
+  "meeting_run_reviews",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    runId: integer("run_id").notNull().references(() => meetingRuns.id, { onDelete: "cascade" }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    verdict: text("verdict").$type<RunVerdict>().notNull(),
+    comment: text("comment"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    onePerPerson: uniqueIndex("meeting_run_reviews_person_idx").on(t.runId, t.userId),
+  }),
+);
+
+export type MeetingRun = typeof meetingRuns.$inferSelect;
+export type MeetingRunReview = typeof meetingRunReviews.$inferSelect;
 
 /**
  * The secretary's workspace is a list of typed items rather than a wall of

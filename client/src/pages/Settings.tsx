@@ -1368,8 +1368,20 @@ function TownHallTab() {
           checked={draft.carryOverActionItems}
           onChange={(value) => set("carryOverActionItems", value)}
         />
+        <FieldRow
+          label="Approvals before the wiki changes"
+          hint="A processed Town Hall waits until this many people in the studio (not the Secretary who submitted it) say it's correct. Then the Secretary pushes it in. Never fewer than three."
+        >
+          <NumberInput
+            value={draft.approvalsRequired}
+            onChange={(value) => set("approvalsRequired", value)}
+            min={3}
+            max={20}
+            suffix="people"
+          />
+        </FieldRow>
         <ToggleRow
-          label="Lock the notes once the AI has processed them"
+          label="Lock the notes once they're in the wiki"
           hint="Stops the record drifting away from what the wiki says came out of it. An admin can still reprocess."
           checked={draft.lockAfterProcessing}
           onChange={(value) => set("lockAfterProcessing", value)}

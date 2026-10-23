@@ -47,6 +47,7 @@ import { effectiveForStudio, studioCircle, studioFilter, type StudioScope } from
 import { resolveSettings, type AcademySettings } from "@shared/settings";
 import { meetingProcessedEmail, sendMail } from "../mailer";
 import { env } from "../env";
+import { createRun } from "../townhall-runs";
 
 /**
  * Jobs run in-process, detached from the request that started them, and report
@@ -698,6 +699,22 @@ export async function settleFinding(opts: {
 
 export function startProcessMeeting(job: AiJob, meetingId: number) {
   runDetached(job, async () => {
+    try {
+      await processMeeting(job, meetingId);
+    } catch (error) {
+      // A failed run mustn't leave the meeting stuck "processing", where it
+      // can't be edited or processed again.
+      await db
+        .update(meetings)
+        .set({ status: "in_progress" })
+        .where(and(eq(meetings.id, meetingId), eq(meetings.status, "processing")));
+      throw error;
+    }
+  });
+}
+
+async function processMeeting(job: AiJob, meetingId: number) {
+  {
     const context = await runContext(job);
 
     const [meeting] = await db.select().from(meetings).where(eq(meetings.id, meetingId)).limit(1);
@@ -769,87 +786,31 @@ export function startProcessMeeting(job: AiJob, meetingId: number) {
       },
     });
 
-    await updateJob(job.id, { message: "Applying changes to the wiki...", progress: 90 });
+    await updateJob(job.id, { message: "Saving the changes for review...", progress: 90 });
 
-    const outcome = await applyOperations({
-      academyId: job.academyId,
-      studioId: job.studioId,
-      operations: data.operations as WikiOperation[],
-      actorUserId: job.requestedBy,
-      actorType: "ai",
-      sourceType: "town_hall",
-      sourceRef: String(meetingId),
-      jobId: job.id,
-    });
-
-    const positionsAdded = context.settings.ai.detectPositions
-      ? await savePositions({
-          academyId: job.academyId,
-          studioId: job.studioId,
-          positions: data.newPositions,
-          sourceType: "town_hall",
-          sourceRef: String(meetingId),
-        })
-      : 0;
-
-    await saveFindings({
-      academyId: job.academyId,
-      studioId: job.studioId,
-      findings: data.findings,
-      sourceType: "town_hall",
-      sourceRef: String(meetingId),
-      jobId: job.id,
-    });
-
-    // Proposed elections are never created automatically - the studio decides.
-    const proposals = context.settings.ai.proposeElections ? data.proposedElections : [];
-    const needsDecision =
-      proposals.length > 0 || data.unresolvedQuestions.length > 0 || outcome.skipped.length > 0;
+    // Nothing touches the wiki yet. The changes wait as a run until enough
+    // people in the studio approve them and the Secretary pushes it.
+    const run = await createRun({ job, meetingId, data, settings: context.settings });
 
     await db
       .update(meetings)
-      .set({ status: "processed", processedAt: new Date(), lastJobId: job.id })
+      .set({ status: "in_review", lastJobId: job.id })
       .where(eq(meetings.id, meetingId));
 
-    const changeLine = `${outcome.created} added, ${outcome.amended} amended, ${outcome.repealed} repealed.`;
+    const operations = data.operations as WikiOperation[];
+    const count = (op: WikiOperation["op"]) => operations.filter((entry) => entry.op === op).length;
+    const changeLine = `${count("create_rule")} to add, ${count("amend_rule")} to amend, ${count("repeal_rule")} to repeal.`;
 
     await updateJob(job.id, {
-      status: needsDecision ? "awaiting_input" : "succeeded",
-      awaitingReason: needsDecision
-        ? [
-            proposals.length > 0
-              ? `${proposals.length} election${proposals.length === 1 ? "" : "s"} to approve or skip`
-              : null,
-            data.unresolvedQuestions.length > 0
-              ? `${data.unresolvedQuestions.length} question${data.unresolvedQuestions.length === 1 ? "" : "s"} for the secretary`
-              : null,
-            outcome.skipped.length > 0
-              ? `${outcome.skipped.length} operation(s) couldn't be applied`
-              : null,
-          ]
-            .filter(Boolean)
-            .join("; ")
-        : null,
-      message: changeLine,
+      status: "succeeded",
+      awaitingReason: null,
+      message: `${changeLine} Waiting for ${run.approvalsRequired} approvals before it's pushed into the wiki.`,
       progress: 100,
       finishedAt: new Date(),
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
-      result: {
-        summary: data.summary,
-        ...outcome,
-        positionsAdded,
-        proposedElections: proposals,
-        unresolvedQuestions: data.unresolvedQuestions,
-        studio: context.studioName,
-      },
+      result: { summary: data.summary, runId: run.id, pending: true, studio: context.studioName },
     });
-
-    if (context.settings.notifications.emailOnMeetingProcessed) {
-      void notifyMeetingProcessed(job, meeting.title, data.summary, changeLine, context).catch(
-        (error) => console.error("[ai] meeting-processed notify failed", error),
-      );
-    }
 
     await logActivity({
       academyId: job.academyId,
@@ -857,13 +818,22 @@ export function startProcessMeeting(job: AiJob, meetingId: number) {
       actorUserId: job.requestedBy,
       actorType: "ai",
       actorLabel: "Eagle Bot AI",
-      action: "townhall.processed",
+      action: "townhall.run.submitted",
       entityType: "meeting",
       entityId: meetingId,
-      summary: `Processed "${meeting.title}": ${changeLine}`,
-      metadata: { jobId: job.id, ...outcome },
+      summary: `Processed "${meeting.title}" for review: ${changeLine}`,
+      metadata: { jobId: job.id, runId: run.id },
     });
-  });
+  }
+}
+
+/** Emails the studio once a pushed run has changed its Contract. */
+export async function notifyRunPushed(jobId: number, title: string, summary: string, changes: string): Promise<void> {
+  const [job] = await db.select().from(aiJobs).where(eq(aiJobs.id, jobId)).limit(1);
+  if (!job) return;
+  const context = await runContext(job);
+  if (!context.settings.notifications.emailOnMeetingProcessed) return;
+  await notifyMeetingProcessed(job, title, summary, changes, context);
 }
 
 /** Tells the studio its Contract moved. Only the studio that met, not everyone. */

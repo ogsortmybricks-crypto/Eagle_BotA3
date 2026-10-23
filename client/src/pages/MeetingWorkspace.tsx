@@ -31,6 +31,7 @@ import {
 } from "@/components/ui";
 import { JobProgress, useJob, type Job } from "@/components/JobStatus";
 import { StudioTag } from "@/components/StudioSwitcher";
+import { RunReview } from "@/townhall/RunReview";
 
 type Item = {
   id: number;
@@ -256,7 +257,9 @@ export function MeetingWorkspace({ id }: { id: number }) {
           </Banner>
         )}
         {job && <JobProgress job={job} />}
-        {job && ["succeeded", "awaiting_input"].includes(job.status) && (
+        <RunReview meetingId={id} />
+        {/* "What the AI did" is about changes already in the wiki: shown once a run is pushed. */}
+        {job && ["succeeded", "awaiting_input"].includes(job.status) && (job.result as { pending?: boolean } | null)?.pending !== true && (
           <AiReviewPanel
             job={job}
             meetingId={id}
@@ -366,11 +369,16 @@ export function MeetingWorkspace({ id }: { id: number }) {
         }
       >
         <p className="text-sm text-gray-600">
-          Claude will read {items.length} item{items.length === 1 ? "" : "s"} and update the wiki:
-          adding what passed, amending what changed, and repealing anything the meeting
+          Claude will read {items.length} item{items.length === 1 ? "" : "s"} and draft the changes
+          to the wiki: adding what passed, amending what changed, and repealing anything the meeting
           contradicted.
         </p>
         <ul className="mt-3 space-y-1.5 text-sm text-gray-600">
+          <li className="flex gap-2">
+            <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+            Nothing changes yet. The draft waits until {settings.townHall.approvalsRequired} people in
+            the studio have checked it, then you push it into the wiki.
+          </li>
           <li className="flex gap-2">
             <Check className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
             Every change is logged with a reason and can be undone in one click.
@@ -380,11 +388,19 @@ export function MeetingWorkspace({ id }: { id: number }) {
             Anything ambiguous comes back as a question instead of a guess.
           </li>
         </ul>
+        {meeting.status === "in_review" && (
+          <div className="mt-4">
+            <Banner tone="info">
+              A run of this meeting is waiting for approvals. Processing again replaces it, and its
+              approvals start over.
+            </Banner>
+          </div>
+        )}
         {meeting.processedAt && (
           <div className="mt-4">
             <Banner tone="warning">
-              These notes were already processed once. Running it again may duplicate rules — undo
-              the previous run first if that's what you want.
+              These notes were already pushed into the wiki once. Running it again may duplicate
+              rules — undo the previous run first if that's what you want.
             </Banner>
           </div>
         )}

@@ -56,6 +56,12 @@ export const townHallSchema = z.object({
   titleTemplate: z.string().max(120).default("Town Hall \u2014 {date}"),
   /** Once the AI has folded a meeting into the wiki, freeze the notes. */
   lockAfterProcessing: z.boolean().default(false),
+  /**
+   * How many people must approve a processed Town Hall before the Secretary
+   * can push it into the wiki. Never fewer than three: one person - or two -
+   * shouldn't be able to rewrite the Contract alone.
+   */
+  approvalsRequired: z.number().int().min(3).max(20).default(3),
 });
 
 export const aiSchema = z.object({

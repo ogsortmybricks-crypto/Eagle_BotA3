@@ -1,11 +1,13 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { db } from "../db";
-import { aiJobs, meetingItems, meetings, studios, users } from "@shared/schema";
+import { RUN_VERDICTS, aiJobs, meetingItems, meetingRuns, meetings, studios, users } from "@shared/schema";
 import { requirePermission } from "../auth";
 import { logActivity } from "../activity";
 import { createJob, startProcessMeeting } from "../ai/jobs";
+import { can } from "@shared/permissions";
+import { RunError, closeRun, loadRun, pushRun, reviewRun, runView, studioGraph } from "../townhall-runs";
 import { aiConfigured } from "../env";
 import {
   canReadStudio,
@@ -541,4 +543,108 @@ townHallRouter.get("/action-items/open", requirePermission("meetings.read"), asy
     )
     .orderBy(asc(meetingItems.dueDate));
   res.json({ items: rows });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  Runs: processed meetings waiting for approval before they're pushed         */
+/* -------------------------------------------------------------------------- */
+
+function canProcess(req: Request): boolean {
+  return can(req.user!.role, "meetings.process", req.settings, { devStatus: req.user!.devStatus });
+}
+
+function runFailure(res: Response, error: unknown) {
+  if (error instanceof RunError) return res.status(error.status).json({ error: error.message });
+  throw error;
+}
+
+/** A run this person can see: same academy, a studio they can read. */
+async function openRun(req: Request) {
+  const run = await loadRun(req.user!.academyId, Number(req.params.runId));
+  if (!run || !canReadStudio(requireScope(req), run.studioId)) throw new RunError(404, "That run doesn't exist.");
+  return run;
+}
+
+/**
+ * The commit graph for the Contract being looked at: the selected studio's
+ * runs, or the academy-wide ones when no studio is selected.
+ */
+townHallRouter.get("/runs/graph", requirePermission("meetings.read"), async (req, res) => {
+  const scope = requireScope(req);
+  const settings = req.settings!;
+  res.json({
+    studioId: scope.studioId,
+    approvalsRequired: settings.townHall.approvalsRequired,
+    nodes: await studioGraph(req.user!.academyId, scope.studioId),
+  });
+});
+
+townHallRouter.get("/runs/:runId", requirePermission("meetings.read"), async (req, res) => {
+  try {
+    const run = await openRun(req);
+    res.json({ run: await runView(run, req.user!, requireScope(req), canProcess(req)) });
+  } catch (error) {
+    runFailure(res, error);
+  }
+});
+
+/** Every run of one meeting, newest first: the one waiting now, and its history. */
+townHallRouter.get("/:id/runs", requirePermission("meetings.read"), async (req, res) => {
+  const scope = requireScope(req);
+  const [meeting] = await db
+    .select()
+    .from(meetings)
+    .where(and(eq(meetings.id, Number(req.params.id)), eq(meetings.academyId, req.user!.academyId)))
+    .limit(1);
+  if (!meeting || !canReadStudio(scope, meeting.studioId)) return res.status(404).json({ error: "That meeting doesn't exist." });
+  const runs = await db
+    .select()
+    .from(meetingRuns)
+    .where(eq(meetingRuns.meetingId, meeting.id))
+    .orderBy(desc(meetingRuns.createdAt), desc(meetingRuns.id));
+  const views = [];
+  for (const run of runs) views.push(await runView(run, req.user!, scope, canProcess(req)));
+  res.json({ runs: views });
+});
+
+const reviewSchema = z.object({
+  verdict: z.enum(RUN_VERDICTS),
+  comment: z.string().max(2000).nullable().optional(),
+});
+
+townHallRouter.post("/runs/:runId/review", requirePermission("meetings.read"), async (req, res) => {
+  const parsed = reviewSchema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: "Approve it, or say what needs changing." });
+  try {
+    const run = await openRun(req);
+    await reviewRun({ run, user: req.user!, scope: requireScope(req), verdict: parsed.data.verdict, comment: parsed.data.comment ?? null });
+    const fresh = (await loadRun(req.user!.academyId, run.id))!;
+    res.json({ run: await runView(fresh, req.user!, requireScope(req), canProcess(req)) });
+  } catch (error) {
+    runFailure(res, error);
+  }
+});
+
+townHallRouter.post("/runs/:runId/push", requirePermission("meetings.process"), async (req, res) => {
+  try {
+    const run = await openRun(req);
+    const outcome = await pushRun({ run, user: req.user!, scope: requireScope(req), canProcess: true, settings: req.settings! });
+    const fresh = (await loadRun(req.user!.academyId, run.id))!;
+    res.json({ outcome, run: await runView(fresh, req.user!, requireScope(req), true) });
+  } catch (error) {
+    runFailure(res, error);
+  }
+});
+
+townHallRouter.post("/runs/:runId/close", requirePermission("meetings.read"), async (req, res) => {
+  const parsed = z.object({ note: z.string().max(1000).nullable().optional() }).safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: "Couldn't read that." });
+  try {
+    const run = await openRun(req);
+    await closeRun({ run, user: req.user!, canProcess: canProcess(req), note: parsed.data.note ?? null });
+    const fresh = (await loadRun(req.user!.academyId, run.id))!;
+    res.json({ run: await runView(fresh, req.user!, requireScope(req), canProcess(req)) });
+  } catch (error) {
+    runFailure(res, error);
+  }
 });
