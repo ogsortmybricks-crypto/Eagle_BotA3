@@ -23,3 +23,16 @@ production migration scripts or startup-time schema changes.
 When schema errors recur, validate all declared tables and columns and compare
 the full development/production column sets before delivery, rather than
 checking only the field named in the latest error.
+
+Do not accept guessed table renames or delete undeclared tables just to make
+Drizzle push non-interactive. Unrelated retained tables may hold extension data.
+
+**Why:** A development database can retain valid tables from earlier engine
+versions while newer declared tables have not been applied. Drizzle can treat
+this as an ambiguous rename rather than a simple additive change.
+
+**How to apply:** Inspect the full difference first. For confirmed missing
+tables, review SQL generated from the current declarations and apply only the
+additive development changes transactionally. Preserve unrelated tables, verify
+columns/defaults/constraints/indexes, and inspect the actual Publish diff before
+asking the owner to synchronize production.
