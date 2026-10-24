@@ -11,6 +11,9 @@ Eagle Bot — the operating system for an Acton academy.
   trips and attendance, by studio, group or academy.
 - [Studio guides](Documentation/Studio-Guides.md) — assigning guides to studios
   and studio groups.
+- [Plans and Help](Documentation/Plans-and-Support.md) — the 90-day demo, the
+  survey, paying with Stripe, read-only mode and the Help button.
+- [Pricing](Documentation/Pricing.md) — what Eagle Bot charges and why.
 
 ## Running it
 

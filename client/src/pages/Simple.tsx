@@ -16,6 +16,7 @@ import {
 import { apiGet, apiPost } from "@/lib/api";
 import { useSession } from "@/lib/session";
 import { Avatar, LoadingPage, Markdown, Spinner } from "@/components/ui";
+import { SupportButton } from "@/components/SupportButton";
 import { addDays, localToday, sessionWeek } from "@shared/calendar";
 
 /**
@@ -87,6 +88,9 @@ export function SimpleApp() {
           <Route>{() => <Redirect to="/wiki" />}</Route>
         </Switch>
       </main>
+
+      {/* Above the bottom bar, not on it - the bar is for the four screens. */}
+      <SupportButton className="bottom-24 right-4" />
 
       {/* A fixed bar of four big targets. Nothing else to get lost in. */}
       <nav className="fixed inset-x-0 bottom-0 border-t border-gray-200 bg-white">

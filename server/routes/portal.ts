@@ -15,22 +15,31 @@
 
 import { Router, type NextFunction, type Request, type Response } from "express";
 import { z } from "zod";
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { db } from "../db";
 import { TACSCRIPT_RETIRED, appBodySchema, prepareApp } from "../tacons/app-publish";
 import {
+  SUPPORT_STATUSES,
   TACON_VISIBILITIES,
+  academies,
+  demoSurveys,
   portalDevs,
   portalInvites,
   portalNotices,
+  supportReplies,
+  supportTickets,
   taconInstalls,
   taconVersions,
   tacons,
+  users,
   type PortalDev,
 } from "@shared/schema";
 import { hashPassword, verifyPassword } from "../auth";
 import { env } from "../env";
+import { messageEmail, sendMail } from "../mailer";
+import { accessFor, demoDaysLeft, foundingSpotsLeft } from "../billing";
+import { withThreads } from "./support";
 
 export const portalRouter = Router();
 
@@ -518,4 +527,130 @@ portalRouter.post("/tacons/:id/suspend", requireHead, async (req, res) => {
   if (!tacon) return res.status(404).json({ error: "No such Tac-On." });
 
   res.json({ tacon });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  Support and the demo                                                       */
+/* -------------------------------------------------------------------------- */
+
+/** Every Help-button message, open ones first, with who sent it and from where. */
+portalRouter.get("/support", requirePortal, async (req, res) => {
+  const status = typeof req.query.status === "string" ? req.query.status : "open";
+  const rows = await db
+    .select({ ticket: supportTickets, academyName: academies.name, userName: users.name, userRole: users.role, userEmail: users.email })
+    .from(supportTickets)
+    .innerJoin(academies, eq(academies.id, supportTickets.academyId))
+    .leftJoin(users, eq(users.id, supportTickets.userId))
+    .where(status === "all" ? undefined : eq(supportTickets.status, status))
+    .orderBy(desc(supportTickets.updatedAt))
+    .limit(200);
+  const threads = await withThreads(rows.map((row) => row.ticket));
+  res.json({
+    tickets: threads.map((ticket, index) => ({
+      ...ticket,
+      academyName: rows[index].academyName,
+      userName: rows[index].userName,
+      userRole: rows[index].userRole,
+      userEmail: rows[index].userEmail,
+    })),
+  });
+});
+
+portalRouter.post("/support/:id/replies", requirePortal, async (req, res) => {
+  const parsed = z
+    .object({ body: z.string().trim().min(1).max(5000), close: z.boolean().default(false) })
+    .safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Write an answer first." });
+
+  const [ticket] = await db
+    .select()
+    .from(supportTickets)
+    .where(eq(supportTickets.id, Number(req.params.id)))
+    .limit(1);
+  if (!ticket) return res.status(404).json({ error: "No such message." });
+
+  await db.insert(supportReplies).values({ ticketId: ticket.id, devId: req.portalDev!.id, body: parsed.data.body });
+  await db
+    .update(supportTickets)
+    .set({ status: parsed.data.close ? "closed" : "answered", updatedAt: new Date() })
+    .where(eq(supportTickets.id, ticket.id));
+
+  // The answer waits behind the Help button either way; email just means they
+  // don't have to be signed in to find out.
+  const [sender] = ticket.userId
+    ? await db.select().from(users).where(eq(users.id, ticket.userId)).limit(1)
+    : [];
+  const [academy] = await db.select().from(academies).where(eq(academies.id, ticket.academyId)).limit(1);
+  if (sender && academy) {
+    const mail = messageEmail({
+      academyName: academy.name,
+      accent: academy.palette.primary,
+      subject: `Re: ${ticket.subject}`,
+      heading: `An answer to "${ticket.subject}"`,
+      paragraphs: [parsed.data.body, "Reply from the Help button in Eagle Bot."],
+      link: env.appUrl,
+    });
+    void sendMail({ to: sender.email, ...mail });
+  }
+
+  res.status(201).json({ ok: true });
+});
+
+portalRouter.patch("/support/:id", requirePortal, async (req, res) => {
+  const parsed = z.object({ status: z.enum(SUPPORT_STATUSES) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Pick a status." });
+  const [ticket] = await db
+    .update(supportTickets)
+    .set({ status: parsed.data.status, updatedAt: new Date() })
+    .where(eq(supportTickets.id, Number(req.params.id)))
+    .returning();
+  if (!ticket) return res.status(404).json({ error: "No such message." });
+  res.json({ ok: true });
+});
+
+/** Each academy's demo or plan, and everything its people said in the survey. */
+portalRouter.get("/academies", requirePortal, async (_req, res) => {
+  const rows = await db.select().from(academies).orderBy(asc(academies.createdAt));
+  const surveys = await db
+    .select({ survey: demoSurveys, userName: users.name, userRole: users.role })
+    .from(demoSurveys)
+    .leftJoin(users, eq(users.id, demoSurveys.userId))
+    .orderBy(desc(demoSurveys.updatedAt));
+  let foundingSpots: number | null = null;
+  try {
+    foundingSpots = await foundingSpotsLeft();
+  } catch (error) {
+    console.error("[portal] couldn't count founding spots", error);
+  }
+  res.json({
+    foundingSpotsLeft: foundingSpots,
+    academies: rows.map((academy) => ({
+      id: academy.id,
+      name: academy.name,
+      createdAt: academy.createdAt,
+      plan: academy.plan,
+      access: accessFor(academy),
+      demoEndsAt: academy.demoEndsAt,
+      daysLeft: demoDaysLeft(academy),
+      subscriptionStatus: academy.subscriptionStatus,
+      surveys: surveys
+        .filter((row) => row.survey.academyId === academy.id)
+        .map((row) => ({ ...row.survey, userName: row.userName, userRole: row.userRole })),
+    })),
+  });
+});
+
+/** Gives an academy more demo time - a pilot that started late, a holiday in the middle. */
+portalRouter.post("/academies/:id/extend", requirePortal, async (req, res) => {
+  const parsed = z.object({ days: z.number().int().min(1).max(365) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: "Between 1 and 365 days." });
+  const [academy] = await db.select().from(academies).where(eq(academies.id, Number(req.params.id))).limit(1);
+  if (!academy) return res.status(404).json({ error: "No such academy." });
+  // From today if it's already over, so extending a lapsed demo actually opens it.
+  const from = Math.max(academy.demoEndsAt.getTime(), Date.now());
+  await db
+    .update(academies)
+    .set({ demoEndsAt: new Date(from + parsed.data.days * 86_400_000) })
+    .where(eq(academies.id, academy.id));
+  res.json({ ok: true });
 });

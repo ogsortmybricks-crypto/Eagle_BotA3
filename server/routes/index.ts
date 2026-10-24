@@ -16,6 +16,9 @@ import { portalRouter } from "./portal";
 import { registerPublicExtensionRoutes } from "../tacons/extensions";
 import { meRouter } from "./me";
 import { calendarRouter } from "./calendar";
+import { billingRouter } from "./billing";
+import { supportRouter } from "./support";
+import { requireWritable } from "../billing";
 
 export const apiRouter = Router();
 
@@ -34,18 +37,24 @@ apiRouter.use("/auth", authRouter);
 // academy's requireAuth. It guards itself.
 apiRouter.use("/portal", portalRouter);
 
-// Everything else needs a session.
-apiRouter.use("/me", requireAuth, meRouter);
-apiRouter.use("/studios", requireAuth, studiosRouter);
-apiRouter.use("/settings", requireAuth, settingsRouter);
-apiRouter.use("/wiki", requireAuth, wikiRouter);
-apiRouter.use("/town-hall", requireAuth, townHallRouter);
-apiRouter.use("/elections", requireAuth, electionsRouter);
-apiRouter.use("/positions", requireAuth, positionsRouter);
-apiRouter.use("/calendar", requireAuth, calendarRouter);
-apiRouter.use("/profiles", requireAuth, profilesRouter);
-apiRouter.use("/admin", requireAuth, adminRouter);
-apiRouter.use("/tacons", requireAuth, taconsRouter);
+// Plans, the survey and the Help button stay open after a demo ends - they're
+// how an academy gets out of read-only, or asks why it's in it.
+apiRouter.use("/billing", requireAuth, billingRouter);
+apiRouter.use("/support", requireAuth, supportRouter);
+
+// Everything else needs a session, and turns read-only once a demo has ended
+// unpaid. See server/billing.ts.
+apiRouter.use("/me", requireAuth, requireWritable, meRouter);
+apiRouter.use("/studios", requireAuth, requireWritable, studiosRouter);
+apiRouter.use("/settings", requireAuth, requireWritable, settingsRouter);
+apiRouter.use("/wiki", requireAuth, requireWritable, wikiRouter);
+apiRouter.use("/town-hall", requireAuth, requireWritable, townHallRouter);
+apiRouter.use("/elections", requireAuth, requireWritable, electionsRouter);
+apiRouter.use("/positions", requireAuth, requireWritable, positionsRouter);
+apiRouter.use("/calendar", requireAuth, requireWritable, calendarRouter);
+apiRouter.use("/profiles", requireAuth, requireWritable, profilesRouter);
+apiRouter.use("/admin", requireAuth, requireWritable, adminRouter);
+apiRouter.use("/tacons", requireAuth, requireWritable, taconsRouter);
 
 apiRouter.use((_req, res) => {
   res.status(404).json({ error: "No such endpoint." });

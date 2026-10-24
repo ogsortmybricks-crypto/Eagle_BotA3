@@ -6,6 +6,7 @@ import {
   CalendarDays,
   ChevronRight,
   Code2,
+  CreditCard,
   Gavel,
   LayoutDashboard,
   LogOut,
@@ -22,6 +23,8 @@ import { useSession } from "@/lib/session";
 import { Avatar, Chip } from "./ui";
 import { StudioSwitcher } from "./StudioSwitcher";
 import { PortalNotices } from "./PortalNotices";
+import { DemoBanner } from "./DemoBanner";
+import { SupportButton } from "./SupportButton";
 import { EagleLogo } from "./EagleLogo";
 import type { TaconNavEntry } from "@shared/tacons/view";
 
@@ -33,6 +36,7 @@ const NAV = [
   { href: "/calendar", label: "Calendar", icon: CalendarDays, permission: "calendar.read" },
   { href: "/people", label: "People", icon: Users, permission: "wiki.read" },
   { href: "/admin", label: "Admin", icon: LayoutDashboard, permission: "status.read" },
+  { href: "/plan", label: "Plan & billing", icon: CreditCard, permission: "academy.manage" },
   // Everyone gets Settings; the admin-only tabs inside it hide themselves.
   { href: "/settings", label: "Settings", icon: Settings, permission: null },
 ] as const;
@@ -265,12 +269,14 @@ export function Layout({ children }: { children: ReactNode }) {
           </div>
         )}
 
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+        <main className="min-w-0 flex-1 px-4 py-6 pb-24 sm:px-6 lg:px-8 lg:py-8 lg:pb-24">
           <div className="mx-auto max-w-6xl">
+            <DemoBanner />
             <PortalNotices />
             {children}
           </div>
         </main>
+        <SupportButton />
       </div>
     </div>
   );

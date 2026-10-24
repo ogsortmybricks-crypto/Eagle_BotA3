@@ -18,7 +18,9 @@ import {
   BadgeCheck,
   Ban,
   Bell,
+  Building2,
   KeyRound,
+  LifeBuoy,
   Megaphone,
   Rocket,
   Users,
@@ -26,6 +28,7 @@ import {
 import { apiGet, apiPatch, apiPost } from "@/lib/api";
 import { Banner, Chip, LoadingPage, Spinner } from "@/components/ui";
 import PublishOfficial from "@/tacons/PublishOfficial";
+import { PortalAcademies, PortalSupport } from "./PortalSupport";
 
 type PortalStatus = {
   needsSetup: boolean;
@@ -298,7 +301,7 @@ function PortalHome({
 }) {
   const queryClient = useQueryClient();
   const [, navigate] = useLocation();
-  const [tab, setTab] = useState<"tacons" | "notices" | "devs">("tacons");
+  const [tab, setTab] = useState<"tacons" | "support" | "academies" | "notices" | "devs">("tacons");
 
   const signOut = useMutation({
     mutationFn: () => apiPost("/portal/logout"),
@@ -330,10 +333,12 @@ function PortalHome({
       </header>
 
       <div className="mx-auto max-w-5xl px-5 py-6">
-        <div className="mb-5 flex gap-2">
+        <div className="mb-5 flex flex-wrap gap-2">
           {(
             [
               ["tacons", "Tac-Ons", Rocket],
+              ["support", "Support", LifeBuoy],
+              ["academies", "Academies", Building2],
               ["notices", "Notices", Megaphone],
               ["devs", "Devs", Users],
             ] as const
@@ -349,6 +354,8 @@ function PortalHome({
         </div>
 
         {tab === "tacons" && <PortalTacons head={dev.head} queryClient={queryClient} />}
+        {tab === "support" && <PortalSupport />}
+        {tab === "academies" && <PortalAcademies />}
         {tab === "notices" && <PortalNotices />}
         {tab === "devs" && <PortalDevs head={dev.head} />}
       </div>

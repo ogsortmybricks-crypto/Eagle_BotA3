@@ -58,6 +58,9 @@ Optional features:
   [Documentation/Tac-Ons.md](Documentation/Tac-Ons.md).
 - Email invitations require `SMTP_USER` and `SMTP_PASS`; `SMTP_HOST`, `SMTP_PORT`, and `SMTP_FROM` can override the Gmail defaults.
 - `APP_URL` should be set to the public app URL when email invitations are enabled.
+- Paid plans need `STRIPE_SECRET_KEY` and the four `STRIPE_PRICE_*` IDs;
+  `SUPPORT_EMAIL` receives survey answers and Help messages. See
+  [Documentation/Plans-and-Support.md](Documentation/Plans-and-Support.md).
 
 Useful checks:
 

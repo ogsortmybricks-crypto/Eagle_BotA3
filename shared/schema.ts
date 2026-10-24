@@ -11,7 +11,7 @@ import {
   index,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 
 /**
  * express-session's connect-pg-simple store creates this table at runtime.
@@ -104,8 +104,25 @@ export const academies = pgTable("academies", {
   learnerNoun: text("learner_noun").notNull().default("Hero"),
   /** Everything tunable. Shape lives in shared/settings.ts. */
   settings: jsonb("settings").$type<Record<string, unknown>>().notNull().default({}),
+  /**
+   * When the free demo ends. Academies that existed before plans did get 90
+   * days from the day the column was added, not from when they signed up.
+   */
+  demoEndsAt: timestamp("demo_ends_at").notNull().default(sql`now() + interval '90 days'`),
+  /** demo | founding | academy. See server/billing.ts. */
+  plan: text("plan").notNull().default("demo"),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  /** Stripe's word for the subscription (active, past_due, canceled...), refreshed from Stripe. */
+  subscriptionStatus: text("subscription_status"),
+  subscriptionCheckedAt: timestamp("subscription_checked_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const PLANS = ["demo", "founding", "academy"] as const;
+export type Plan = (typeof PLANS)[number];
+export const SUPPORT_KINDS = ["question", "request", "problem", "feedback"] as const;
+export const SUPPORT_STATUSES = ["open", "answered", "closed"] as const;
 
 /* -------------------------------------------------------------------------- */
 /*  Studio groups                                                              */
@@ -1131,6 +1148,77 @@ export const portalNotices = pgTable("portal_notices", {
 });
 
 /* -------------------------------------------------------------------------- */
+/*  Demo survey and support                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What someone thought of the free demo. One row per person, edited in place.
+ * Only admins answer `continueChoice` - deciding to pay is theirs - but the
+ * learners who actually use Eagle Bot are asked what they think too.
+ */
+export const demoSurveys = pgTable(
+  "demo_survey_responses",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** 1-5. */
+    rating: integer("rating").notNull(),
+    liked: text("liked"),
+    improve: text("improve"),
+    /** yes | no | unsure. Admins only. */
+    continueChoice: text("continue_choice"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({ userIdx: uniqueIndex("demo_survey_user_idx").on(t.academyId, t.userId) }),
+);
+
+/**
+ * A question or request from anyone in an academy, answered from the dev
+ * portal. A ticket belongs to the person who sent it - nobody else in the
+ * academy, admins included, sees it.
+ */
+export const supportTickets = pgTable(
+  "support_tickets",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    /** question | request | problem | feedback */
+    kind: text("kind").notNull().default("question"),
+    subject: text("subject").notNull(),
+    /** open | answered | closed */
+    status: text("status").notNull().default("open"),
+    /** The page they were on when they asked. */
+    page: text("page"),
+    /** Last time the sender opened the thread, for the unread badge. */
+    userSeenAt: timestamp("user_seen_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    academyIdx: index("support_tickets_academy_idx").on(t.academyId),
+    userIdx: index("support_tickets_user_idx").on(t.userId),
+  }),
+);
+
+/** One message in a ticket's thread: the opening message, follow-ups and portal answers. */
+export const supportReplies = pgTable(
+  "support_replies",
+  {
+    id: serial("id").primaryKey(),
+    ticketId: integer("ticket_id").notNull().references(() => supportTickets.id, { onDelete: "cascade" }),
+    /** Exactly one of these is set: who in the academy, or which portal dev. */
+    userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+    devId: integer("dev_id").references(() => portalDevs.id, { onDelete: "set null" }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({ ticketIdx: index("support_replies_ticket_idx").on(t.ticketId) }),
+);
+
+/* -------------------------------------------------------------------------- */
 /*  Relations                                                                  */
 /* -------------------------------------------------------------------------- */
 
@@ -1253,3 +1341,6 @@ export type PortalInvite = typeof portalInvites.$inferSelect;
 export type PortalNotice = typeof portalNotices.$inferSelect;
 export type StudioGuide = typeof studioGuides.$inferSelect;
 export type CalendarEvent = typeof calendarEvents.$inferSelect;
+export type DemoSurvey = typeof demoSurveys.$inferSelect;
+export type SupportTicket = typeof supportTickets.$inferSelect;
+export type SupportReply = typeof supportReplies.$inferSelect;

@@ -17,6 +17,7 @@ import { People, Profile } from "@/pages/People";
 import { Admin } from "@/pages/Admin";
 import { Settings } from "@/pages/Settings";
 import { Calendar } from "@/pages/Calendar";
+import { Plan } from "@/pages/Plan";
 import { SimpleApp } from "@/pages/Simple";
 import { Market, TaconDetail } from "@/pages/Market";
 import { TaconPage, TaconRecordPage } from "@/pages/TaconPage";
@@ -113,6 +114,7 @@ export function App() {
         <Route path="/people/:id">{(params) => <Profile id={Number(params.id)} />}</Route>
         <Route path="/admin" component={Admin} />
         <Route path="/settings" component={Settings} />
+        <Route path="/plan" component={Plan} />
 
         {/* Tac-Ons: the market, one listing, and the pages installed Tac-Ons
             add. A Tac-On page lives at /t/ so it can never shadow a real one. */}

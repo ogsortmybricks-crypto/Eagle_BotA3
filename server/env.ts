@@ -35,7 +35,35 @@ export const env = {
     pass: process.env.SMTP_PASS ?? "",
     from: process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "",
   },
+
+  /**
+   * Paid plans. Every Eagle Bot points at the same Stripe account, which is
+   * also how the Founding Academy spots are counted across deployments.
+   */
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY ?? "",
+    prices: {
+      founding: {
+        month: process.env.STRIPE_PRICE_FOUNDING_MONTHLY ?? "",
+        year: process.env.STRIPE_PRICE_FOUNDING_YEARLY ?? "",
+      },
+      academy: {
+        month: process.env.STRIPE_PRICE_ACADEMY_MONTHLY ?? "",
+        year: process.env.STRIPE_PRICE_ACADEMY_YEARLY ?? "",
+      },
+    },
+  },
+
+  /** Where survey answers and new support messages are emailed. */
+  supportEmail: process.env.SUPPORT_EMAIL ?? "",
 };
 
 export const aiConfigured = Boolean(env.anthropicApiKey);
 export const emailConfigured = Boolean(env.smtp.user && env.smtp.pass);
+export const stripeConfigured = Boolean(
+  env.stripe.secretKey &&
+    env.stripe.prices.founding.month &&
+    env.stripe.prices.founding.year &&
+    env.stripe.prices.academy.month &&
+    env.stripe.prices.academy.year,
+);

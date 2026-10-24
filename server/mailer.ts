@@ -164,3 +164,31 @@ export function meetingProcessedEmail(opts: {
   const text = `${opts.title} has been processed into the wiki.\n\n${opts.changes}\n\n${opts.summary}\n\n${opts.link}`;
   return { html, text, subject: `Wiki updated: ${opts.title}` };
 }
+
+/**
+ * A plain message: a heading, a few paragraphs, and an optional button. Used
+ * for support threads and survey answers, where the words are whatever
+ * someone typed.
+ */
+export function messageEmail(opts: {
+  academyName: string;
+  accent: string;
+  subject: string;
+  heading: string;
+  paragraphs: string[];
+  link?: string;
+  linkLabel?: string;
+}) {
+  const body = opts.paragraphs
+    .map((paragraph) => `<p style="font-size:15px;line-height:1.6;margin:0 0 12px;white-space:pre-wrap">${escapeHtml(paragraph)}</p>`)
+    .join("");
+  const html = shell(
+    opts.academyName,
+    opts.accent,
+    `<h1 style="font-size:22px;margin:0 0 12px">${escapeHtml(opts.heading)}</h1>${body}${
+      opts.link ? `<div style="margin-top:20px">${button(opts.link, opts.accent, opts.linkLabel ?? "Open Eagle Bot")}</div>` : ""
+    }`,
+  );
+  const text = `${opts.heading}\n\n${opts.paragraphs.join("\n\n")}${opts.link ? `\n\n${opts.link}` : ""}`;
+  return { html, text, subject: opts.subject };
+}
