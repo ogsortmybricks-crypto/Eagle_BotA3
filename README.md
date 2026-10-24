@@ -4,6 +4,8 @@ Eagle Bot — the operating system for an Acton academy.
 
 ## Documentation
 
+- [Getting started](Documentation/Getting-Started.md) — setting Eagle Bot up
+  for a new academy, from the setup wizard to the first Town Hall.
 - [Tac-Ons](Documentation/Tac-Ons.md) — add-ons for Eagle Bot: the market,
   installing, dev status and the dev portal.
 - [TacScript](Documentation/TacScript.md) — the language Tac-Ons are written in.
