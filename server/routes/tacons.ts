@@ -18,6 +18,7 @@ import { db } from "../db";
 import {
   TACON_VISIBILITIES,
   studios,
+  studioGroups,
   taconInstalls,
   taconMessages,
   taconRecords,
@@ -616,8 +617,19 @@ taconsRouter.delete("/app/:installId/records/:recordId", requirePermission("taco
       payload: z.record(z.unknown()).default({}),
     });
 
-    function appMessageScope(entry: LoadedInstall) {
-      return entry.install.studioId === null ? Promise.resolve([] as number[]) : studioCircle(entry.install.studioId);
+    async function appMessageScope(entry: LoadedInstall): Promise<number[] | null> {
+      const install = entry.install;
+      if (install.visibility === "academy") return null;
+      if (install.visibility === "group" && install.groupId !== null) {
+        const members = await db
+          .select({ id: studios.id })
+          .from(studios)
+          .where(and(eq(studios.academyId, install.academyId), eq(studios.groupId, install.groupId), eq(studios.archived, false)));
+        return members.map((member) => member.id);
+      }
+      if (install.visibility === "studio") return install.studioId === null ? [] : [install.studioId];
+      if (install.studioId === null) return null;
+      return install.visibility === "legacy" ? studioCircle(install.studioId) : [install.studioId];
     }
 
     async function ensureWallet(installId: number, academyId: number, userId: number) {
@@ -625,6 +637,24 @@ taconsRouter.delete("/app/:installId/records/:recordId", requirePermission("taco
       const [wallet] = await db.select().from(taconWallets).where(and(eq(taconWallets.installId, installId), eq(taconWallets.userId, userId))).limit(1);
       return wallet;
     }
+
+    taconsRouter.get("/app/:installId/members", requirePermission("tacons.use"), async (req, res) => {
+      try {
+        const { entry } = await openApp(req);
+        const circle = await appMessageScope(entry);
+        const filters = [eq(users.academyId, entry.install.academyId), eq(users.active, true)];
+        if (circle !== null) {
+          if (circle.length === 0) return res.json({ people: [] });
+          filters.push(inArray(users.studioId, circle));
+        }
+        const people = await db
+          .select({ id: users.id, name: users.name, role: users.role, studioId: users.studioId })
+          .from(users)
+          .where(and(...filters))
+          .orderBy(asc(users.name));
+        res.json({ people: people.map((person) => ({ ...person, email: null, currentPositions: [] })) });
+      } catch (error) { recordFailure(res, error); }
+    });
 
     taconsRouter.get("/app/:installId/market/wallet", requirePermission("tacons.use"), async (req, res) => {
       try {
@@ -645,7 +675,7 @@ taconsRouter.delete("/app/:installId/records/:recordId", requirePermission("taco
         if (!access.mayRead("wallets")) throw new RecordError(403, "Only the Shopkeeper can view learner balances.");
         const circle = await appMessageScope(entry);
         const filters = [eq(users.academyId, entry.install.academyId), eq(users.role, "learner")];
-        if (entry.install.studioId !== null) filters.push(inArray(users.studioId, circle));
+        if (circle !== null) filters.push(inArray(users.studioId, circle));
         const people = await db.select({ id: users.id, name: users.name, studioId: users.studioId }).from(users).where(and(...filters)).orderBy(asc(users.name));
         const balances = await db.select({ userId: taconWallets.userId, balance: taconWallets.balance }).from(taconWallets).where(eq(taconWallets.installId, entry.install.id));
         const byUser = new Map(balances.map((row) => [row.userId, row.balance]));
@@ -663,7 +693,7 @@ taconsRouter.delete("/app/:installId/records/:recordId", requirePermission("taco
         const { userId, amount, reason } = parsed.data;
         const circle = await appMessageScope(entry);
         const [person] = await db.select().from(users).where(and(eq(users.id, userId), eq(users.academyId, entry.install.academyId), eq(users.role, "learner"))).limit(1);
-        if (!person || (entry.install.studioId !== null && !circle.includes(person.studioId ?? -1))) throw new RecordError(404, "That learner is not in this studio group.");
+        if (!person || (circle !== null && !circle.includes(person.studioId ?? -1))) throw new RecordError(404, "That learner is not in this studio group.");
         const result = await db.transaction(async (tx) => {
           await tx.insert(taconWallets).values({ installId: entry.install.id, academyId: entry.install.academyId, userId }).onConflictDoNothing();
           const [wallet] = await tx.select().from(taconWallets).where(and(eq(taconWallets.installId, entry.install.id), eq(taconWallets.userId, userId))).for("update").limit(1);
@@ -742,7 +772,7 @@ taconsRouter.delete("/app/:installId/records/:recordId", requirePermission("taco
         if (peer && !peers.includes(peer)) throw new RecordError(403, "That Tac-On is not a declared message partner.");
         const circle = await appMessageScope(entry);
         const filters = [eq(taconMessages.academyId, entry.install.academyId), eq(taconMessages.targetSlug, entry.tacon.slug), inArray(tacons.slug, peer ? [peer] : peers)];
-        filters.push(circle.length ? or(inArray(taconMessages.sourceStudioId, circle), isNull(taconMessages.sourceStudioId))! : isNull(taconMessages.sourceStudioId));
+        if (circle !== null) filters.push(circle.length ? or(inArray(taconMessages.sourceStudioId, circle), isNull(taconMessages.sourceStudioId))! : isNull(taconMessages.sourceStudioId));
         const rows = await db.select({ message: taconMessages, sourceSlug: tacons.slug }).from(taconMessages)
           .innerJoin(taconInstalls, eq(taconInstalls.id, taconMessages.sourceInstallId))
           .innerJoin(tacons, eq(tacons.id, taconInstalls.taconId))
@@ -768,7 +798,7 @@ taconsRouter.delete("/app/:installId/records/:recordId", requirePermission("taco
             const learnerId = Number(payload.learnerId);
             if (!Number.isInteger(grantId) || !Number.isInteger(learnerId)) throw new RecordError(400, "The pass reference is incomplete.");
             const [grant] = await tx.select().from(taconMessages).where(and(eq(taconMessages.id, grantId), eq(taconMessages.academyId, entry.install.academyId), eq(taconMessages.targetSlug, "studio-maintenance"), eq(taconMessages.kind, "pass-issued"))).for("update").limit(1);
-            if (!grant || Number(grant.payload.learnerId) !== learnerId || (grant.sourceStudioId !== null && !circle.includes(grant.sourceStudioId))) throw new RecordError(404, "That pass is not available to this studio group.");
+            if (!grant || Number(grant.payload.learnerId) !== learnerId || (grant.sourceStudioId !== null && circle !== null && !circle.includes(grant.sourceStudioId))) throw new RecordError(404, "That pass is not available to this studio group.");
             const [source] = await tx.select({ slug: tacons.slug }).from(taconInstalls).innerJoin(tacons, eq(tacons.id, taconInstalls.taconId)).where(eq(taconInstalls.id, grant.sourceInstallId)).limit(1);
             if (source?.slug !== "eagle-buck-market") throw new RecordError(404, "That pass did not come from Eagle Buck Market.");
             const usesAllowed = Number(grant.payload.uses);
@@ -839,9 +869,10 @@ taconsRouter.get("/market/:slug", requirePermission("tacons.market"), async (req
   const manifest = latest ? readManifest(latest) : null;
 
   const installs = await db
-    .select({ install: taconInstalls, studioName: studios.name })
+    .select({ install: taconInstalls, studioName: studios.name, groupName: studioGroups.name })
     .from(taconInstalls)
     .leftJoin(studios, eq(studios.id, taconInstalls.studioId))
+    .leftJoin(studioGroups, eq(studioGroups.id, taconInstalls.groupId))
     .where(and(eq(taconInstalls.academyId, academyId), eq(taconInstalls.taconId, tacon.id)));
 
   const [author] = tacon.authorUserId
@@ -867,6 +898,7 @@ taconsRouter.get("/market/:slug", requirePermission("tacons.market"), async (req
       id: row.install.id,
       studioId: row.install.studioId,
       studioName: row.studioName,
+      groupName: row.groupName,
       enabled: row.install.enabled,
       versionId: row.install.versionId,
       settings: row.install.settings,
@@ -883,10 +915,14 @@ taconsRouter.get("/market/:slug", requirePermission("tacons.market"), async (req
 const installSchema = z.object({
   /** Omit for the studio being viewed; null installs it academy-wide. */
   studioId: z.number().int().nullable().optional(),
+  /** Install one shared copy and record set for this whole Studio Group. */
+  groupId: z.number().int().positive().optional(),
   settings: z.record(z.unknown()).default({}),
   /** Which optional setup actions the admin left ticked: ids or indexes. Omit for each one's default. */
   setupSelection: z.array(z.union([z.string().max(60), z.number().int().min(0)])).max(30).optional(),
   setup_selection: z.array(z.union([z.string().max(60), z.number().int().min(0)])).max(30).optional(),
+}).refine((body) => !(body.groupId !== undefined && body.studioId !== undefined), {
+  message: "Choose a studio or a Studio Group, not both.",
 });
 
 /** Settings an admin sends never include Eagle Bot's own `__` keys. */
@@ -921,11 +957,57 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
 
   const scope = requireScope(req);
   let studioId: number | null;
+  let visibility: "academy" | "studio" | "group";
+  let groupId: number | null = null;
+  let targetGroupId: number | null = null;
+  let targetStudioIds: number[] = [];
   try {
-    // A Tac-On installed academy-wide appears in every studio, which is a
-    // bigger decision than it looks - so the same rule as everything else
-    // applies: only an admin makes it, and only deliberately.
-    studioId = writeStudioId(scope, parsed.data.studioId);
+    if (parsed.data.groupId !== undefined) {
+      const [selectedGroup] = await db
+        .select()
+        .from(studioGroups)
+        .where(and(eq(studioGroups.id, parsed.data.groupId), eq(studioGroups.academyId, academyId)))
+        .limit(1);
+      if (!selectedGroup) return res.status(404).json({ error: "That Studio Group doesn't exist." });
+      const members = await db
+        .select({ id: studios.id })
+        .from(studios)
+        .where(and(eq(studios.academyId, academyId), eq(studios.groupId, selectedGroup.id), eq(studios.archived, false)))
+        .orderBy(asc(studios.orderIndex), asc(studios.id));
+      targetStudioIds = members.map((member) => member.id);
+      if (targetStudioIds.length === 0) return res.status(400).json({ error: "That Studio Group has no active studios." });
+      if (targetStudioIds.some((id) => !scope.allowedIds.includes(id))) {
+        return res.status(403).json({ error: "You can't install into every studio in that group." });
+      }
+      visibility = "group";
+      groupId = selectedGroup.id;
+      targetGroupId = selectedGroup.id;
+      const anchor = scope.studioId !== null && targetStudioIds.includes(scope.studioId) ? scope.studioId : targetStudioIds[0];
+      studioId = writeStudioId(scope, anchor);
+    } else {
+      // A Tac-On installed academy-wide appears in every studio, which is a
+      // bigger decision than it looks - so the same rule as everything else
+      // applies: only an admin makes it, and only deliberately.
+      studioId = writeStudioId(scope, parsed.data.studioId);
+      visibility = studioId === null ? "academy" : "studio";
+      if (studioId !== null) {
+        const [targetStudio] = await db
+          .select({ groupId: studios.groupId })
+          .from(studios)
+          .where(and(eq(studios.id, studioId), eq(studios.academyId, academyId)))
+          .limit(1);
+        targetGroupId = targetStudio?.groupId ?? null;
+        if (targetGroupId !== null) {
+          const members = await db
+            .select({ id: studios.id })
+            .from(studios)
+            .where(and(eq(studios.academyId, academyId), eq(studios.groupId, targetGroupId), eq(studios.archived, false)));
+          targetStudioIds = members.map((member) => member.id);
+        } else {
+          targetStudioIds = [studioId];
+        }
+      }
+    }
   } catch (error) {
     if (error instanceof StudioChoiceError) {
       return res.status(400).json({ error: error.message, needsStudio: true });
@@ -933,23 +1015,34 @@ taconsRouter.post("/market/:slug/install", requirePermission("tacons.install"), 
     throw error;
   }
   const result = await db.transaction(async (tx) => {
-    const [existing] = await tx
+    if (targetGroupId !== null) {
+      await tx.select({ id: studioGroups.id }).from(studioGroups).where(eq(studioGroups.id, targetGroupId)).for("update");
+    }
+    const existingRows = await tx
       .select()
       .from(taconInstalls)
-      .where(
-        and(
-          eq(taconInstalls.academyId, academyId),
-          eq(taconInstalls.taconId, tacon.id),
-          studioId === null ? sql`${taconInstalls.studioId} is null` : eq(taconInstalls.studioId, studioId),
-        ),
-      )
-      .limit(1);
+      .where(and(eq(taconInstalls.academyId, academyId), eq(taconInstalls.taconId, tacon.id)))
+      .for("update");
+    const existing = existingRows.find((candidate) => {
+      if (visibility === "academy" || candidate.visibility === "academy" || (candidate.visibility === "legacy" && candidate.studioId === null)) return true;
+      if (visibility === "group") {
+        if (candidate.visibility === "group" && candidate.groupId === groupId) return true;
+        return candidate.studioId !== null && targetStudioIds.includes(candidate.studioId);
+      }
+      if (candidate.visibility === "group") {
+        return candidate.groupId !== null ? candidate.groupId === targetGroupId : candidate.studioId === studioId;
+      }
+      if (candidate.visibility === "legacy") return candidate.studioId !== null && targetStudioIds.includes(candidate.studioId);
+      return candidate.studioId === studioId;
+    });
     if (existing) return { existing, install: null };
     const [install] = await tx
       .insert(taconInstalls)
       .values({
         academyId,
         studioId,
+        visibility,
+        groupId,
         taconId: tacon.id,
         versionId: tacon.latestVersionId!,
         settings: adminSettings(parsed.data.settings as Record<string, unknown>),

@@ -99,7 +99,12 @@ export async function dispatchTaconEvent(event: TaconEvent): Promise<void> {
     (entry) =>
       (entry.manifest.hooks.some((hook) => hook.event === event.action) ||
         (entry.manifest.app?.reactions ?? []).some((reaction) => reaction.on === event.action)) &&
-      (entry.install.studioId === null || circle.includes(entry.install.studioId)),
+      (entry.install.visibility === "academy" ||
+        (entry.install.visibility === "group" && entry.install.groupId !== null
+          ? circle.includes(entry.install.studioId ?? -1)
+          : entry.install.visibility === "studio"
+            ? entry.install.studioId === event.studioId
+            : entry.install.studioId === null || circle.includes(entry.install.studioId))),
   );
   if (relevant.length === 0) return;
 

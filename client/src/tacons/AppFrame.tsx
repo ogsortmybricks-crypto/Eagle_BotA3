@@ -74,8 +74,10 @@ type PositionRow = {
 };
 type Section = { id: number; title: string; summary: string | null; studioName: string | null; rules: { id: number; title: string; body: string; status: string }[] };
 
-const members: Call = async () => {
-  const { people } = await apiGet<{ people: Person[] }>("/profiles");
+const members: Call = async ([options], app) => {
+  const scope = options && typeof options === "object" ? (options as { scope?: unknown }).scope : undefined;
+  const path = scope === "install" ? base(app).slice(0, -8) + "/members" : "/profiles";
+  const { people } = await apiGet<{ people: Person[] }>(path);
   return people.map((person) => ({
     id: person.id,
     name: person.name,

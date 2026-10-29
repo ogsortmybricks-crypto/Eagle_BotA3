@@ -43,6 +43,8 @@ import { KIND_LABELS } from "@shared/calendar";
 import { describeExtensions } from "@shared/tacons/extension-registry";
 import { ProgramPermissions } from "@/tacons/ProgramPermissions";
 
+type InstallGroupsResponse = { groups: { id: number; name: string; studioIds: number[] }[] };
+
 type Listing = {
   id: number;
   slug: string;
@@ -208,6 +210,7 @@ type Detail = {
     id: number;
     studioId: number | null;
     studioName: string | null;
+    groupName: string | null;
     enabled: boolean;
     settings: Record<string, unknown>;
     display?: "inline" | "fullscreen";
@@ -523,7 +526,7 @@ export function TaconDetail({ slug }: { slug: string }) {
                   <li key={install.id} className="rounded-lg border border-gray-200 p-3">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium text-gray-800">
-                        {install.studioName ?? "Whole academy"}
+                        {install.groupName ?? install.studioName ?? "Whole academy"}
                       </span>
                       <span className="flex gap-1">
                         {install.display === "fullscreen" && <Chip tone="brand">⛶ Full window</Chip>}
@@ -640,7 +643,9 @@ function InstallModal({
   onDone: () => void;
 }) {
   const { studioId: viewingStudioId, studioGroup } = useSession();
-  const [installForGroup, setInstallForGroup] = useState(false);
+  const groupsQuery = useQuery<InstallGroupsResponse>({ queryKey: ["studios"], queryFn: () => apiGet("/studios") });
+  const [visibility, setVisibility] = useState<"studio" | "group">("studio");
+  const [groupId, setGroupId] = useState<number | null>(studioGroup?.id ?? null);
   const [target, setTarget] = useState<number | null | undefined>(
     viewingStudioId === null ? undefined : viewingStudioId,
   );
@@ -657,8 +662,8 @@ function InstallModal({
   const install = useMutation({
     mutationFn: () =>
       apiPost(`/tacons/market/${slug}/install`, {
-        ...(installForGroup && viewingStudioId !== null
-          ? { studioId: viewingStudioId }
+        ...(visibility === "group"
+          ? { groupId }
           : target === undefined ? {} : { studioId: target }),
         settings,
         ...(setup.length
@@ -678,7 +683,7 @@ function InstallModal({
       open
       onClose={onClose}
       title={`Install ${name}`}
-      description="It appears for everyone in the studio you pick."
+      description="Choose a specific studio or a Studio Group for this Tac-On."
       footer={
         <>
           <button onClick={onClose} className="btn-secondary">
@@ -686,7 +691,7 @@ function InstallModal({
           </button>
           <button
             onClick={() => install.mutate()}
-            disabled={install.isPending || target === undefined}
+            disabled={install.isPending || (visibility === "group" ? groupId === null : target === undefined)}
             className="btn-primary"
           >
             {install.isPending && <Spinner />} Install
@@ -752,29 +757,40 @@ function InstallModal({
           </fieldset>
         )}
 
-        {studioGroup && viewingStudioId !== null && (
-          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-brand-200 bg-brand-50 p-3 text-sm">
-            <input
-              type="checkbox"
-              checked={installForGroup}
-              onChange={(event) => setInstallForGroup(event.target.checked)}
-              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-600"
-            />
-            <span>
-              <span className="block font-semibold text-gray-900">Install for {studioGroup.name}</span>
-              <span className="block text-gray-600">One shared Tac-On and record set across every studio in this group.</span>
-            </span>
+        <fieldset className="space-y-2">
+          <legend className="label">Visibility</legend>
+          <label className="flex items-center gap-2 text-sm text-gray-700">
+            <input type="radio" name="install-visibility" checked={visibility === "studio"} onChange={() => setVisibility("studio")} />
+            Specific studio or academy-wide
           </label>
-        )}
+          {(groupsQuery.data?.groups.length ?? 0) > 0 && (
+            <label className="flex items-center gap-2 text-sm text-gray-700">
+              <input type="radio" name="install-visibility" checked={visibility === "group"} onChange={() => setVisibility("group")} />
+              Studio Group
+            </label>
+          )}
+        </fieldset>
 
-        {!installForGroup && (
+        {visibility === "group" ? (
+          <div>
+            <label className="label" htmlFor="install-group">Studio Group</label>
+            <select id="install-group" className="input" value={groupId ?? ""} onChange={(event) => setGroupId(event.target.value ? Number(event.target.value) : null)}>
+              <option value="">Choose a Studio Group</option>
+              {(groupsQuery.data?.groups ?? []).map((group) => (
+                <option key={group.id} value={group.id}>{group.name} · {group.studioIds.length} studios</option>
+              ))}
+            </select>
+            <p className="hint">One shared Tac-On and record set will be visible to everyone in this group.</p>
+          </div>
+        ) : (
           <StudioPicker
             value={target}
             onChange={setTarget}
             label="Install for"
-            hint="A studio in a group shares one install with the group. Academy-wide puts it in every studio's sidebar."
+            hint="A specific studio stays separate. Choose Studio Group to share this Tac-On across a group."
           />
         )}
+
 
         {manifest.settings.map((setting) => (
           <div key={setting.name}>

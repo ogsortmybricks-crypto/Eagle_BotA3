@@ -1040,6 +1040,9 @@ export const taconInstalls = pgTable(
     academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
     /** Null installs it academy-wide; a studio id keeps it to that studio. */
     studioId: integer("studio_id").references(() => studios.id, { onDelete: "cascade" }),
+    /** Explicit install visibility; legacy keeps the behavior of existing rows. */
+    visibility: text("visibility").$type<"legacy" | "academy" | "studio" | "group">().notNull().default("legacy"),
+    groupId: integer("group_id").references(() => studioGroups.id, { onDelete: "set null" }),
     taconId: integer("tacon_id").notNull().references(() => tacons.id, { onDelete: "cascade" }),
     versionId: integer("version_id").notNull().references(() => taconVersions.id),
     enabled: boolean("enabled").notNull().default(true),
@@ -1052,6 +1055,7 @@ export const taconInstalls = pgTable(
   (t) => ({
     academyIdx: index("tacon_installs_academy_idx").on(t.academyId),
     uniqueIdx: uniqueIndex("tacon_installs_unique_idx").on(t.academyId, t.studioId, t.taconId),
+    groupUniqueIdx: uniqueIndex("tacon_installs_group_unique_idx").on(t.academyId, t.groupId, t.taconId),
   }),
 );
 
@@ -1356,6 +1360,7 @@ export const taconInstallsRelations = relations(taconInstalls, ({ one, many }) =
   tacon: one(tacons, { fields: [taconInstalls.taconId], references: [tacons.id] }),
   version: one(taconVersions, { fields: [taconInstalls.versionId], references: [taconVersions.id] }),
   studio: one(studios, { fields: [taconInstalls.studioId], references: [studios.id] }),
+  group: one(studioGroups, { fields: [taconInstalls.groupId], references: [studioGroups.id] }),
   records: many(taconRecords),
 }));
 
