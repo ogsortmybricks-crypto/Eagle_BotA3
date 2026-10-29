@@ -13,20 +13,23 @@
 
 import { Router, type Request } from "express";
 import { z } from "zod";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "../db";
 import {
   TACON_VISIBILITIES,
   studios,
   taconInstalls,
+  taconMessages,
   taconRecords,
+  taconWallets,
+  taconWalletTransactions,
   taconVersions,
   tacons,
   users,
 } from "@shared/schema";
 import { requireAuth, requirePermission } from "../auth";
 import { logActivity } from "../activity";
-import { requireScope, writeStudioId, StudioChoiceError } from "../studio";
+import { requireScope, writeStudioId, StudioChoiceError, studioCircle } from "../studio";
 import {
   APP_FILE_EXTENSION,
   packageOf,
@@ -565,8 +568,8 @@ taconsRouter.post("/app/:installId/records", requirePermission("tacons.use"), as
 
 taconsRouter.patch("/app/:installId/records/:recordId", requirePermission("tacons.use"), async (req, res) => {
   try {
-    const { entry } = await openApp(req);
-    const record = await updateRecord(entry.install, entry.tacon.name, req.user!, Number(req.params.recordId), req.body ?? {});
+    const { entry, access } = await openApp(req);
+    const record = await updateRecord(entry.install, entry.tacon.name, req.user!, Number(req.params.recordId), req.body ?? {}, access);
     res.json({ record });
   } catch (error) {
     recordFailure(res, error);
@@ -575,15 +578,205 @@ taconsRouter.patch("/app/:installId/records/:recordId", requirePermission("tacon
 
 taconsRouter.delete("/app/:installId/records/:recordId", requirePermission("tacons.use"), async (req, res) => {
   try {
-    const { entry } = await openApp(req);
-    await deleteRecord(entry.install, req.user!, Number(req.params.recordId));
+    const { entry, access } = await openApp(req);
+    await deleteRecord(entry.install, req.user!, Number(req.params.recordId), access);
     res.json({ ok: true });
   } catch (error) {
     recordFailure(res, error);
   }
 });
 
-/* -------------------------------------------------------------------------- */
+
+    /* -------------------------------------------------------------------------- */
+    /*  Eagle Buck wallets, atomic purchases, and scoped app-to-app messages       */
+    /* -------------------------------------------------------------------------- */
+
+    function requireMarketEntry(entry: LoadedInstall): void {
+      if (entry.tacon.slug !== "eagle-buck-market") throw new RecordError(404, "That market service is not available to this Tac-On.");
+    }
+
+    function messagePeers(entry: LoadedInstall): string[] {
+      return entry.manifest.app?.communicatesWith ?? [];
+    }
+
+    const purchaseSchema = z.object({
+      items: z.array(z.object({ productId: z.number().int().positive(), quantity: z.number().int().min(1).max(99) })).min(1).max(3),
+      bundle: z.boolean().optional().default(false),
+    });
+
+    const adjustmentSchema = z.object({
+      userId: z.number().int().positive(),
+      amount: z.number().int().min(1).max(1000000),
+      reason: z.string().trim().max(200).optional().default("Shopkeeper credit"),
+    });
+
+    const messageSchema = z.object({
+      to: z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/),
+      kind: z.string().regex(/^[a-z0-9][a-z0-9-]{0,39}$/),
+      payload: z.record(z.unknown()).default({}),
+    });
+
+    function appMessageScope(entry: LoadedInstall) {
+      return entry.install.studioId === null ? Promise.resolve([] as number[]) : studioCircle(entry.install.studioId);
+    }
+
+    async function ensureWallet(installId: number, academyId: number, userId: number) {
+      await db.insert(taconWallets).values({ installId, academyId, userId }).onConflictDoNothing();
+      const [wallet] = await db.select().from(taconWallets).where(and(eq(taconWallets.installId, installId), eq(taconWallets.userId, userId))).limit(1);
+      return wallet;
+    }
+
+    taconsRouter.get("/app/:installId/market/wallet", requirePermission("tacons.use"), async (req, res) => {
+      try {
+        const { entry } = await openApp(req);
+        requireMarketEntry(entry);
+        const wallet = await ensureWallet(entry.install.id, entry.install.academyId, req.user!.id);
+        const transactions = await db.select().from(taconWalletTransactions)
+          .where(and(eq(taconWalletTransactions.installId, entry.install.id), eq(taconWalletTransactions.userId, req.user!.id)))
+          .orderBy(desc(taconWalletTransactions.createdAt), desc(taconWalletTransactions.id)).limit(40);
+        res.json({ wallet: { balance: wallet?.balance ?? 0 }, transactions });
+      } catch (error) { recordFailure(res, error); }
+    });
+
+    taconsRouter.get("/app/:installId/market/people", requirePermission("tacons.use"), async (req, res) => {
+      try {
+        const { entry, access } = await openApp(req);
+        requireMarketEntry(entry);
+        if (!access.mayRead("wallets")) throw new RecordError(403, "Only the Shopkeeper can view learner balances.");
+        const circle = await appMessageScope(entry);
+        const filters = [eq(users.academyId, entry.install.academyId), eq(users.role, "learner")];
+        if (entry.install.studioId !== null) filters.push(inArray(users.studioId, circle));
+        const people = await db.select({ id: users.id, name: users.name, studioId: users.studioId }).from(users).where(and(...filters)).orderBy(asc(users.name));
+        const balances = await db.select({ userId: taconWallets.userId, balance: taconWallets.balance }).from(taconWallets).where(eq(taconWallets.installId, entry.install.id));
+        const byUser = new Map(balances.map((row) => [row.userId, row.balance]));
+        res.json({ people: people.map((person) => ({ ...person, balance: byUser.get(person.id) ?? 0 })) });
+      } catch (error) { recordFailure(res, error); }
+    });
+
+    taconsRouter.post("/app/:installId/market/adjust", requirePermission("tacons.use"), async (req, res) => {
+      try {
+        const { entry, access } = await openApp(req);
+        requireMarketEntry(entry);
+        if (!access.mayWrite("wallets")) throw new RecordError(403, "Only the Shopkeeper can add Eagle Bucks.");
+        const parsed = adjustmentSchema.safeParse(req.body ?? {});
+        if (!parsed.success) throw new RecordError(400, "Enter a learner and a positive whole-number amount.");
+        const { userId, amount, reason } = parsed.data;
+        const circle = await appMessageScope(entry);
+        const [person] = await db.select().from(users).where(and(eq(users.id, userId), eq(users.academyId, entry.install.academyId), eq(users.role, "learner"))).limit(1);
+        if (!person || (entry.install.studioId !== null && !circle.includes(person.studioId ?? -1))) throw new RecordError(404, "That learner is not in this studio group.");
+        const result = await db.transaction(async (tx) => {
+          await tx.insert(taconWallets).values({ installId: entry.install.id, academyId: entry.install.academyId, userId }).onConflictDoNothing();
+          const [wallet] = await tx.select().from(taconWallets).where(and(eq(taconWallets.installId, entry.install.id), eq(taconWallets.userId, userId))).for("update").limit(1);
+          if (!wallet) throw new RecordError(500, "The wallet could not be opened.");
+          const [updated] = await tx.update(taconWallets).set({ balance: wallet.balance + amount, updatedAt: new Date() }).where(eq(taconWallets.id, wallet.id)).returning();
+          const [transaction] = await tx.insert(taconWalletTransactions).values({ academyId: entry.install.academyId, installId: entry.install.id, userId, actorUserId: req.user!.id, kind: "credit", amount, balanceAfter: updated.balance, details: { reason } }).returning();
+          return { wallet: updated, transaction };
+        });
+        res.status(201).json(result);
+      } catch (error) { recordFailure(res, error); }
+    });
+
+    taconsRouter.post("/app/:installId/market/purchase", requirePermission("tacons.use"), async (req, res) => {
+      try {
+        const { entry } = await openApp(req);
+        requireMarketEntry(entry);
+        const parsed = purchaseSchema.safeParse(req.body ?? {});
+        if (!parsed.success) throw new RecordError(400, "That purchase is not valid.");
+        const { items, bundle } = parsed.data;
+        const ids = items.map((item) => item.productId);
+        if (new Set(ids).size !== ids.length) throw new RecordError(400, "Choose each item only once.");
+        if (bundle && (items.length !== 3 || items.some((item) => item.quantity !== 1))) throw new RecordError(400, "A three-item bundle needs three different items.");
+        const result = await db.transaction(async (tx) => {
+          await tx.insert(taconWallets).values({ installId: entry.install.id, academyId: entry.install.academyId, userId: req.user!.id }).onConflictDoNothing();
+          const [wallet] = await tx.select().from(taconWallets).where(and(eq(taconWallets.installId, entry.install.id), eq(taconWallets.userId, req.user!.id))).for("update").limit(1);
+          if (!wallet) throw new RecordError(500, "Your wallet could not be opened.");
+          const products = await tx.select().from(taconRecords).where(and(eq(taconRecords.installId, entry.install.id), eq(taconRecords.store, "products"), inArray(taconRecords.id, ids))).for("update");
+          if (products.length !== ids.length) throw new RecordError(404, "One of those products is no longer available.");
+          const lines = items.map((selection) => {
+            const row = products.find((product) => product.id === selection.productId)!;
+            const data = row.data as Record<string, unknown>;
+            const price = Number(data.price);
+            const stock = Number(data.quantity);
+            if (data.active === false || !Number.isSafeInteger(price) || price < 0 || !Number.isSafeInteger(stock) || stock < selection.quantity) throw new RecordError(409, "A product is unavailable or has insufficient stock.");
+            if (bundle && data.bundleEligible !== true) throw new RecordError(400, "Every bundle item must be marked as bundle eligible.");
+            const passUses = data.passUses === undefined ? 0 : Number(data.passUses);
+            if (!Number.isInteger(passUses) || passUses < 0 || passUses > 100) throw new RecordError(400, "A product has an invalid pass allowance.");
+            return { row, data, productId: row.id, name: String(data.name ?? "Item"), quantity: selection.quantity, unitPrice: price, stock, passUses };
+          });
+          const total = lines.reduce((sum, line) => sum + line.unitPrice * line.quantity, 0);
+          if (!Number.isSafeInteger(total) || wallet.balance < total) throw new RecordError(409, "Your Eagle Buck balance is too low.");
+          for (const line of lines) {
+            await tx.update(taconRecords).set({ data: { ...line.data, quantity: line.stock - line.quantity }, updatedAt: new Date() }).where(eq(taconRecords.id, line.productId));
+          }
+          const balance = wallet.balance - total;
+          await tx.update(taconWallets).set({ balance, updatedAt: new Date() }).where(eq(taconWallets.id, wallet.id));
+          const details = { bundle, items: lines.map((line) => ({ productId: line.productId, name: line.name, quantity: line.quantity, unitPrice: line.unitPrice })) };
+          const [transaction] = await tx.insert(taconWalletTransactions).values({ academyId: entry.install.academyId, installId: entry.install.id, userId: req.user!.id, actorUserId: req.user!.id, kind: "purchase", amount: -total, balanceAfter: balance, details }).returning();
+          if (messagePeers(entry).includes("studio-maintenance")) {
+            for (const line of lines) {
+              const uses = line.passUses * line.quantity;
+              if (uses > 0) await tx.insert(taconMessages).values({ academyId: entry.install.academyId, sourceInstallId: entry.install.id, sourceStudioId: entry.install.studioId, targetSlug: "studio-maintenance", kind: "pass-issued", payload: { learnerId: req.user!.id, uses, purchaseId: transaction.id, productName: line.name }, createdBy: req.user!.id });
+            }
+          }
+          return { wallet: { balance }, transaction };
+        });
+        res.status(201).json(result);
+      } catch (error) { recordFailure(res, error); }
+    });
+
+    taconsRouter.get("/app/:installId/messages", requirePermission("tacons.use"), async (req, res) => {
+      try {
+        const { entry, access } = await openApp(req);
+        if (!access.mayRead("messages")) throw new RecordError(403, "This Tac-On can't read messages.");
+        const peers = messagePeers(entry);
+        if (!peers.length) return res.json({ messages: [] });
+        const peer = typeof req.query.from === "string" ? req.query.from : undefined;
+        if (peer && !peers.includes(peer)) throw new RecordError(403, "That Tac-On is not a declared message partner.");
+        const circle = await appMessageScope(entry);
+        const filters = [eq(taconMessages.academyId, entry.install.academyId), eq(taconMessages.targetSlug, entry.tacon.slug), inArray(tacons.slug, peer ? [peer] : peers)];
+        filters.push(circle.length ? or(inArray(taconMessages.sourceStudioId, circle), isNull(taconMessages.sourceStudioId))! : isNull(taconMessages.sourceStudioId));
+        const rows = await db.select({ message: taconMessages, sourceSlug: tacons.slug }).from(taconMessages)
+          .innerJoin(taconInstalls, eq(taconInstalls.id, taconMessages.sourceInstallId))
+          .innerJoin(tacons, eq(tacons.id, taconInstalls.taconId))
+          .where(and(...filters)).orderBy(desc(taconMessages.createdAt), desc(taconMessages.id)).limit(200);
+        res.json({ messages: rows.map((row) => ({ ...row.message, sourceSlug: row.sourceSlug })) });
+      } catch (error) { recordFailure(res, error); }
+    });
+
+    taconsRouter.post("/app/:installId/messages", requirePermission("tacons.use"), async (req, res) => {
+      try {
+        const { entry, access } = await openApp(req);
+        if (!access.mayWrite("messages")) throw new RecordError(403, "This Tac-On can't send messages.");
+        const parsed = messageSchema.safeParse(req.body ?? {});
+        if (!parsed.success) throw new RecordError(400, "That message is not valid.");
+        const { to, kind, payload } = parsed.data;
+        if (!messagePeers(entry).includes(to)) throw new RecordError(403, "That Tac-On is not a declared message partner.");
+        if (Buffer.byteLength(JSON.stringify(payload), "utf8") > 8000) throw new RecordError(413, "That message is too large.");
+        if (kind === "pass-redeemed" && (entry.tacon.slug !== "studio-maintenance" || to !== "eagle-buck-market")) throw new RecordError(403, "Only Studio Maintenance can redeem a Market pass.");
+        const circle = await appMessageScope(entry);
+        const saved = await db.transaction(async (tx) => {
+          if (kind === "pass-redeemed") {
+            const grantId = Number(payload.grantId);
+            const learnerId = Number(payload.learnerId);
+            if (!Number.isInteger(grantId) || !Number.isInteger(learnerId)) throw new RecordError(400, "The pass reference is incomplete.");
+            const [grant] = await tx.select().from(taconMessages).where(and(eq(taconMessages.id, grantId), eq(taconMessages.academyId, entry.install.academyId), eq(taconMessages.targetSlug, "studio-maintenance"), eq(taconMessages.kind, "pass-issued"))).for("update").limit(1);
+            if (!grant || Number(grant.payload.learnerId) !== learnerId || (grant.sourceStudioId !== null && !circle.includes(grant.sourceStudioId))) throw new RecordError(404, "That pass is not available to this studio group.");
+            const [source] = await tx.select({ slug: tacons.slug }).from(taconInstalls).innerJoin(tacons, eq(tacons.id, taconInstalls.taconId)).where(eq(taconInstalls.id, grant.sourceInstallId)).limit(1);
+            if (source?.slug !== "eagle-buck-market") throw new RecordError(404, "That pass did not come from Eagle Buck Market.");
+            const usesAllowed = Number(grant.payload.uses);
+            if (!Number.isInteger(usesAllowed) || usesAllowed < 1) throw new RecordError(400, "That pass has no valid uses.");
+            const previous = await tx.select({ payload: taconMessages.payload }).from(taconMessages).where(and(eq(taconMessages.academyId, entry.install.academyId), eq(taconMessages.targetSlug, "eagle-buck-market"), eq(taconMessages.kind, "pass-redeemed")));
+            const used = previous.filter((row) => Number(row.payload.grantId) === grantId).length;
+            if (used >= usesAllowed) throw new RecordError(409, "All uses on this pass have already been used.");
+          }
+          const [message] = await tx.insert(taconMessages).values({ academyId: entry.install.academyId, sourceInstallId: entry.install.id, sourceStudioId: entry.install.studioId, targetSlug: to, kind, payload, createdBy: req.user!.id }).returning();
+          return message;
+        });
+        res.status(201).json({ message: saved });
+      } catch (error) { recordFailure(res, error); }
+    });
+
+    /* -------------------------------------------------------------------------- */
 /*  The market                                                                 */
 /* -------------------------------------------------------------------------- */
 
