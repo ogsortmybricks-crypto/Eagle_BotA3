@@ -74,8 +74,10 @@ type PositionRow = {
 };
 type Section = { id: number; title: string; summary: string | null; studioName: string | null; rules: { id: number; title: string; body: string; status: string }[] };
 
-const members: Call = async () => {
-  const { people } = await apiGet<{ people: Person[] }>("/profiles");
+const members: Call = async ([options], app) => {
+  const scope = options && typeof options === "object" ? (options as { scope?: unknown }).scope : undefined;
+  const path = scope === "install" ? base(app).slice(0, -8) + "/members" : "/profiles";
+  const { people } = await apiGet<{ people: Person[] }>(path);
   return people.map((person) => ({
     id: person.id,
     name: person.name,
@@ -146,6 +148,22 @@ const METHODS: Record<string, Call> = {
     await apiDelete(`${base(app)}/${id(recordId, "The record id")}`);
     return { ok: true };
   },
+
+  "messages.list": async ([options], app) => {
+    const input = options && typeof options === "object" ? (options as { from?: unknown; to?: unknown }) : {};
+    const query = typeof input.from === "string" ? "?from=" + encodeURIComponent(input.from) : typeof input.to === "string" ? "?to=" + encodeURIComponent(input.to) : "";
+    return (await apiGet<{ messages: Json[] }>(base(app).slice(0, -8) + "/messages" + query)).messages;
+  },
+  "messages.send": async ([message], app) =>
+    apiPost(base(app).slice(0, -8) + "/messages", object(message, "message")),
+  "market.wallet": async (_args, app) =>
+    apiGet(base(app).slice(0, -8) + "/market/wallet"),
+  "market.people": async (_args, app) =>
+    apiGet(base(app).slice(0, -8) + "/market/people"),
+  "market.adjust": async ([input], app) =>
+    apiPost(base(app).slice(0, -8) + "/market/adjust", object(input, "adjustment")),
+  "market.purchase": async ([input], app) =>
+    apiPost(base(app).slice(0, -8) + "/market/purchase", object(input, "purchase")),
 
   /* People. */
   "members.list": members,
@@ -392,6 +410,8 @@ function sdkBoot(init: {
       deleteRecord: call("api.deleteRecord"),
       getRoster: members.list,
     },
+    messages: { list: call("messages.list"), send: call("messages.send") },
+    market: { wallet: call("market.wallet"), people: call("market.people"), adjust: call("market.adjust"), purchase: call("market.purchase") },
     members,
     users: members,
     roster: { list: members.list, get: members.list },

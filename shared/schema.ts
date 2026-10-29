@@ -1040,6 +1040,9 @@ export const taconInstalls = pgTable(
     academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
     /** Null installs it academy-wide; a studio id keeps it to that studio. */
     studioId: integer("studio_id").references(() => studios.id, { onDelete: "cascade" }),
+    /** Explicit install visibility; legacy keeps the behavior of existing rows. */
+    visibility: text("visibility").$type<"legacy" | "academy" | "studio" | "group">().notNull().default("legacy"),
+    groupId: integer("group_id").references(() => studioGroups.id, { onDelete: "set null" }),
     taconId: integer("tacon_id").notNull().references(() => tacons.id, { onDelete: "cascade" }),
     versionId: integer("version_id").notNull().references(() => taconVersions.id),
     enabled: boolean("enabled").notNull().default(true),
@@ -1052,6 +1055,7 @@ export const taconInstalls = pgTable(
   (t) => ({
     academyIdx: index("tacon_installs_academy_idx").on(t.academyId),
     uniqueIdx: uniqueIndex("tacon_installs_unique_idx").on(t.academyId, t.studioId, t.taconId),
+    groupUniqueIdx: uniqueIndex("tacon_installs_group_unique_idx").on(t.academyId, t.groupId, t.taconId),
   }),
 );
 
@@ -1081,6 +1085,65 @@ export const taconRecords = pgTable(
   (t) => ({
     installIdx: index("tacon_records_install_idx").on(t.installId, t.store),
     createdIdx: index("tacon_records_created_idx").on(t.createdAt),
+  }),
+);
+
+
+/** Per-install Eagle Buck accounts. A group-shared install shares one ledger. */
+export const taconWallets = pgTable(
+  "tacon_wallets",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    installId: integer("install_id").notNull().references(() => taconInstalls.id, { onDelete: "cascade" }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    balance: integer("balance").notNull().default(0),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    installUserIdx: uniqueIndex("tacon_wallets_install_user_idx").on(t.installId, t.userId),
+    academyIdx: index("tacon_wallets_academy_idx").on(t.academyId),
+  }),
+);
+
+/** Auditable credits and purchases for an Eagle Buck wallet. */
+export const taconWalletTransactions = pgTable(
+  "tacon_wallet_transactions",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    installId: integer("install_id").notNull().references(() => taconInstalls.id, { onDelete: "cascade" }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    actorUserId: integer("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    kind: text("kind").notNull(),
+    amount: integer("amount").notNull(),
+    balanceAfter: integer("balance_after").notNull(),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    installUserIdx: index("tacon_wallet_transactions_install_user_idx").on(t.installId, t.userId, t.createdAt),
+    academyIdx: index("tacon_wallet_transactions_academy_idx").on(t.academyId),
+  }),
+);
+
+/** Messages are addressable only between explicitly paired Tac-On slugs. */
+export const taconMessages = pgTable(
+  "tacon_messages",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    sourceInstallId: integer("source_install_id").notNull().references(() => taconInstalls.id, { onDelete: "cascade" }),
+    sourceStudioId: integer("source_studio_id").references(() => studios.id, { onDelete: "set null" }),
+    targetSlug: text("target_slug").notNull(),
+    kind: text("kind").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    targetStudioIdx: index("tacon_messages_target_studio_idx").on(t.academyId, t.targetSlug, t.sourceStudioId, t.createdAt),
+    sourceIdx: index("tacon_messages_source_idx").on(t.sourceInstallId, t.createdAt),
   }),
 );
 
@@ -1297,6 +1360,7 @@ export const taconInstallsRelations = relations(taconInstalls, ({ one, many }) =
   tacon: one(tacons, { fields: [taconInstalls.taconId], references: [tacons.id] }),
   version: one(taconVersions, { fields: [taconInstalls.versionId], references: [taconVersions.id] }),
   studio: one(studios, { fields: [taconInstalls.studioId], references: [studios.id] }),
+  group: one(studioGroups, { fields: [taconInstalls.groupId], references: [studioGroups.id] }),
   records: many(taconRecords),
 }));
 
@@ -1336,6 +1400,9 @@ export type Tacon = typeof tacons.$inferSelect;
 export type TaconVersion = typeof taconVersions.$inferSelect;
 export type TaconInstall = typeof taconInstalls.$inferSelect;
 export type TaconRecord = typeof taconRecords.$inferSelect;
+export type TaconWallet = typeof taconWallets.$inferSelect;
+export type TaconWalletTransaction = typeof taconWalletTransactions.$inferSelect;
+export type TaconMessage = typeof taconMessages.$inferSelect;
 export type PortalDev = typeof portalDevs.$inferSelect;
 export type PortalInvite = typeof portalInvites.$inferSelect;
 export type PortalNotice = typeof portalNotices.$inferSelect;

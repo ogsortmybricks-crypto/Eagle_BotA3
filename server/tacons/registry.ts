@@ -51,6 +51,27 @@ export function readManifest(version: Pick<TaconVersion, "manifest">): Manifest 
  * which keeps the sidebar honest for an admin switching between Spark and
  * Launchpad - they see both studios' Tac-Ons, labelled.
  */
+function installVisibleToScope(install: TaconInstall, scope: StudioScope | undefined): boolean {
+  if (install.visibility === "academy" || (install.visibility === "legacy" && install.studioId === null)) return true;
+  if (!scope) return false;
+  if (install.visibility === "group" && install.groupId !== null) {
+    return scope.studioId !== null
+      ? scope.studio?.groupId === install.groupId
+      : scope.canSeeAll || scope.allowed.some((studio) => studio.groupId === install.groupId);
+  }
+  if (install.visibility === "studio") {
+    if (install.studioId === null) return false;
+    return scope.studioId !== null
+      ? scope.studioId === install.studioId
+      : scope.canSeeAll || scope.allowedIds.includes(install.studioId);
+  }
+  if (install.studioId === null) return true;
+  // Preserve the old group-sharing behavior for installs created before visibility was explicit.
+  return scope.studioId !== null
+    ? scope.circleIds.includes(install.studioId)
+    : scope.canSeeAll || scope.readableIds.includes(install.studioId);
+}
+
 export async function visibleInstalls(
   academyId: number,
   scope: StudioScope | undefined,
@@ -64,13 +85,7 @@ export async function visibleInstalls(
     .where(and(eq(taconInstalls.academyId, academyId), eq(taconInstalls.enabled, true)))
     .orderBy(desc(taconInstalls.installedAt));
 
-  const allowed = (install: TaconInstall): boolean => {
-    if (install.studioId === null) return true;
-    if (!scope) return false;
-    // A studio in a group runs the whole group's Tac-Ons, with one set of records.
-    if (scope.studioId !== null) return scope.circleIds.includes(install.studioId);
-    return scope.canSeeAll || scope.readableIds.includes(install.studioId);
-  };
+  const allowed = (install: TaconInstall): boolean => installVisibleToScope(install, scope);
 
   const loaded: LoadedInstall[] = [];
   for (const row of rows) {
@@ -137,11 +152,7 @@ export async function loadInstall(
     .limit(1);
 
   if (!row) return null;
-  if (row.install.studioId !== null && scope) {
-    const reachable =
-      scope.canSeeAll || scope.readableIds.includes(row.install.studioId);
-    if (!reachable) return null;
-  }
+  if (!installVisibleToScope(row.install, scope)) return null;
   const manifest = readManifest(row.version);
   if (!manifest) return null;
 
