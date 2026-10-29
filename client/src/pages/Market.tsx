@@ -639,7 +639,8 @@ function InstallModal({
   onClose: () => void;
   onDone: () => void;
 }) {
-  const { studioId: viewingStudioId } = useSession();
+  const { studioId: viewingStudioId, studioGroup } = useSession();
+  const [installForGroup, setInstallForGroup] = useState(false);
   const [target, setTarget] = useState<number | null | undefined>(
     viewingStudioId === null ? undefined : viewingStudioId,
   );
@@ -656,7 +657,9 @@ function InstallModal({
   const install = useMutation({
     mutationFn: () =>
       apiPost(`/tacons/market/${slug}/install`, {
-        ...(target === undefined ? {} : { studioId: target }),
+        ...(installForGroup && viewingStudioId !== null
+          ? { studioId: viewingStudioId }
+          : target === undefined ? {} : { studioId: target }),
         settings,
         ...(setup.length
           ? {
@@ -749,12 +752,29 @@ function InstallModal({
           </fieldset>
         )}
 
-        <StudioPicker
-          value={target}
-          onChange={setTarget}
-          label="Install for"
-          hint="Academy-wide puts it in every studio's sidebar."
-        />
+        {studioGroup && viewingStudioId !== null && (
+          <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-brand-200 bg-brand-50 p-3 text-sm">
+            <input
+              type="checkbox"
+              checked={installForGroup}
+              onChange={(event) => setInstallForGroup(event.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-600"
+            />
+            <span>
+              <span className="block font-semibold text-gray-900">Install for {studioGroup.name}</span>
+              <span className="block text-gray-600">One shared Tac-On and record set across every studio in this group.</span>
+            </span>
+          </label>
+        )}
+
+        {!installForGroup && (
+          <StudioPicker
+            value={target}
+            onChange={setTarget}
+            label="Install for"
+            hint="A studio in a group shares one install with the group. Academy-wide puts it in every studio's sidebar."
+          />
+        )}
 
         {manifest.settings.map((setting) => (
           <div key={setting.name}>

@@ -1084,6 +1084,65 @@ export const taconRecords = pgTable(
   }),
 );
 
+
+/** Per-install Eagle Buck accounts. A group-shared install shares one ledger. */
+export const taconWallets = pgTable(
+  "tacon_wallets",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    installId: integer("install_id").notNull().references(() => taconInstalls.id, { onDelete: "cascade" }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    balance: integer("balance").notNull().default(0),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    installUserIdx: uniqueIndex("tacon_wallets_install_user_idx").on(t.installId, t.userId),
+    academyIdx: index("tacon_wallets_academy_idx").on(t.academyId),
+  }),
+);
+
+/** Auditable credits and purchases for an Eagle Buck wallet. */
+export const taconWalletTransactions = pgTable(
+  "tacon_wallet_transactions",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    installId: integer("install_id").notNull().references(() => taconInstalls.id, { onDelete: "cascade" }),
+    userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    actorUserId: integer("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+    kind: text("kind").notNull(),
+    amount: integer("amount").notNull(),
+    balanceAfter: integer("balance_after").notNull(),
+    details: jsonb("details").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    installUserIdx: index("tacon_wallet_transactions_install_user_idx").on(t.installId, t.userId, t.createdAt),
+    academyIdx: index("tacon_wallet_transactions_academy_idx").on(t.academyId),
+  }),
+);
+
+/** Messages are addressable only between explicitly paired Tac-On slugs. */
+export const taconMessages = pgTable(
+  "tacon_messages",
+  {
+    id: serial("id").primaryKey(),
+    academyId: integer("academy_id").notNull().references(() => academies.id, { onDelete: "cascade" }),
+    sourceInstallId: integer("source_install_id").notNull().references(() => taconInstalls.id, { onDelete: "cascade" }),
+    sourceStudioId: integer("source_studio_id").references(() => studios.id, { onDelete: "set null" }),
+    targetSlug: text("target_slug").notNull(),
+    kind: text("kind").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => ({
+    targetStudioIdx: index("tacon_messages_target_studio_idx").on(t.academyId, t.targetSlug, t.sourceStudioId, t.createdAt),
+    sourceIdx: index("tacon_messages_source_idx").on(t.sourceInstallId, t.createdAt),
+  }),
+);
+
 /* -------------------------------------------------------------------------- */
 /*  The dev portal                                                             */
 /* -------------------------------------------------------------------------- */
@@ -1336,6 +1395,9 @@ export type Tacon = typeof tacons.$inferSelect;
 export type TaconVersion = typeof taconVersions.$inferSelect;
 export type TaconInstall = typeof taconInstalls.$inferSelect;
 export type TaconRecord = typeof taconRecords.$inferSelect;
+export type TaconWallet = typeof taconWallets.$inferSelect;
+export type TaconWalletTransaction = typeof taconWalletTransactions.$inferSelect;
+export type TaconMessage = typeof taconMessages.$inferSelect;
 export type PortalDev = typeof portalDevs.$inferSelect;
 export type PortalInvite = typeof portalInvites.$inferSelect;
 export type PortalNotice = typeof portalNotices.$inferSelect;

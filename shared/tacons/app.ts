@@ -235,6 +235,7 @@ export const appManifestSchema = z.object({
   calendar: z.unknown().optional(),
   panels: z.unknown().optional(),
   reactions: z.unknown().optional(),
+  communicatesWith: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,59}$/)).max(12).optional(),
 });
 
 export type AppManifest = {
@@ -252,6 +253,8 @@ export type AppManifest = {
   calendar?: AppCalendar[];
   panels?: AppPanel[];
   reactions?: AppReaction[];
+  /** Other Tac-Ons this app may exchange scoped messages with. */
+  communicatesWith?: string[];
 };
 
 /** A published app: its manifest and its bundled HTML. */
@@ -267,6 +270,7 @@ export type AppDef = {
   calendar?: AppCalendar[];
   panels?: AppPanel[];
   reactions?: AppReaction[];
+  communicatesWith?: string[];
 };
 
 export type AppCheck = { label: string; ok: boolean; message?: string };
@@ -549,6 +553,7 @@ export function manifestForApp(pkg: AppPackage): Manifest {
       ...(app.calendar ? { calendar: app.calendar } : {}),
       ...(app.panels ? { panels: app.panels } : {}),
       ...(app.reactions ? { reactions: app.reactions } : {}),
+      ...(app.communicatesWith ? { communicatesWith: app.communicatesWith } : {}),
     },
   };
 }
@@ -570,6 +575,7 @@ export function packageOf(manifest: Manifest): AppPackage | null {
       ...(manifest.app.stores ? { stores: manifest.app.stores } : {}),
       ...(manifest.app.calendar ? { calendar: manifest.app.calendar } : {}),
       ...(manifest.app.panels ? { panels: manifest.app.panels } : {}),
+      ...(manifest.app.communicatesWith ? { communicatesWith: manifest.app.communicatesWith } : {}),
       ...(manifest.app.reactions ? { reactions: manifest.app.reactions } : {}),
     },
     html: manifest.app.html,

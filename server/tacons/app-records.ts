@@ -188,7 +188,7 @@ export async function createRecord(
 }
 
 /** The row, if this person may change it: its author, an admin or a guide. */
-async function ownedRow(install: { id: number }, user: User, recordId: number) {
+async function ownedRow(install: { id: number }, user: User, recordId: number, access: StoreAccess) {
   if (!Number.isInteger(recordId) || recordId < 1) throw new RecordError(404, "That record isn't here.");
   const [row] = await db
     .select()
@@ -196,8 +196,8 @@ async function ownedRow(install: { id: number }, user: User, recordId: number) {
     .where(and(eq(taconRecords.id, recordId), eq(taconRecords.installId, install.id)))
     .limit(1);
   if (!row || row.store.startsWith("__")) throw new RecordError(404, "That record isn't here.");
-  const mayChange = row.createdBy === user.id || user.role === "admin" || user.role === "guide";
-  if (!mayChange) throw new RecordError(403, "Only the person who saved this record, or an admin or guide, can change it.");
+  const mayChange = row.createdBy === user.id || user.role === "admin" || user.role === "guide" || access.mayWrite(row.store);
+  if (!mayChange) throw new RecordError(403, "You can only change records you saved or records your Tac-On role can manage.");
   return row;
 }
 
@@ -207,9 +207,10 @@ export async function updateRecord(
   user: User,
   recordId: number,
   body: { data?: unknown },
+  access: StoreAccess,
 ): Promise<AppRecord> {
   const data = recordData(body.data);
-  await ownedRow(install, user, recordId);
+  await ownedRow(install, user, recordId, access);
   if ((await signaturesFor(install.id)).has(recordId)) {
     throw new RecordError(409, "A signed record can't be changed. Add a new record instead.");
   }
@@ -221,8 +222,8 @@ export async function updateRecord(
   return shape(row, await namesFor(install.academyId), taconName);
 }
 
-export async function deleteRecord(install: { id: number }, user: User, recordId: number): Promise<void> {
-  await ownedRow(install, user, recordId);
+export async function deleteRecord(install: { id: number }, user: User, recordId: number, access: StoreAccess): Promise<void> {
+  await ownedRow(install, user, recordId, access);
   await db.transaction(async (tx) => {
     await tx.delete(taconRecords).where(eq(taconRecords.id, recordId));
     // Its signature goes with it.
