@@ -424,6 +424,7 @@ export function checkApp(input: { manifest: unknown; html: string | null }): {
     return null;
   });
 
+  const communicatesWith = parsed.success ? parsed.data.communicatesWith ?? [] : [];
   const html = input.html ?? "";
   add(
     "index.html",
@@ -456,6 +457,7 @@ export function checkApp(input: { manifest: unknown; html: string | null }): {
             ...(calendar.length ? { calendar } : {}),
             ...(panels.length ? { panels } : {}),
             ...(reactions.length ? { reactions } : {}),
+            ...(communicatesWith.length ? { communicatesWith } : {}),
           },
           html,
         }
