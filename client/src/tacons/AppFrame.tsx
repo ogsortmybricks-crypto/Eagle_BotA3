@@ -148,8 +148,8 @@ const METHODS: Record<string, Call> = {
   },
 
   "messages.list": async ([options], app) => {
-    const input = options && typeof options === "object" ? (options as { from?: unknown }) : {};
-    const query = typeof input.from === "string" ? "?from=" + encodeURIComponent(input.from) : "";
+    const input = options && typeof options === "object" ? (options as { from?: unknown; to?: unknown }) : {};
+    const query = typeof input.from === "string" ? "?from=" + encodeURIComponent(input.from) : typeof input.to === "string" ? "?to=" + encodeURIComponent(input.to) : "";
     return (await apiGet<{ messages: Json[] }>(base(app).slice(0, -8) + "/messages" + query)).messages;
   },
   "messages.send": async ([message], app) =>
