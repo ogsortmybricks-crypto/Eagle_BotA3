@@ -731,6 +731,14 @@ taconsRouter.delete("/app/:installId/records/:recordId", requirePermission("taco
         const peers = messagePeers(entry);
         if (!peers.length) return res.json({ messages: [] });
         const peer = typeof req.query.from === "string" ? req.query.from : undefined;
+        const sentTo = typeof req.query.to === "string" ? req.query.to : undefined;
+        if (peer && sentTo) throw new RecordError(400, "Choose incoming or sent messages, not both.");
+        if (sentTo && !peers.includes(sentTo)) throw new RecordError(403, "That Tac-On is not a declared message partner.");
+        if (sentTo) {
+          const sent = await db.select().from(taconMessages).where(and(eq(taconMessages.academyId, entry.install.academyId), eq(taconMessages.sourceInstallId, entry.install.id), eq(taconMessages.targetSlug, sentTo)))
+            .orderBy(desc(taconMessages.createdAt), desc(taconMessages.id)).limit(200);
+          return res.json({ messages: sent.map((message) => ({ ...message, sourceSlug: entry.tacon.slug })) });
+        }
         if (peer && !peers.includes(peer)) throw new RecordError(403, "That Tac-On is not a declared message partner.");
         const circle = await appMessageScope(entry);
         const filters = [eq(taconMessages.academyId, entry.install.academyId), eq(taconMessages.targetSlug, entry.tacon.slug), inArray(tacons.slug, peer ? [peer] : peers)];
